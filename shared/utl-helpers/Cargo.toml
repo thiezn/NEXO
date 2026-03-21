@@ -1,0 +1,22 @@
+[package]
+name = "utl-helpers"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["output"]
+config = ["dep:toml"]
+output = ["dep:serde_json"]
+
+[dependencies]
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+toml = { version = "1", optional = true }
+dirs = "6"
+tracing = "0"
+tracing-subscriber = { version = "0", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }

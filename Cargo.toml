@@ -1,0 +1,20 @@
+[workspace]
+members = ["gateway","shared/utl-helpers","tools/extractor_epub", "tools/generator_image"]
+
+resolver = "3"
+
+# [workspace.lints.rust]
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+[profile.release]
+# https://nnethercote.github.io/perf-book/build-configuration.html
+codegen-units = 1
+lto = "fat"
+
+# This will enable debug symbols in the release build making it increase in size.
+# It will not slow down the actual release. Still for running in containers, it
+# would be good if we can disable this when pushing to Container registry.
+debug = true
