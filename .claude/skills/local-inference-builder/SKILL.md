@@ -31,7 +31,7 @@ metal = ["local-inference-helpers/metal", "candle-transformers/metal"]
 [dependencies]
 local-inference-helpers = { path = "../../shared/local-inference-helpers", features = ["download"] }
 utl-helpers = { path = "../../shared/utl-helpers", features = ["config"] }
-candle-transformers = { version = "0", package = "candle-transformers-mold" }
+candle-transformers = "0"
 ```
 
 Always mirror `cuda`/`metal` features down to both `local-inference-helpers` and `candle-transformers`.

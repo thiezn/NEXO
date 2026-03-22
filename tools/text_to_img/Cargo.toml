@@ -13,10 +13,12 @@ cuda = ["local-inference-helpers/cuda", "candle-transformers/cuda"]
 metal = ["local-inference-helpers/metal", "candle-transformers/metal"]
 
 [dependencies]
-local-inference-helpers = { path = "../../shared/local-inference-helpers", features = ["download"] }
+local-inference-helpers = { path = "../../shared/local-inference-helpers", features = [
+    "download",
+] }
 utl-helpers = { path = "../../shared/utl-helpers", features = ["config"] }
 # candle-core and candle-nn come via local-inference-helpers re-exports
-candle-transformers = { version = "0", package = "candle-transformers-mold" }
+candle-transformers = "0"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }

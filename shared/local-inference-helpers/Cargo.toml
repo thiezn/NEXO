@@ -10,8 +10,8 @@ metal = ["candle-core/metal", "candle-nn/metal"]
 download = ["dep:hf-hub", "dep:indicatif", "dep:console", "dep:sha2", "dep:tokio"]
 
 [dependencies]
-candle-core = { version = "0", package = "candle-core-mold" }
-candle-nn = { version = "0", package = "candle-nn-mold" }
+candle-core = "0"
+candle-nn = "0"
 # Pinned to 0.9/0.5 to match candle's rand dependency (0.x = semver-breaking per minor)
 rand = "0.9"
 rand_distr = "0.5"
