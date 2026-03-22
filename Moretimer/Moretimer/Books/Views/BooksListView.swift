@@ -10,83 +10,73 @@ struct BooksListView: View {
     @State private var showError = false
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(books) { book in
-                    NavigationLink(value: book.persistentModelID) {
-                        BookRowView(book: book)
+        List {
+            ForEach(books) { book in
+                NavigationLink(value: book.persistentModelID) {
+                    BookRowView(book: book)
+                }
+                .draggable(book.toJSON())
+            }
+            .onDelete(perform: deleteBooks)
+        }
+        .navigationTitle("Library")
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .navigationBarTrailing) {
+                EditButton()
+            }
+            #endif
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Import Book...", systemImage: "doc.badge.plus") {
+                        showFileImporter = true
                     }
-                    .draggable(book.toJSON())
-                }
-                .onDelete(perform: deleteBooks)
-            }
-            .navigationTitle("Library")
-            .toolbar {
-                #if os(iOS)
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                #endif
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button("Import Book...", systemImage: "doc.badge.plus") {
-                            showFileImporter = true
-                        }
-                        if books.isEmpty {
-                            Button("Load Sample Book", systemImage: "book") {
-                                loadSampleBook()
-                            }
-                        }
-                    } label: {
-                        Label("Add", systemImage: "plus")
-                    }
-                }
-            }
-            .dropDestination(for: BookOutputJSON.self) { droppedBooks, _ in
-                for bookJSON in droppedBooks {
-                    do {
-                        _ = try BookImportService.importFromJSON(bookJSON, into: modelContext)
-                    } catch {
-                        importError = error.localizedDescription
-                        showError = true
-                    }
-                }
-                return !droppedBooks.isEmpty
-            }
-            .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [.json, .bookJSON],
-                allowsMultipleSelection: false
-            ) { result in
-                handleFileImport(result)
-            }
-            .alert("Import Error", isPresented: $showError) {
-                Button("OK") { }
-            } message: {
-                Text(importError ?? "Unknown error")
-            }
-            .navigationDestination(for: PersistentIdentifier.self) { bookID in
-                if let book = modelContext.model(for: bookID) as? BookEntity {
-                    BookReaderView(book: book)
-                }
-            }
-            .overlay {
-                if books.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Books", systemImage: "books.vertical")
-                    } description: {
-                        Text("Add a book to get started.")
-                    } actions: {
-                        Button("Load Sample Book") {
+                    if books.isEmpty {
+                        Button("Load Sample Book", systemImage: "book") {
                             loadSampleBook()
                         }
-                        .buttonStyle(.borderedProminent)
                     }
+                } label: {
+                    Label("Add", systemImage: "plus")
                 }
             }
-        } detail: {
-            ContentUnavailableView("Select a Book", systemImage: "book.closed",
-                                   description: Text("Choose a book from your library"))
+        }
+        .dropDestination(for: BookOutputJSON.self) { droppedBooks, _ in
+            for bookJSON in droppedBooks {
+                do {
+                    _ = try BookImportService.importFromJSON(bookJSON, into: modelContext)
+                } catch {
+                    importError = error.localizedDescription
+                    showError = true
+                }
+            }
+            return !droppedBooks.isEmpty
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.json, .bookJSON],
+            allowsMultipleSelection: false
+        ) { result in
+            handleFileImport(result)
+        }
+        .alert("Import Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(importError ?? "Unknown error")
+        }
+        .overlay {
+            if books.isEmpty {
+                ContentUnavailableView {
+                    Label("No Books", systemImage: "books.vertical")
+                } description: {
+                    Text("Add a book to get started.")
+                } actions: {
+                    Button("Load Sample Book") {
+                        loadSampleBook()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
         }
     }
 

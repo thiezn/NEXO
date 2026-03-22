@@ -6,7 +6,7 @@ extension UTType {
 }
 
 extension BookOutputJSON: Transferable {
-    static var transferRepresentation: some TransferRepresentation {
+    nonisolated static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .bookJSON)
     }
 }

@@ -28,7 +28,7 @@ nonisolated struct ImageRefJSON: Codable, Sendable {
     let path: String
     let id: String
     let mediaType: String
-    let data: String
+    let data: String?
 
     enum CodingKeys: String, CodingKey {
         case path, id, data

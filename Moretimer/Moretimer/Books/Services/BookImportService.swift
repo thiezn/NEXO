@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftData
 
 struct BookImportService {
@@ -8,7 +9,13 @@ struct BookImportService {
         _ data: Data,
         into modelContext: ModelContext
     ) throws -> BookEntity {
-        let decoded = try JSONDecoder().decode(BookOutputJSON.self, from: data)
+        let decoded: BookOutputJSON
+        do {
+            decoded = try JSONDecoder().decode(BookOutputJSON.self, from: data)
+        } catch {
+            Logger.book.error("JSON decode failed: \(error, privacy: .public)")
+            throw error
+        }
         return try importFromJSON(decoded, into: modelContext)
     }
 
@@ -32,13 +39,50 @@ struct BookImportService {
     @MainActor
     static func importBundledBook(into modelContext: ModelContext) throws -> BookEntity {
         guard let jsonURL = Bundle.main.url(
-            forResource: "book",
-            withExtension: "json",
-            subdirectory: "mzzl_meiden"
+            forResource: "mzzl_meiden",
+            withExtension: "json"
         ) else {
+            logBundleDiagnostics()
             throw ImportError.bundledBookNotFound
         }
+        Logger.book.info("Found bundled book at: \(jsonURL.path, privacy: .public)")
         return try importBook(from: jsonURL, into: modelContext)
+    }
+
+    private static func logBundleDiagnostics() {
+        let bundle = Bundle.main
+        Logger.book.error("Failed to find mzzl_meiden.json in bundle")
+        Logger.book.error("Bundle path: \(bundle.bundlePath, privacy: .public)")
+        Logger.book.error("Resource path: \(bundle.resourcePath ?? "nil", privacy: .public)")
+        Logger.book.error("Bundle identifier: \(bundle.bundleIdentifier ?? "nil", privacy: .public)")
+
+        guard let resourcePath = bundle.resourcePath else { return }
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(atPath: resourcePath) else {
+            Logger.book.error("Could not list bundle resource directory")
+            return
+        }
+
+        let jsonFiles = items.filter { $0.hasSuffix(".json") }
+        Logger.book.error("JSON files in bundle root: \(jsonFiles, privacy: .public)")
+
+        let directories = items.filter { item in
+            var isDir: ObjCBool = false
+            fm.fileExists(atPath: resourcePath + "/" + item, isDirectory: &isDir)
+            return isDir.boolValue
+        }
+        Logger.book.error("Directories in bundle: \(directories, privacy: .public)")
+
+        for dir in directories {
+            if let subItems = try? fm.contentsOfDirectory(atPath: resourcePath + "/" + dir) {
+                let subJson = subItems.filter { $0.hasSuffix(".json") }
+                if !subJson.isEmpty {
+                    Logger.book.error("JSON in \(dir, privacy: .public)/: \(subJson, privacy: .public)")
+                }
+            }
+        }
+
+        Logger.book.error("All bundle items (\(items.count) total): \(items, privacy: .public)")
     }
 
     @MainActor
@@ -78,7 +122,7 @@ struct BookImportService {
         var imageDataCache: [String: Data] = [:]
 
         for imageJSON in output.book.images {
-            let imageData = Data(base64Encoded: imageJSON.data)
+            let imageData = imageJSON.data.flatMap { Data(base64Encoded: $0) }
             let imageEntity = ImageRefEntity(
                 path: imageJSON.path,
                 imageId: imageJSON.id,
@@ -104,7 +148,7 @@ struct BookImportService {
                 modelContext.insert(paraEntity)
 
                 for imgJSON in paraJSON.images {
-                    let imgData = imageDataCache[imgJSON.path] ?? Data(base64Encoded: imgJSON.data)
+                    let imgData = imageDataCache[imgJSON.path] ?? imgJSON.data.flatMap { Data(base64Encoded: $0) }
                     let imgEntity = ImageRefEntity(
                         path: imgJSON.path,
                         imageId: imgJSON.id,

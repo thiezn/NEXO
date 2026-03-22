@@ -1,5 +1,10 @@
 [workspace]
-members = ["gateway","shared/utl-helpers","tools/extractor_epub", "tools/generator_image"]
+members = [
+    "gateway", "shared/local-inference-helpers",
+    "shared/utl-helpers",
+    "tools/extractor_epub", "tools/img_to_text", "tools/speech_to_text",
+    "tools/text_to_img", "tools/text_to_speech",
+]
 
 resolver = "3"
 

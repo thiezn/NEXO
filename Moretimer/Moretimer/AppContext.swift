@@ -5,4 +5,99 @@
 //  Created by Mortimer, M (Mathijs) on 22/03/2026.
 //
 
-import Foundation
+import SwiftData
+import SwiftUI
+import OSLog
+
+/// Centralized Application context for ModelContainer, LocalDataStorage, and API clients.
+struct AppContext {
+    
+    /// The Application Context
+    struct Context {
+
+        /// The SwiftData ModelContainer
+        let container: ModelContainer
+
+        /// The app-wide ErrorManager
+        let errorManager: ErrorManager
+    }
+
+    /// Builds a shared application environment with all models registered.
+    /// Autosave is disabled to allow explicit saves in MRPFAPI.
+    ///
+    /// If the SwiftData store is incompatible with the current schema (e.g. after
+    /// a model property type change), the store files are deleted and recreated
+    /// from scratch. Important data is offloaded to the REST API so local data
+    /// loss is acceptable during development.
+    @MainActor
+    static func make() throws -> Context {
+
+        Logger.storage.log("Building AppContext ModelContainer")
+
+        let schema = Schema([
+            // Books
+            BookEntity.self,
+            ChapterEntity.self,
+            ParagraphEntity.self,
+            ImageRefEntity.self,
+            ReadingProgress.self,
+
+            // Threads
+            ThreadEntity.self,
+            MessageEntity.self,
+        ])
+        let config = ModelConfiguration("default", schema: schema)
+        
+        // WARNING, this will delete ALL local storage!
+        // Can be useful if we need to change models. We don't have a migration schema.
+        // deleteStoreFiles(at: config.url)
+        
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(for: schema, configurations: [config])
+        } catch {
+            Logger.storage.error("ModelContainer creation failed, deleting store and retrying: \(error)")
+            deleteStoreFiles(at: config.url)
+            container = try ModelContainer(for: schema, configurations: [config])
+        }
+
+        container.mainContext.autosaveEnabled = false
+
+        Logger.storage.log("Building AppContext ErrorManager")
+        let errorManager = ErrorManager()
+
+        return Context(
+            container: container,
+            errorManager: errorManager
+        )
+    }
+
+    // Shared cached environment for app-wide reuse
+    @MainActor
+    private static var cachedContext: Context?
+
+    /// Returns the shared environment, creating it once on first access.
+    @MainActor
+    static func shared() throws -> Context {
+        if let cachedContext {
+            return cachedContext
+        }
+
+        let context = try make()
+        cachedContext = context
+
+        return context
+    }
+
+    /// Delete the SQLite store and its WAL/SHM companion files.
+    ///
+    /// Called when the existing store is incompatible with the current schema
+    /// and cannot be auto-migrated. A fresh store will be created on retry.
+    private static func deleteStoreFiles(at url: URL) {
+        let fm = FileManager.default
+        for ext in ["", "-wal", "-shm"] {
+            let fileURL = URL(fileURLWithPath: url.path + ext)
+            try? fm.removeItem(at: fileURL)
+        }
+    }
+}

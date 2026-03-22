@@ -32,7 +32,9 @@ struct BookReaderView: View {
             }
         }
         .navigationTitle(currentTitle)
+        #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Settings", systemImage: "textformat.size") {

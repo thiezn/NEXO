@@ -5,14 +5,14 @@
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>com.moretimer.book</string>
-			<key>UTTypeDescription</key>
-			<string>Moretimer Book</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.json</string>
 			</array>
+			<key>UTTypeDescription</key>
+			<string>Moretimer Book</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.moretimer.book</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>

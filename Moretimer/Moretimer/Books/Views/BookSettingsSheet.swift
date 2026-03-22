@@ -62,7 +62,9 @@ struct BookSettingsSheet: View {
                 }
             }
             .navigationTitle("Reading Settings")
+            #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
