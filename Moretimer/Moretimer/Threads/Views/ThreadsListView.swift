@@ -1,16 +1,11 @@
-//
-//  ThreadsListView.swift
-//  Moretimer
-//
-//  Created by Mortimer, M (Mathijs) on 22/03/2026.
-//
-
 import SwiftUI
 import SwiftData
 
 struct ThreadsListView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(NavigationManager.self) private var navManager
+    @Environment(UserProfileManager.self) private var userProfile
+
     @Query(sort: \ThreadEntity.lastMessageAt, order: .reverse) private var threads: [ThreadEntity]
 
     var pinnedThreads: [ThreadEntity] {
@@ -39,23 +34,26 @@ struct ThreadsListView: View {
         }
         .navigationTitle("Threads")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("New Thread", systemImage: "plus") {
-                    createThread()
-                }
-            }
+            TopLevelToolbarContent(
+                avatarData: userProfile.avatarImageData,
+                avatarInitials: userProfile.initials,
+                onAvatarTap: { navManager.presentSheet(.settings) },
+                listSections: [[
+                    MenuAction(title: "New Thread", icon: AppIcon.add) {
+                        createThread()
+                    }
+                ]]
+            )
         }
         .overlay {
             if threads.isEmpty {
-                ContentUnavailableView {
-                    Label("No Threads", systemImage: "bubble.left.and.bubble.right")
-                } description: {
-                    Text("Start a conversation with your AI agent.")
-                } actions: {
-                    Button("New Thread") {
-                        createThread()
-                    }
-                    .buttonStyle(.borderedProminent)
+                EmptyStateView(
+                    "No Threads",
+                    systemImage: AppIcon.threads,
+                    description: "Start a conversation with your AI agent.",
+                    actionLabel: "New Thread"
+                ) {
+                    createThread()
                 }
             }
         }
@@ -63,14 +61,14 @@ struct ThreadsListView: View {
 
     @ViewBuilder
     private func threadRow(_ thread: ThreadEntity) -> some View {
-        NavigationLink(value: thread.persistentModelID) {
+        NavigationLink(value: AppDestination.thread(thread.persistentModelID)) {
             ThreadRowView(thread: thread)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 deleteThread(thread)
             } label: {
-                Label("Delete", systemImage: "trash")
+                Label("Delete", systemImage: AppIcon.delete)
             }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -79,7 +77,7 @@ struct ThreadsListView: View {
             } label: {
                 Label(
                     thread.isPinned ? "Unpin" : "Pin",
-                    systemImage: thread.isPinned ? "pin.slash" : "pin"
+                    systemImage: thread.isPinned ? AppIcon.unpin : AppIcon.pin
                 )
             }
             .tint(.orange)
@@ -89,7 +87,7 @@ struct ThreadsListView: View {
             } label: {
                 Label(
                     thread.isRead ? "Mark Unread" : "Mark Read",
-                    systemImage: thread.isRead ? "envelope.badge" : "envelope.open"
+                    systemImage: thread.isRead ? AppIcon.markUnread : AppIcon.markRead
                 )
             }
             .tint(.blue)
@@ -100,7 +98,7 @@ struct ThreadsListView: View {
         let thread = ThreadEntity(title: "New Thread")
         modelContext.insert(thread)
         try? modelContext.save()
-        navManager.threadsPath.append(thread.persistentModelID)
+        navManager.threadsPath.append(AppDestination.thread(thread.persistentModelID))
     }
 
     private func deleteThread(_ thread: ThreadEntity) {

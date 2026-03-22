@@ -13,7 +13,7 @@ struct ErrorBanner: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: AppIcon.error)
                 .foregroundStyle(.white)
                 .font(.title3)
 
@@ -24,7 +24,7 @@ struct ErrorBanner: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(action: onDismiss) {
-                Image(systemName: "xmark.circle.fill")
+                Image(systemName: AppIcon.close)
                     .foregroundStyle(.white.opacity(0.8))
                     .font(.title3)
             }

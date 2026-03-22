@@ -40,10 +40,13 @@ impl AudioChunker {
         Some((&self.buffer, offset_secs))
     }
 
-    /// Seek to a time position in seconds.
+    /// Seek to a time position in seconds. Only moves forward to prevent infinite loops.
     pub fn seek_to_time(&mut self, seconds: f64) {
         let pos = (seconds * SAMPLE_RATE as f64) as usize;
-        self.position = pos.min(self.samples.len());
+        let pos = pos.min(self.samples.len());
+        if pos > self.position {
+            self.position = pos;
+        }
     }
 
     /// Total duration in seconds.

@@ -1,10 +1,3 @@
-//
-//  SearchView.swift
-//  Moretimer
-//
-//  Created by Mortimer, M (Mathijs) on 22/03/2026.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -18,6 +11,8 @@ enum SearchContentType: String, CaseIterable, Identifiable {
 
 struct SearchView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(NavigationManager.self) private var navManager
+    @Environment(UserProfileManager.self) private var userProfile
 
     @State private var searchText = ""
     @State private var selectedType: SearchContentType = .all
@@ -46,7 +41,7 @@ struct SearchView: View {
 
             if searchText.isEmpty {
                 ContentUnavailableView("Search Moretimer",
-                    systemImage: "magnifyingglass",
+                    systemImage: AppIcon.search,
                     description: Text("Search across books and threads"))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -58,6 +53,13 @@ struct SearchView: View {
         }
         .navigationTitle("Search")
         .searchable(text: $searchText, prompt: "Books, threads...")
+        .toolbar {
+            TopLevelToolbarContent(
+                avatarData: userProfile.avatarImageData,
+                avatarInitials: userProfile.initials,
+                onAvatarTap: { navManager.presentSheet(.settings) }
+            )
+        }
         .onChange(of: searchText) { _, newValue in
             searchTask?.cancel()
             searchTask = Task {

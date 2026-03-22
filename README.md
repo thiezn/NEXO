@@ -1,4 +1,6 @@
-# My Claw
+# NEXO
+
+NEXO - Neural Extension Operator
 
 The end-all tool for myself to work on my projects.
 

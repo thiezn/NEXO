@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 struct BooksListView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(NavigationManager.self) private var navManager
+    @Environment(UserProfileManager.self) private var userProfile
     @Query(sort: \BookEntity.importedAt, order: .reverse) private var books: [BookEntity]
     @State private var showFileImporter = false
     @State private var importError: String?
@@ -12,7 +14,7 @@ struct BooksListView: View {
     var body: some View {
         List {
             ForEach(books) { book in
-                NavigationLink(value: book.persistentModelID) {
+                NavigationLink(value: AppDestination.book(book.persistentModelID)) {
                     BookRowView(book: book)
                 }
                 .draggable(book.toJSON())
@@ -26,20 +28,19 @@ struct BooksListView: View {
                 EditButton()
             }
             #endif
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Import Book...", systemImage: "doc.badge.plus") {
+            TopLevelToolbarContent(
+                avatarData: userProfile.avatarImageData,
+                avatarInitials: userProfile.initials,
+                onAvatarTap: { navManager.presentSheet(.settings) },
+                listSections: [[
+                    MenuAction(title: "Import Book", icon: AppIcon.importBook) {
                         showFileImporter = true
-                    }
-                    if books.isEmpty {
-                        Button("Load Sample Book", systemImage: "book") {
-                            loadSampleBook()
-                        }
-                    }
-                } label: {
-                    Label("Add", systemImage: "plus")
-                }
-            }
+                    },
+                    MenuAction(title: "Load Sample Book", icon: AppIcon.book) {
+                        loadSampleBook()
+                    },
+                ]]
+            )
         }
         .dropDestination(for: BookOutputJSON.self) { droppedBooks, _ in
             for bookJSON in droppedBooks {
@@ -66,15 +67,13 @@ struct BooksListView: View {
         }
         .overlay {
             if books.isEmpty {
-                ContentUnavailableView {
-                    Label("No Books", systemImage: "books.vertical")
-                } description: {
-                    Text("Add a book to get started.")
-                } actions: {
-                    Button("Load Sample Book") {
-                        loadSampleBook()
-                    }
-                    .buttonStyle(.borderedProminent)
+                EmptyStateView(
+                    "No Books",
+                    systemImage: AppIcon.books,
+                    description: "Add a book to get started.",
+                    actionLabel: "Load Sample Book"
+                ) {
+                    loadSampleBook()
                 }
             }
         }

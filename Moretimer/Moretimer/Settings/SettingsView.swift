@@ -1,10 +1,3 @@
-//
-//  SettingsView.swift
-//  Moretimer
-//
-//  Created by Mortimer, M (Mathijs) on 22/03/2026.
-//
-
 import SwiftUI
 import AuthenticationServices
 import PhotosUI
@@ -18,6 +11,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             accountSection
+            appearanceSection
             themeSection
             aboutSection
         }
@@ -42,8 +36,17 @@ struct SettingsView: View {
     private var accountSection: some View {
         Section("Account") {
             if userProfile.isSignedIn {
+                let avatarData = userProfile.avatarImageData
+                let initials = userProfile.initials
                 HStack(spacing: 16) {
-                    avatarView
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        AvatarView(
+                            imageData: avatarData,
+                            initials: initials
+                        )
+                    }
+                    .buttonStyle(.plain)
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text(userProfile.fullName ?? "User")
                             .font(.headline)
@@ -71,24 +74,22 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Appearance
+
     @ViewBuilder
-    private var avatarView: some View {
-        PhotosPicker(selection: $selectedPhoto, matching: .images) {
-            Group {
-                if let data = userProfile.avatarImageData {
-                    imageFromData(data, contentMode: .fill)
-                        .frame(width: 56, height: 56)
-                        .clipShape(.circle)
-                } else {
-                    Text(userProfile.initials)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(.blue.gradient, in: .circle)
+    private var appearanceSection: some View {
+        @Bindable var tm = themeManager
+
+        Section("Appearance") {
+            Picker("Mode", selection: $tm.appearanceMode) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Label(mode.rawValue, systemImage: mode.systemImage)
+                        .tag(mode)
                 }
             }
+            .pickerStyle(.inline)
+            .labelsHidden()
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Theme
@@ -104,7 +105,7 @@ struct SettingsView: View {
                         Text(theme.rawValue)
                     } icon: {
                         Image(systemName: theme.systemImage)
-                            .foregroundStyle(theme.colors.primary)
+                            .foregroundStyle(theme.lightColors.primary)
                     }
                     .tag(theme)
                 }

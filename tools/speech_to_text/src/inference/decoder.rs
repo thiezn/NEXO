@@ -161,10 +161,13 @@ fn try_decode(
 
         tokens.push(next_token);
 
-        // Feed the new token to get next logits
-        let input = Tensor::new(&[next_token], device)?.unsqueeze(0)?;
+        // The candle Whisper model has no self-attention KV cache, so we must
+        // pass ALL accumulated tokens each step. Cross-attention KV cache is
+        // reused (flush_kv_cache = false) to avoid re-encoding.
+        let input = Tensor::new(tokens.as_slice(), device)?.unsqueeze(0)?;
         let logits = model.decoder_forward(&input, audio_features, false)?;
-        next_logits = logits.i((0, 0))?;
+        let seq_len = tokens.len() - 1;
+        next_logits = logits.i((0, seq_len))?;
     }
 
     let avg_logprob = if count > 0 {

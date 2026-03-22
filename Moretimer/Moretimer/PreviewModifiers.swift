@@ -16,6 +16,8 @@ struct PreviewAppEnvironment: PreviewModifier {
     struct Context {
         let container: ModelContainer
         let errorManager: ErrorManager
+        let themeManager: ThemeManager
+        let userProfileManager: UserProfileManager
     }
 
     @MainActor
@@ -23,7 +25,9 @@ struct PreviewAppEnvironment: PreviewModifier {
         let appContext = try AppContext.shared()
         return Context(
             container: appContext.container,
-            errorManager: appContext.errorManager
+            errorManager: appContext.errorManager,
+            themeManager: appContext.themeManager,
+            userProfileManager: appContext.userProfileManager
         )
     }
 
@@ -31,8 +35,9 @@ struct PreviewAppEnvironment: PreviewModifier {
         content
             .modelContainer(context.container)
             .environment(NavigationManager())
-            .environment(ThemeManager())
+            .resolveThemeColors()
+            .environment(context.themeManager)
             .environment(context.errorManager)
-            .environment(UserProfileManager())
+            .environment(context.userProfileManager)
     }
 }

@@ -13,6 +13,14 @@ struct MessageBubbleView: View {
     private var isUser: Bool { message.role == .user }
 
     var body: some View {
+        if message.isQuestionMessage {
+            questionContent
+        } else {
+            textContent
+        }
+    }
+
+    private var textContent: some View {
         HStack {
             if isUser { Spacer(minLength: 60) }
 
@@ -27,5 +35,15 @@ struct MessageBubbleView: View {
             if !isUser { Spacer(minLength: 60) }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+
+    @ViewBuilder
+    private var questionContent: some View {
+        let sorted = message.sortedQuestions
+        if sorted.count == 1, let question = sorted.first {
+            InlineQuestionView(question: question)
+        } else {
+            QuestionCarouselView(questions: sorted)
+        }
     }
 }

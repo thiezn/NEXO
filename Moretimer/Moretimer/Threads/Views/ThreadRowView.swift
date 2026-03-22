@@ -13,7 +13,8 @@ struct ThreadRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             if thread.isPinned {
-                Image(systemName: "pin.fill")
+                Image(systemName: AppIcon.pin)
+                    .symbolVariant(.fill)
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
@@ -39,11 +40,7 @@ struct ThreadRowView: View {
                 }
 
                 HStack {
-                    Text(thread.category)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.secondary.opacity(0.15), in: .capsule)
+                    CategoryBadge(text: thread.category)
 
                     if let lastMessage = thread.lastMessage {
                         Text(lastMessage.content)

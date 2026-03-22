@@ -20,6 +20,12 @@ struct AppContext {
 
         /// The app-wide ErrorManager
         let errorManager: ErrorManager
+        
+        /// The app-wide ThemeManager
+        let themeManager: ThemeManager
+        
+        /// The User Profile Manager
+        let userProfileManager: UserProfileManager
     }
 
     /// Builds a shared application environment with all models registered.
@@ -45,6 +51,10 @@ struct AppContext {
             // Threads
             ThreadEntity.self,
             MessageEntity.self,
+
+            // Questions & Answers
+            QuestionEntity.self,
+            AnswerEntity.self,
         ])
         let config = ModelConfiguration("default", schema: schema)
         
@@ -66,9 +76,18 @@ struct AppContext {
         Logger.storage.log("Building AppContext ErrorManager")
         let errorManager = ErrorManager()
 
+        Logger.storage.log("Building AppContext ThemeManager")
+        let themeManager = ThemeManager()
+
+        Logger.storage.log("Building AppContext UserProfileManager")
+        let userProfileManager = UserProfileManager()
+
+        
         return Context(
             container: container,
-            errorManager: errorManager
+            errorManager: errorManager,
+            themeManager: themeManager,
+            userProfileManager: userProfileManager
         )
     }
 

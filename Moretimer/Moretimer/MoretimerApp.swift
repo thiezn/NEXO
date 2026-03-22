@@ -19,14 +19,16 @@ struct MoretimerApp: App {
 
     @State private var container: ModelContainer
     @State private var errorManager: ErrorManager
-    @State private var themeManager = ThemeManager()
-    @State private var userProfileManager = UserProfileManager()
+    @State private var themeManager: ThemeManager
+    @State private var userProfileManager: UserProfileManager
 
     init() {
         do {
             let context = try AppContext.shared()
             self._container = State(initialValue: context.container)
             self._errorManager = State(initialValue: context.errorManager)
+            self._themeManager = State(initialValue: context.themeManager)
+            self._userProfileManager = State(initialValue: context.userProfileManager)
         } catch {
             fatalError("Failed to initialize AppContext after store reset: \(error)")
         }
@@ -39,7 +41,6 @@ struct MoretimerApp: App {
                 .environment(themeManager)
                 .environment(userProfileManager)
                 .preferredColorScheme(themeManager.preferredColorScheme)
-                .tint(themeManager.colors.accent)
         }
         .modelContainer(container)
     }
@@ -50,10 +51,14 @@ struct MoretimerApp: App {
 /// separate state for each opened window.
 struct WindowSceneView: View {
     @State private var navManager = NavigationManager()
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(ErrorManager.self) private var errorManager
+    @Environment(UserProfileManager.self) private var userProfile
 
     var body: some View {
         MainTabView()
             .environment(navManager)
+            .resolveThemeColors()
             .loadingErrorOverlay()
             .sheet(item: $navManager.currentSheet) { sheet in
                 switch sheet {
@@ -61,6 +66,10 @@ struct WindowSceneView: View {
                     NavigationStack {
                         SettingsView()
                     }
+                    .resolveThemeColors()
+                    .environment(themeManager)
+                    .environment(errorManager)
+                    .environment(userProfile)
                 }
             }
     }

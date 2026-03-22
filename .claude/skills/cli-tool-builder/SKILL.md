@@ -32,11 +32,20 @@ utl-helpers = { path = "../../shared/utl-helpers" }
 clap = { version = "4", features = ["derive"] }
 tracing = "0"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+dirs = "6"
 # Add domain-specific deps here
 
 [lints]
 workspace = true
 ```
+
+Common additional deps:
+- `tokio = { version = "1", features = ["rt-multi-thread", "macros"] }` — async runtime
+- `serde_json = "1"` — JSON parsing (configs, API responses)
+- `anyhow = "1"` — ergonomic error handling (prefer over `utl_helpers::Error` for inference tools)
+- `dirs = "6"` — home directory detection for config paths
 
 Enable utl-helpers features as needed:
 
@@ -173,6 +182,43 @@ use utl_helpers::{OutputFormat, write_output};
 // fields supports paths like "results[*].name" for filtering JSON output
 ```
 
+## Config pattern
+
+Tools that need persistent configuration use a standard AppConfig pattern:
+
+```rust
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppConfig {
+    pub default_model: String,
+    // tool-specific fields...
+}
+
+impl Default for AppConfig { /* sensible defaults */ }
+
+impl AppConfig {
+    pub fn config_path() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".myclaw")
+            .join("<tool_name>.toml")
+    }
+
+    pub fn load() -> utl_helpers::Result<Self> {
+        utl_helpers::config::load_or_create(&Self::config_path())
+    }
+
+    pub fn save(&self) -> utl_helpers::Result {
+        utl_helpers::config::save(self, &Self::config_path())
+    }
+}
+```
+
+Requires `utl-helpers` with `features = ["config"]` and `dirs = "6"`.
+
 ## Error handling
 
 Use `utl_helpers::Error` variants for typed errors:
@@ -183,6 +229,8 @@ Err(utl_helpers::Error::Other("something went wrong".into()))
 ```
 
 `From<io::Error>`, `From<String>`, `From<&str>`, and `From<serde_json::Error>` are implemented, so `?` works naturally for those types. For other error types (e.g. `anyhow`), either convert manually or use a different error type in your `run()` function.
+
+For inference tools that depend on `candle-*` crates, prefer `anyhow::Result` throughout (candle uses its own error type that doesn't convert to `utl_helpers::Error`).
 
 ## Key conventions
 

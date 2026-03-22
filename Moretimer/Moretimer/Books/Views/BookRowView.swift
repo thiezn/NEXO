@@ -37,7 +37,7 @@ struct BookRowView: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(.quaternary)
                 .overlay {
-                    Image(systemName: "book.closed")
+                    Image(systemName: AppIcon.book)
                         .foregroundStyle(.secondary)
                 }
         }

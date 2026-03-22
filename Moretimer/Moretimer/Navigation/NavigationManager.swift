@@ -1,10 +1,3 @@
-//
-//  NavigationManager.swift
-//  Moretimer
-//
-//  Created by Mortimer, M (Mathijs) on 22/03/2026.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -29,10 +22,10 @@ enum AppTab: String, Hashable, Identifiable, CaseIterable, Sendable {
 
     var systemImage: String {
         switch self {
-        case .home: "house"
-        case .books: "books.vertical"
-        case .threads: "bubble.left.and.bubble.right"
-        case .search: "magnifyingglass"
+        case .home: AppIcon.home
+        case .books: AppIcon.books
+        case .threads: AppIcon.threads
+        case .search: AppIcon.search
         }
     }
 }
@@ -73,12 +66,12 @@ final class NavigationManager {
 
     func navigateToBook(_ bookID: PersistentIdentifier) {
         selectedTab = .books
-        booksPath.append(bookID)
+        booksPath.append(AppDestination.book(bookID))
     }
 
     func navigateToThread(_ threadID: PersistentIdentifier) {
         selectedTab = .threads
-        threadsPath.append(threadID)
+        threadsPath.append(AppDestination.thread(threadID))
     }
 
     func popToRoot(tab: AppTab) {

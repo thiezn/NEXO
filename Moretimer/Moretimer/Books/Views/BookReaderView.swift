@@ -36,12 +36,11 @@ struct BookReaderView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Settings", systemImage: "textformat.size") {
+            DetailToolbarContent(
+                primaryAction: MenuAction(title: "Settings", icon: AppIcon.textSettings) {
                     showSettings = true
                 }
-
-            }
+            )
         }
         .sheet(isPresented: $showSettings) {
             BookSettingsSheet(

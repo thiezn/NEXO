@@ -58,6 +58,15 @@ final class MessageEntity {
     var createdAt: Date
     var thread: ThreadEntity?
 
+    @Relationship(deleteRule: .cascade, inverse: \QuestionEntity.message)
+    var questions: [QuestionEntity] = []
+
+    var sortedQuestions: [QuestionEntity] {
+        questions.sorted { $0.order < $1.order }
+    }
+
+    var isQuestionMessage: Bool { !questions.isEmpty }
+
     init(content: String, role: MessageRole) {
         self.content = content
         self.role = role

@@ -1,7 +1,7 @@
 import UniformTypeIdentifiers
 import CoreTransferable
 
-extension UTType {
+nonisolated extension UTType {
     static let bookJSON = UTType(exportedAs: "com.moretimer.book", conformingTo: .json)
 }
 
@@ -10,3 +10,5 @@ extension BookOutputJSON: Transferable {
         CodableRepresentation(contentType: .bookJSON)
     }
 }
+
+

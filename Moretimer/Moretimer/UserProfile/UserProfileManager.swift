@@ -9,7 +9,7 @@ import Foundation
 import AuthenticationServices
 import OSLog
 
-enum UserProfileKeys {
+nonisolated enum UserProfileKeys {
     static let userID = "appleUserID"
     static let fullName = "appleUserFullName"
     static let email = "appleUserEmail"

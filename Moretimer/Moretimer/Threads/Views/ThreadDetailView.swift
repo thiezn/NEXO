@@ -1,10 +1,3 @@
-//
-//  ThreadDetailView.swift
-//  Moretimer
-//
-//  Created by Mortimer, M (Mathijs) on 22/03/2026.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -30,18 +23,23 @@ struct ThreadDetailView: View {
 
             Divider()
 
-            messageInputBar
+            MessageInputBar(text: $messageText) { content in
+                sendMessage(content)
+            }
         }
         .navigationTitle(thread.title)
         #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Settings", systemImage: "gearshape") {
+            DetailToolbarContent(
+                primaryAction: MenuAction(title: "Settings", icon: AppIcon.settings) {
                     showSettings = true
-                }
-            }
+                },
+                listSections: [
+                    questionTestActions
+                ]
+            )
         }
         .sheet(isPresented: $showSettings) {
             ThreadSettingsSheet(thread: thread)
@@ -53,42 +51,56 @@ struct ThreadDetailView: View {
         }
     }
 
-    private var trimmedMessage: String {
-        messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var messageInputBar: some View {
-        HStack(spacing: 12) {
-            TextField("Message...", text: $messageText, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.secondary.opacity(0.1), in: .capsule)
-
-            Button {
-                sendMessage()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-            }
-            .disabled(trimmedMessage.isEmpty)
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-    }
-
-    private func sendMessage() {
-        let content = trimmedMessage
-        guard !content.isEmpty else { return }
-
-        let message = MessageEntity(content: content, role: .user)
+    @discardableResult
+    private func insertMessage(content: String, role: MessageRole) -> MessageEntity {
+        let message = MessageEntity(content: content, role: role)
         message.thread = thread
         thread.messages.append(message)
         thread.lastMessageAt = Date()
         modelContext.insert(message)
-        try? modelContext.save()
+        return message
+    }
 
-        messageText = ""
+    private func sendMessage(_ content: String) {
+        insertMessage(content: content, role: .user)
+        try? modelContext.save()
+    }
+
+    // MARK: - Test Question Actions
+
+    private var questionTestActions: [MenuAction] {
+        QuestionType.allCases.map { type in
+            MenuAction(title: "Add \(type.displayName)", icon: type.systemImage) {
+                addTestQuestion(type: type)
+            }
+        } + [
+            MenuAction(title: "Add All Types", icon: AppIcon.addAll) {
+                addAllTestQuestions()
+            }
+        ]
+    }
+
+    private func addTestQuestion(type: QuestionType) {
+        let message = insertMessage(content: "", role: .assistant)
+
+        let question = QuestionEntity.sample(for: type, order: 0)
+        question.message = message
+        message.questions.append(question)
+        modelContext.insert(question)
+
+        try? modelContext.save()
+    }
+
+    private func addAllTestQuestions() {
+        let message = insertMessage(content: "", role: .assistant)
+
+        for (index, type) in QuestionType.allCases.enumerated() {
+            let question = QuestionEntity.sample(for: type, order: index)
+            question.message = message
+            message.questions.append(question)
+            modelContext.insert(question)
+        }
+
+        try? modelContext.save()
     }
 }

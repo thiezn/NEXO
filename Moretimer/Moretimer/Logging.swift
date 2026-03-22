@@ -9,13 +9,14 @@ import Foundation
 import OSLog
 
 extension Logger {
-    static let subsystem = Bundle.main.bundleIdentifier ?? "nl.mortimer.moretimer"
+    nonisolated static let subsystem = Bundle.main.bundleIdentifier ?? "nl.mortimer.moretimer"
 
-    static let storage = Logger(subsystem: subsystem, category: "storage")
-    static let ui = Logger(subsystem: subsystem, category: "ui")
-    static let book = Logger(subsystem: subsystem, category: "book")
-    static let thread = Logger(subsystem: subsystem, category: "thread")
-    static let auth = Logger(subsystem: subsystem, category: "auth")
+    nonisolated static let storage = Logger(subsystem: subsystem, category: "storage")
+    nonisolated static let ui = Logger(subsystem: subsystem, category: "ui")
+    nonisolated static let book = Logger(subsystem: subsystem, category: "book")
+    nonisolated static let thread = Logger(subsystem: subsystem, category: "thread")
+    nonisolated static let auth = Logger(subsystem: subsystem, category: "auth")
+    nonisolated static let question = Logger(subsystem: subsystem, category: "question")
 }
 
 //extension OSSignposter {
