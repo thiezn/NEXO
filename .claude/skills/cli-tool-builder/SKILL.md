@@ -1,6 +1,6 @@
 ---
 name: cli-tool-builder
-description: Use when creating a new CLI tool under tools/ in the myclaw workspace. Covers project scaffolding, utl-helpers integration, and project conventions.
+description: Use when creating a new CLI tool under tools/ in the nexo workspace. Covers project scaffolding, utl-helpers integration, and project conventions.
 ---
 
 # CLI Tool Builder
@@ -162,7 +162,7 @@ pub enum Command {
 
 ### `config` feature
 
-Config files go to `~/.myclaw/<tool_name>.toml`. The config struct must impl `Serialize + DeserializeOwned + Default`.
+Config files go to `~/.nexo/<tool_name>.toml`. The config struct must impl `Serialize + DeserializeOwned + Default`.
 
 ```rust
 use utl_helpers::config;
@@ -203,7 +203,7 @@ impl AppConfig {
     pub fn config_path() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".myclaw")
+            .join(".nexo")
             .join("<tool_name>.toml")
     }
 
@@ -232,6 +232,30 @@ Err(utl_helpers::Error::Other("something went wrong".into()))
 
 For inference tools that depend on `candle-*` crates, prefer `anyhow::Result` throughout (candle uses its own error type that doesn't convert to `utl_helpers::Error`).
 
+## Pull / List / Domain dispatch pattern
+
+Inference tools that download models follow a standard three-subcommand pattern. The domain-specific subcommand (e.g. `Describe`, `Generate`, `Transcribe`) is the primary action; `Pull` and `List` manage model assets.
+
+```rust
+async fn run(command: Command) -> anyhow::Result<()> {
+    match command {
+        Command::DomainAction { /* args */ } => {
+            let app_config = AppConfig::load()?;
+            // build domain config from CLI args + app_config defaults
+            // call high-level API function from lib.rs
+            // print result to stdout or write to --output path
+        }
+        Command::Pull { model } => cmd_pull(&model).await?,
+        Command::List => cmd_list()?,
+    }
+    Ok(())
+}
+```
+
+`cmd_pull` downloads files via `pull_model(manifest)`, then persists paths into `AppConfig` via `ModelPaths::from_downloads()` + `to_model_config()`.
+
+`cmd_list` iterates `known_manifests()`, shows install status from `AppConfig`, and prints download sizes.
+
 ## Key conventions
 
 - Binary name matches crate name
@@ -239,3 +263,4 @@ For inference tools that depend on `candle-*` crates, prefer `anyhow::Result` th
 - Use `tracing::info!`, `tracing::warn!`, `tracing::error!` for logging (never `println!` for status)
 - `println!` only for primary program output (e.g. listing items, final results to stdout)
 - Domain logic belongs in `src/lib.rs` or dedicated modules, not in `main.rs`
+- For inference tools, use `anyhow::Result` throughout (candle errors don't convert to `utl_helpers::Error`)

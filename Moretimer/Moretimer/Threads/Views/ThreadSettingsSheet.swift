@@ -13,8 +13,6 @@ struct ThreadSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
-    private let categories = ["General", "Work", "Personal", "Research", "Creative"]
-
     var body: some View {
         NavigationStack {
             Form {
@@ -24,8 +22,9 @@ struct ThreadSettingsSheet: View {
 
                 Section("Category") {
                     Picker("Category", selection: $thread.category) {
-                        ForEach(categories, id: \.self) { category in
-                            Text(category).tag(category)
+                        ForEach(ThreadCategory.allCases) { category in
+                            Label(category.displayName, systemImage: category.systemImage)
+                                .tag(category.rawValue)
                         }
                     }
                     .pickerStyle(.inline)

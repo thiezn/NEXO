@@ -10,9 +10,19 @@ import SwiftData
 
 struct InlineQuestionView: View {
     @Bindable var question: QuestionEntity
+    var onSubmit: (() -> Void)?
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
-        QuestionCardView(question: question)
-            .padding(.horizontal)
+        VStack(alignment: .trailing, spacing: 8) {
+            QuestionCardView(question: question)
+
+            Button("Submit") {
+                try? modelContext.save()
+                onSubmit?()
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(.horizontal)
     }
 }

@@ -4,6 +4,8 @@ pub mod error;
 #[cfg(feature = "output")]
 pub mod output;
 pub mod paths;
+#[cfg(feature = "progress")]
+pub mod progress;
 pub mod tracing;
 
 pub use error::{Error, Result};

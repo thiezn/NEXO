@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// Default model storage directory: `~/.myclaw/local_models/`.
+/// Default model storage directory: `~/.nexo/local_models/`.
 pub fn default_models_dir() -> PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
@@ -10,7 +10,7 @@ pub fn default_models_dir() -> PathBuf {
         } else {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".myclaw")
+                .join(".nexo")
                 .join("local_models")
         };
         let _ = std::fs::create_dir_all(&dir);

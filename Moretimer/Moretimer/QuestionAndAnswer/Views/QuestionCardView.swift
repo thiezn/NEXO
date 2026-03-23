@@ -10,33 +10,50 @@ import SwiftData
 
 struct QuestionCardView: View {
     @Bindable var question: QuestionEntity
+    var onShowAnswer: (() -> Void)?
     @Environment(\.themeColors) private var colors
 
+    static let cardHeight: CGFloat = 420
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let imageData = question.imageData {
-                imageFromData(imageData, contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: 180)
-                    .clipShape(.rect(cornerRadius: 12))
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 12) {
+                if let imageData = question.imageData {
+                    imageFromData(imageData, contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: 180)
+                        .clipShape(.rect(cornerRadius: 12))
+                }
+
+                Text(question.questionText)
+                    .font(.headline)
+
+                if let desc = question.descriptionText {
+                    Text(desc)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                if question.isFlashcard {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button {
+                            onShowAnswer?()
+                        } label: {
+                            Label("Show Answer", systemImage: AppIcon.flipCard)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    answerInputView
+                }
             }
-
-            Text(question.questionText)
-                .font(.headline)
-
-            if let desc = question.descriptionText {
-                Text(desc)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            CategoryBadge(text: question.questionType.displayName, color: colors.accent)
-
-            Divider()
-
-            answerInputView
+            .padding(16)
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: Self.cardHeight)
         .clipShape(.rect(cornerRadius: 20))
         .glassEffect(
             .regular.tint(colors.primary.opacity(0.1)),

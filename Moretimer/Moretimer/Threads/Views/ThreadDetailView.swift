@@ -4,8 +4,10 @@ import SwiftData
 struct ThreadDetailView: View {
     @Bindable var thread: ThreadEntity
     @Environment(\.modelContext) private var modelContext
+    @Environment(LearningService.self) private var learningService
     @State private var messageText = ""
     @State private var showSettings = false
+    @State private var showDeckPicker = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +21,7 @@ struct ThreadDetailView: View {
                     .padding()
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom)
 
             Divider()
@@ -37,6 +40,7 @@ struct ThreadDetailView: View {
                     showSettings = true
                 },
                 listSections: [
+                    learningActions,
                     questionTestActions
                 ]
             )
@@ -44,9 +48,15 @@ struct ThreadDetailView: View {
         .sheet(isPresented: $showSettings) {
             ThreadSettingsSheet(thread: thread)
         }
+        .sheet(isPresented: $showDeckPicker) {
+            LearningDeckPickerView(thread: thread, learningService: learningService)
+        }
         .task {
             if !thread.isRead {
                 thread.isRead = true
+            }
+            if thread.isLearningThread && thread.messages.isEmpty {
+                showDeckPicker = true
             }
         }
     }
@@ -66,6 +76,17 @@ struct ThreadDetailView: View {
         try? modelContext.save()
     }
 
+    // MARK: - Learning Actions
+
+    private var learningActions: [MenuAction] {
+        guard thread.isLearningThread else { return [] }
+        return [
+            MenuAction(title: "Add Cards", icon: AppIcon.deck) {
+                showDeckPicker = true
+            }
+        ]
+    }
+
     // MARK: - Test Question Actions
 
     private var questionTestActions: [MenuAction] {
@@ -76,6 +97,9 @@ struct ThreadDetailView: View {
         } + [
             MenuAction(title: "Add All Types", icon: AppIcon.addAll) {
                 addAllTestQuestions()
+            },
+            MenuAction(title: "Add Flashcard", icon: AppIcon.flashcard) {
+                addTestFlashcard()
             }
         ]
     }
@@ -100,6 +124,17 @@ struct ThreadDetailView: View {
             message.questions.append(question)
             modelContext.insert(question)
         }
+
+        try? modelContext.save()
+    }
+
+    private func addTestFlashcard() {
+        let message = insertMessage(content: "", role: .assistant)
+
+        let question = QuestionEntity.sampleFlashcard(order: 0)
+        question.message = message
+        message.questions.append(question)
+        modelContext.insert(question)
 
         try? modelContext.save()
     }

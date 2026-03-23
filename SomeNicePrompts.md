@@ -1,16 +1,10 @@
 # I seem to had ok success with the following prompt to add a new locla llm model:
 
+Use the /cli-tool-builder and /local-inference-builder skill to create the text-to-text crate @tools/text_to_text/src/main.rs
 
-
-use the /cli-tool-builder and /local-inference-builder skill to create the text-to-speech crate @tools/text_to_speech/src/main.rs 
-
-I want to support the Qwen3-TTS model and Parler-TTS models.
+I want to support the Qwen3.5-9B-Instruct model.
 
 use candle and rust to make a robust local inference tool.
-
-
-
-# Prompt to improve my skills for cli tool builder and local-inference-builder:
 
 After everything is completed and tested, perform the following:
 

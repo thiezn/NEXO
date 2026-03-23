@@ -20,12 +20,15 @@ struct AppContext {
 
         /// The app-wide ErrorManager
         let errorManager: ErrorManager
-        
+
         /// The app-wide ThemeManager
         let themeManager: ThemeManager
-        
+
         /// The User Profile Manager
         let userProfileManager: UserProfileManager
+
+        /// The Learning Service
+        let learningService: LearningService
     }
 
     /// Builds a shared application environment with all models registered.
@@ -55,6 +58,11 @@ struct AppContext {
             // Questions & Answers
             QuestionEntity.self,
             AnswerEntity.self,
+
+            // Learning
+            LearningDeck.self,
+            LearningSession.self,
+            LearningResult.self,
         ])
         let config = ModelConfiguration("default", schema: schema)
         
@@ -82,12 +90,15 @@ struct AppContext {
         Logger.storage.log("Building AppContext UserProfileManager")
         let userProfileManager = UserProfileManager()
 
-        
+        Logger.storage.log("Building AppContext LearningService")
+        let learningService = LearningService(modelContext: container.mainContext)
+
         return Context(
             container: container,
             errorManager: errorManager,
             themeManager: themeManager,
-            userProfileManager: userProfileManager
+            userProfileManager: userProfileManager,
+            learningService: learningService
         )
     }
 

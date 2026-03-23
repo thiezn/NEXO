@@ -21,6 +21,7 @@ struct MoretimerApp: App {
     @State private var errorManager: ErrorManager
     @State private var themeManager: ThemeManager
     @State private var userProfileManager: UserProfileManager
+    @State private var learningService: LearningService
 
     init() {
         do {
@@ -29,6 +30,7 @@ struct MoretimerApp: App {
             self._errorManager = State(initialValue: context.errorManager)
             self._themeManager = State(initialValue: context.themeManager)
             self._userProfileManager = State(initialValue: context.userProfileManager)
+            self._learningService = State(initialValue: context.learningService)
         } catch {
             fatalError("Failed to initialize AppContext after store reset: \(error)")
         }
@@ -40,6 +42,7 @@ struct MoretimerApp: App {
                 .environment(errorManager)
                 .environment(themeManager)
                 .environment(userProfileManager)
+                .environment(learningService)
                 .preferredColorScheme(themeManager.preferredColorScheme)
         }
         .modelContainer(container)

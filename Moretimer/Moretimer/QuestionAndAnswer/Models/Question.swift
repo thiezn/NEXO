@@ -57,16 +57,20 @@ final class QuestionEntity {
     var choices: [String]
     var order: Int
     var createdAt: Date
+    var staticAnswer: String?
 
     @Relationship(deleteRule: .cascade, inverse: \AnswerEntity.question)
     var answer: AnswerEntity?
 
     var message: MessageEntity?
+    var deck: LearningDeck?
 
     var questionType: QuestionType {
         get { QuestionType(rawValue: questionTypeRaw) ?? .openEnded }
         set { questionTypeRaw = newValue.rawValue }
     }
+
+    var isFlashcard: Bool { staticAnswer != nil }
 
     init(
         questionText: String,
@@ -74,7 +78,8 @@ final class QuestionEntity {
         descriptionText: String? = nil,
         imageData: Data? = nil,
         choices: [String] = [],
-        order: Int = 0
+        order: Int = 0,
+        staticAnswer: String? = nil
     ) {
         self.questionText = questionText
         self.questionTypeRaw = questionType.rawValue
@@ -83,6 +88,7 @@ final class QuestionEntity {
         self.choices = choices
         self.order = order
         self.createdAt = Date()
+        self.staticAnswer = staticAnswer
     }
 }
 
@@ -98,6 +104,7 @@ extension QuestionEntity: Codable {
         case order
         case createdAt = "created_at"
         case answer
+        case staticAnswer = "static_answer"
     }
 
     convenience init(from decoder: Decoder) throws {
@@ -128,6 +135,7 @@ extension QuestionEntity: Codable {
         }
 
         self.answer = try container.decodeIfPresent(AnswerEntity.self, forKey: .answer)
+        self.staticAnswer = try container.decodeIfPresent(String.self, forKey: .staticAnswer)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -140,6 +148,7 @@ extension QuestionEntity: Codable {
         try container.encode(order, forKey: .order)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(answer, forKey: .answer)
+        try container.encodeIfPresent(staticAnswer, forKey: .staticAnswer)
     }
 }
 
@@ -327,5 +336,15 @@ extension QuestionEntity {
                 order: order
             )
         }
+    }
+
+    static func sampleFlashcard(order: Int) -> QuestionEntity {
+        QuestionEntity(
+            questionText: "What is the capital of France?",
+            questionType: .openEnded,
+            descriptionText: "Geography flashcard",
+            order: order,
+            staticAnswer: "Paris"
+        )
     }
 }

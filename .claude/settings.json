@@ -8,6 +8,9 @@
       "Bash(find:*)",
       "Bash(head:*)",
       "Bash(tail:*)",
+      "Bash(mkdir:*)",
+      "Bash(grep:*)",
+      "Bash(curl:*)",
       "mcp__xcode",
       "Edit(.claude/**)",
       "Write(.claude/**)"

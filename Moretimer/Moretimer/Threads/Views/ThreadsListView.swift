@@ -38,11 +38,16 @@ struct ThreadsListView: View {
                 avatarData: userProfile.avatarImageData,
                 avatarInitials: userProfile.initials,
                 onAvatarTap: { navManager.presentSheet(.settings) },
-                listSections: [[
-                    MenuAction(title: "New Thread", icon: AppIcon.add) {
-                        createThread()
+                listSections: [
+                    ThreadCategory.allCases.map { category in
+                        MenuAction(
+                            title: "New \(category.displayName)",
+                            icon: category.systemImage
+                        ) {
+                            createThread(category: category)
+                        }
                     }
-                ]]
+                ]
             )
         }
         .overlay {
@@ -53,7 +58,7 @@ struct ThreadsListView: View {
                     description: "Start a conversation with your AI agent.",
                     actionLabel: "New Thread"
                 ) {
-                    createThread()
+                    createThread(category: .general)
                 }
             }
         }
@@ -94,8 +99,8 @@ struct ThreadsListView: View {
         }
     }
 
-    private func createThread() {
-        let thread = ThreadEntity(title: "New Thread")
+    private func createThread(category: ThreadCategory = .general) {
+        let thread = ThreadEntity(title: "New \(category.displayName) Thread", category: category.rawValue)
         modelContext.insert(thread)
         try? modelContext.save()
         navManager.threadsPath.append(AppDestination.thread(thread.persistentModelID))

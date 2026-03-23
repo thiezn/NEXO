@@ -41,7 +41,12 @@ struct MessageBubbleView: View {
     private var questionContent: some View {
         let sorted = message.sortedQuestions
         if sorted.count == 1, let question = sorted.first {
-            InlineQuestionView(question: question)
+            if question.isFlashcard {
+                FlashcardView(question: question)
+                    .padding(.horizontal)
+            } else {
+                InlineQuestionView(question: question)
+            }
         } else {
             QuestionCarouselView(questions: sorted)
         }

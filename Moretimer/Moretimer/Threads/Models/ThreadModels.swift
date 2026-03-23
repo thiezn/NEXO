@@ -15,6 +15,32 @@ enum MessageRole: String, Codable, Sendable {
     case assistant
 }
 
+// MARK: - Thread Category
+
+enum ThreadCategory: String, CaseIterable, Identifiable, Sendable {
+    case general = "General"
+    case work = "Work"
+    case personal = "Personal"
+    case research = "Research"
+    case creative = "Creative"
+    case learning = "Learning"
+
+    var id: String { rawValue }
+
+    var displayName: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .general: "bubble.left"
+        case .work: "briefcase"
+        case .personal: "person"
+        case .research: "magnifyingglass"
+        case .creative: "paintbrush"
+        case .learning: AppIcon.learning
+        }
+    }
+}
+
 // MARK: - Thread Entity
 
 @Model
@@ -38,6 +64,13 @@ final class ThreadEntity {
     }
 
     var messageCount: Int { messages.count }
+
+    var threadCategory: ThreadCategory? {
+        get { ThreadCategory(rawValue: category) }
+        set { if let newValue { category = newValue.rawValue } }
+    }
+
+    var isLearningThread: Bool { category == ThreadCategory.learning.rawValue }
 
     init(title: String, category: String = "General", isPinned: Bool = false) {
         self.title = title

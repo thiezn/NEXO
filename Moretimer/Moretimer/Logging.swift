@@ -17,6 +17,7 @@ extension Logger {
     nonisolated static let thread = Logger(subsystem: subsystem, category: "thread")
     nonisolated static let auth = Logger(subsystem: subsystem, category: "auth")
     nonisolated static let question = Logger(subsystem: subsystem, category: "question")
+    nonisolated static let learning = Logger(subsystem: subsystem, category: "learning")
 }
 
 //extension OSSignposter {
