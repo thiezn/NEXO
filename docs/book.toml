@@ -1,0 +1,16 @@
+[book]
+authors = ["Mathijs Mortimer <mathijs@mortimer.nl>"]
+language = "en"
+src = "src"
+title = "NEXO"
+description = "Neural Extension Operators"
+
+[preprocessor]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output]
+
+[output.html]
+additional-js = ["mermaid.min.js", "mermaid-init.js"]

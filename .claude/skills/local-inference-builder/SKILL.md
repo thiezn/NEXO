@@ -160,7 +160,7 @@ This isn't needed for autoregressive models (VL, LLM) where the whole model must
 ## Recommended Crate Structure
 
 ```
-tools/<tool_name>/
+nexo-tools/<tool_name>/
 ├── Cargo.toml
 └── src/
     ├── main.rs              # async tokio entry, command dispatch (pull/list/domain)

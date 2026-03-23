@@ -7,11 +7,11 @@ description: Use when creating a new CLI tool under tools/ in the nexo workspace
 
 ## When to use
 
-When building a new Rust CLI tool that will live under `tools/<tool_name>/`.
+When building a new Rust CLI tool that will live under `nexo-tools/<tool_name>/`.
 
 ## Scaffolding checklist
 
-1. Create `tools/<tool_name>/` with `src/main.rs`, `src/cli.rs`, and `Cargo.toml`
+1. Create `nexo-tools/<tool_name>/` with `src/main.rs`, `src/cli.rs`, and `Cargo.toml`
 2. Add the crate to the workspace `members` list in the root `Cargo.toml`
 3. Add domain-specific modules as needed (`src/lib.rs`, etc.)
 

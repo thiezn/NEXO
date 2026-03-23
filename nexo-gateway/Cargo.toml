@@ -1,0 +1,26 @@
+[package]
+name = "nexo-gateway"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "nexo"
+path = "src/main.rs"
+
+[dependencies]
+nexo-ws-schema = { path = "../shared/nexo-ws-schema" }
+nexo-tool-spec = { path = "../shared/nexo-tool-spec" }
+utl-helpers = { path = "../shared/utl-helpers" }
+sqlx = { version = "0", features = [
+    "runtime-tokio",
+    "tls-native-tls",
+    "sqlite",
+    "uuid",
+    "chrono",
+    "json",
+] }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0"
+
+[lints]
+workspace = true

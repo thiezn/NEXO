@@ -1,6 +1,6 @@
 # I seem to had ok success with the following prompt to add a new locla llm model:
 
-Use the /cli-tool-builder and /local-inference-builder skill to create the text-to-text crate @tools/text_to_text/src/main.rs
+Use the /cli-tool-builder and /local-inference-builder skill to create the text-to-text crate @nexo-tools/text_to_text/src/main.rs
 
 I want to support the Qwen3.5-9B-Instruct model.
 

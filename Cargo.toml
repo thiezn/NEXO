@@ -1,14 +1,19 @@
 [workspace]
 members = [
-    "gateway",
     "shared/local-inference-helpers",
     "shared/utl-helpers",
-    "tools/epub-extractor",
-    "tools/multimodal",
-    "tools/speech-to-text",
-    "tools/text-to-img",
-    "tools/text-to-speech",
-    "tools/game-extractor",
+    "nexo-tools/ai/multimodal",
+    "nexo-tools/ai/speech-to-text",
+    "nexo-tools/ai/text-to-img",
+    "nexo-tools/ai/text-to-speech",
+    "nexo-tools/plugins/epub-extractor",
+    "nexo-tools/plugins/game-extractor",
+    "shared/nexo-ws-schema",
+    "shared/nexo-ws-client",
+    "shared/nexo-tool-spec",
+    "nexo-gateway",
+    "nexo-node",
+    "nexo-client",
 ]
 
 resolver = "3"
