@@ -98,6 +98,10 @@ impl Coordinator {
         crate::registry::list_models(|name| self.is_model_loaded(name))
     }
 
+    pub fn model_mut(&mut self, name: &str) -> Option<&mut dyn crate::shared::model_traits::ModelInfo> {
+        self.slots.get_mut(name).map(|s| s.model_mut())
+    }
+
     pub fn total_memory_used(&self) -> u64 {
         self.slots
             .values()

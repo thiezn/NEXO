@@ -4,7 +4,7 @@ use crate::registry::{find_manifest, manifests_for_category, known_manifests};
 use crate::download::pull_model;
 use crate::config::AiConfig;
 
-pub async fn run(model: &str, _force: bool) -> Result<()> {
+pub async fn run(model: &str, force: bool) -> Result<()> {
     // If model is "all", pull all known manifests.
     // If model matches a category name (chat, tool, etc.), pull all for that category.
     // Otherwise, try to find manifest by name.
@@ -28,7 +28,7 @@ pub async fn run(model: &str, _force: bool) -> Result<()> {
 
     for manifest in manifests_to_pull {
         println!("pulling {} ({:.1} GB)...", manifest.name, manifest.size_gb);
-        let downloads = pull_model(manifest).await?;
+        let downloads = pull_model(manifest, force).await?;
         println!("  downloaded {} files for {}", downloads.len(), manifest.name);
     }
 

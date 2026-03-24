@@ -32,7 +32,8 @@ impl super::Coordinator {
         slot.model.load()?;
         let load_time_ms = load_start.elapsed().as_millis() as u64;
         let memory_bytes = slot.memory_estimate_bytes();
-        self.stats.record_model_loaded(model_name, load_time_ms, memory_bytes);
+        self.stats
+            .record_model_loaded(model_name, load_time_ms, memory_bytes);
 
         tracing::info!("loaded model '{}' in {}ms", model_name, load_time_ms);
         Ok(())
@@ -51,7 +52,7 @@ impl super::Coordinator {
         Ok(())
     }
 
-    pub fn load_startup_models(&mut self) -> Result<()> {
+    pub fn load_startup_categories(&mut self) -> Result<()> {
         let categories: Vec<ModelCategory> = self
             .config
             .startup_categories
@@ -62,11 +63,33 @@ impl super::Coordinator {
     }
 
     fn create_model_slot(&self, model_name: &str) -> Result<super::ModelSlot> {
-        // Factory -- dispatches to model constructors based on manifest family.
-        // Currently no models are implemented, so we return an error.
-        anyhow::bail!(
-            "model '{}' is not yet supported -- no model implementations available",
-            model_name
-        )
+        let manifest = find_manifest(model_name)
+            .ok_or_else(|| anyhow::anyhow!("unknown model '{model_name}'"))?;
+
+        let model_dir = crate::download::paths::model_storage_dir(model_name);
+        let categories = manifest.categories.clone();
+        let memory_bytes = (manifest.manifest.size_gb * 1_000_000_000.0) as u64;
+
+        let model: Box<dyn crate::shared::model_traits::ModelInfo> =
+            match manifest.manifest.family.as_str() {
+                "parler" => Box::new(crate::models::talk::parler::ParlerTtsModel::new(
+                    model_name.to_string(),
+                    memory_bytes,
+                    model_dir,
+                )),
+                "whisper" => Box::new(crate::models::listen::whisper::WhisperModel::new(
+                    model_name.to_string(),
+                    memory_bytes,
+                    model_dir,
+                )),
+                "flux" => Box::new(crate::models::imagine::flux::FluxModel::new(
+                    model_name.to_string(),
+                    memory_bytes,
+                    model_dir,
+                )),
+                other => anyhow::bail!("unsupported model family '{other}'"),
+            };
+
+        Ok(super::ModelSlot::new(model, categories))
     }
 }

@@ -25,14 +25,14 @@ pub async fn run(categories: Option<Vec<String>>) -> Result<()> {
         {
             tracing::warn!("failed to load some models: {e}");
         }
-    } else if let Err(e) = coordinator.load_startup_models() {
+    } else if let Err(e) = coordinator.load_startup_categories() {
         tracing::warn!("failed to load startup models: {e}");
     }
 
     // Show what's loaded.
     let loaded = coordinator.loaded_models();
     if loaded.is_empty() {
-        println!("no models loaded. Use /start models <category> to load models.");
+        println!("no models loaded. Use /start categories <category> to load models.");
     } else {
         println!("loaded models:");
         for (name, cats) in loaded {

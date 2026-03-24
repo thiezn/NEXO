@@ -23,6 +23,16 @@ pub trait ModelInfo: Send {
 
     /// Unload model weights, freeing memory.
     fn unload(&mut self);
+
+    // ── Category downcasts ─────────────────────────────────────────
+    // Override when the model supports a category. Default returns None.
+
+    fn as_chat(&mut self) -> Option<&mut dyn ChatModel> { None }
+    fn as_tool(&mut self) -> Option<&mut dyn ToolModel> { None }
+    fn as_image(&mut self) -> Option<&mut dyn ImageModel> { None }
+    fn as_listen(&mut self) -> Option<&mut dyn ListenModel> { None }
+    fn as_talk(&mut self) -> Option<&mut dyn TalkModel> { None }
+    fn as_imagine(&mut self) -> Option<&mut dyn ImagineModel> { None }
 }
 
 /// Text chat completion.

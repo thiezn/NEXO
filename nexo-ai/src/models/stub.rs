@@ -22,6 +22,7 @@ impl ModelInfo for StubModel {
     fn is_loaded(&self) -> bool { self.loaded }
     fn load(&mut self) -> Result<()> { self.loaded = true; Ok(()) }
     fn unload(&mut self) { self.loaded = false; }
+    fn as_chat(&mut self) -> Option<&mut dyn ChatModel> { Some(self) }
 }
 
 impl ChatModel for StubModel {

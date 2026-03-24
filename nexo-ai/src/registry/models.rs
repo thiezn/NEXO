@@ -1,5 +1,5 @@
 use super::manifest::known_manifests;
-use crate::download::paths::default_models_dir;
+use crate::download::paths::model_storage_dir;
 use crate::shared::types::ModelCategory;
 
 #[derive(Debug, Clone)]
@@ -16,7 +16,6 @@ pub struct ModelEntry {
 /// Build a list of all known models, checking download status and
 /// using the provided closure to determine if each model is currently loaded.
 pub fn list_models(is_loaded: impl Fn(&str) -> bool) -> Vec<ModelEntry> {
-    let models_dir = default_models_dir();
     known_manifests()
         .iter()
         .map(|m| {
@@ -27,7 +26,7 @@ pub fn list_models(is_loaded: impl Fn(&str) -> bool) -> Vec<ModelEntry> {
                 categories: m.categories.clone(),
                 size_gb: m.manifest.size_gb,
                 description: m.manifest.description.clone(),
-                is_downloaded: models_dir.join(name).exists(),
+                is_downloaded: model_storage_dir(name).exists(),
                 is_loaded: is_loaded(name),
             }
         })

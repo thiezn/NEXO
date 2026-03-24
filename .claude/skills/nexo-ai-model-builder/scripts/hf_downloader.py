@@ -6,8 +6,10 @@ from HuggingFace model repositories.
 
 Usage:
     python hf_downloader.py inspect <repo_id> [--filter PATTERN] [--sha256] [--pretty]
+    python hf_downloader.py tree <repo_id> [--pretty]
     python hf_downloader.py config <repo_id> [--file NAME] [--all] [--pretty]
     python hf_downloader.py manifest <repo_id> --files F [F ...] [--component-map K=V ...] [--pretty]
+    python hf_downloader.py autodetect <repo_id> [--pretty]
     python hf_downloader.py verify --manifest-json PATH [--pretty]
 
 Repo IDs are things like 'openai/whisper-large-v3'
@@ -20,7 +22,7 @@ import json
 import os
 import sys
 from argparse import ArgumentParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from huggingface_hub import HfApi, hf_hub_download
@@ -30,12 +32,33 @@ from huggingface_hub.utils import EntryNotFoundError, GatedRepoError, Repository
 
 
 def load_token() -> str | None:
-    token_path = Path(__file__).resolve().parent / "hugging_token.txt"
-    if token_path.exists():
-        token = token_path.read_text().strip()
+    # 1. Environment variable
+    if token := os.environ.get("HF_TOKEN", "").strip():
+        return token
+
+    # 2. Project root hugging_token.txt
+    project_root = Path(__file__).resolve().parents[3]
+    for name in ("hugging_token.txt", "hf_token.txt"):
+        token_path = project_root / name
+        if token_path.exists():
+            token = token_path.read_text().strip()
+            if token:
+                return token
+
+    # 3. ~/.nexo/hf_token.txt
+    home = Path.home()
+    nexo_token = home / ".nexo" / "hf_token.txt"
+    if nexo_token.exists():
+        token = nexo_token.read_text().strip()
         if token:
             return token
-    return os.environ.get("HF_TOKEN")
+
+    # 4. huggingface-cli cached token
+    try:
+        from huggingface_hub import HfFolder
+        return HfFolder.get_token()
+    except Exception:
+        return None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,21 +87,30 @@ def output_json(data: dict[str, Any], pretty: bool = False) -> None:
     sys.stdout.write("\n")
 
 
+def get_repo_info(api: HfApi, repo_id: str) -> Any:
+    """Fetch model info with clear error messages."""
+    try:
+        return api.model_info(repo_id, files_metadata=True)
+    except GatedRepoError:
+        output_json({
+            "error": f"Gated repo '{repo_id}' — set HF_TOKEN or request access at https://huggingface.co/{repo_id}",
+            "hint": "export HF_TOKEN=hf_... or place token in hugging_token.txt at project root",
+        })
+        sys.exit(1)
+    except RepositoryNotFoundError:
+        output_json({
+            "error": f"Repository '{repo_id}' not found",
+            "hint": f"Check the repo ID at https://huggingface.co/{repo_id}",
+        })
+        sys.exit(1)
+
+
 # ── inspect ──────────────────────────────────────────────────────────────────
 
 
 def cmd_inspect(args: Any) -> None:
-    token = load_token()
-    api = HfApi(token=token)
-
-    try:
-        info = api.model_info(args.repo_id, files_metadata=True)
-    except GatedRepoError:
-        output_json({"error": f"Gated repo '{args.repo_id}' — token required or access not granted"})
-        sys.exit(1)
-    except RepositoryNotFoundError:
-        output_json({"error": f"Repository '{args.repo_id}' not found"})
-        sys.exit(1)
+    api = HfApi(token=load_token())
+    info = get_repo_info(api, args.repo_id)
 
     gated = bool(info.gated)
     files = []
@@ -117,6 +149,51 @@ def cmd_inspect(args: Any) -> None:
             "total_size_human": format_human_size(total),
             "file_count": len(files),
             "files": files,
+        },
+        pretty=args.pretty,
+    )
+
+
+# ── tree ─────────────────────────────────────────────────────────────────────
+
+
+def cmd_tree(args: Any) -> None:
+    """Show repo directory structure with file counts and sizes per directory."""
+    api = HfApi(token=load_token())
+    info = get_repo_info(api, args.repo_id)
+
+    if not info.siblings:
+        output_json({"error": f"No files found in repo '{args.repo_id}'"})
+        sys.exit(1)
+
+    dirs: dict[str, dict[str, Any]] = {}
+    for sibling in info.siblings:
+        fname = sibling.rfilename
+        parts = PurePosixPath(fname)
+        parent = str(parts.parent) if str(parts.parent) != "." else "/"
+        size = sibling.size or 0
+
+        if parent not in dirs:
+            dirs[parent] = {"files": [], "total_bytes": 0}
+        dirs[parent]["files"].append({"name": parts.name, "size": size})
+        dirs[parent]["total_bytes"] += size
+
+    tree = []
+    for dir_path in sorted(dirs.keys()):
+        d = dirs[dir_path]
+        tree.append({
+            "directory": dir_path,
+            "file_count": len(d["files"]),
+            "total_size": format_human_size(d["total_bytes"]),
+            "total_bytes": d["total_bytes"],
+            "files": sorted(d["files"], key=lambda f: f["name"]),
+        })
+
+    output_json(
+        {
+            "repo_id": args.repo_id,
+            "gated": bool(info.gated),
+            "directories": tree,
         },
         pretty=args.pretty,
     )
@@ -161,11 +238,154 @@ def cmd_config(args: Any) -> None:
             configs[fname] = None
             errors.append(f"{fname}: not valid JSON")
 
-    result = {"repo_id": args.repo_id, "configs": configs}
+    result: dict[str, Any] = {"repo_id": args.repo_id, "configs": configs}
     if errors:
         result["_errors"] = errors
 
     output_json(result, pretty=args.pretty)
+
+
+# ── autodetect ───────────────────────────────────────────────────────────────
+
+# Patterns to auto-classify files into components
+COMPONENT_PATTERNS: list[tuple[str, str, list[str]]] = [
+    # (component_name, description, glob_patterns)
+    ("transformer", "Model weights (transformer/diffusion)", [
+        "*.safetensors",
+        "model*.safetensors",
+        "diffusion_pytorch_model*.safetensors",
+    ]),
+    ("text_encoder", "Text encoder weights", [
+        "text_encoder/*.safetensors",
+        "text_encoder/**/*.safetensors",
+    ]),
+    ("vae", "VAE weights", [
+        "vae/*.safetensors",
+        "vae/**/*.safetensors",
+    ]),
+    ("tokenizer", "Tokenizer files", [
+        "tokenizer.json",
+        "tokenizer/*.json",
+        "text_encoder/tokenizer.json",
+        "**/tokenizer.json",
+    ]),
+    ("config", "Configuration files", [
+        "config.json",
+        "generation_config.json",
+        "preprocessor_config.json",
+    ]),
+]
+
+
+def classify_file(fname: str) -> str | None:
+    """Try to classify a file into a component category."""
+    parts = PurePosixPath(fname)
+
+    # Subdirectory-based classification (most reliable)
+    if len(parts.parts) >= 2:
+        subdir = parts.parts[0]
+        ext = parts.suffix
+        if subdir == "transformer" and ext == ".safetensors":
+            return "transformer"
+        if subdir == "text_encoder" and ext == ".safetensors":
+            return "text_encoder"
+        if subdir == "vae" and ext == ".safetensors":
+            return "vae"
+        if subdir == "tokenizer" and parts.name == "tokenizer.json":
+            return "tokenizer"
+        if subdir == "text_encoder" and parts.name == "tokenizer.json":
+            return "tokenizer"
+
+    # Root-level classification
+    name = parts.name
+    if name == "tokenizer.json":
+        return "tokenizer"
+    if name == "config.json":
+        return "config"
+    if name.endswith(".safetensors") and parts.parent == PurePosixPath("."):
+        return "model"
+
+    return None
+
+
+def cmd_autodetect(args: Any) -> None:
+    """Auto-detect model components from repo file structure."""
+    api = HfApi(token=load_token())
+    info = get_repo_info(api, args.repo_id)
+
+    if not info.siblings:
+        output_json({"error": f"No files found in repo '{args.repo_id}'"})
+        sys.exit(1)
+
+    gated = bool(info.gated)
+    components: dict[str, list[dict[str, Any]]] = {}
+    unclassified = []
+
+    for sibling in sorted(info.siblings, key=lambda s: s.rfilename):
+        fname = sibling.rfilename
+        size = sibling.size or 0
+        sha256 = sibling.lfs.sha256 if sibling.lfs else None
+
+        category = classify_file(fname)
+        entry = {
+            "filename": fname,
+            "size_bytes": size,
+            "size_human": format_human_size(size),
+            "sha256": sha256,
+        }
+
+        if category:
+            components.setdefault(category, []).append(entry)
+        else:
+            unclassified.append(entry)
+
+    # Determine if sharded
+    for comp_name, comp_files in components.items():
+        safetensor_count = sum(1 for f in comp_files if f["filename"].endswith(".safetensors"))
+        for f in comp_files:
+            f["is_shard"] = safetensor_count > 1 and f["filename"].endswith(".safetensors")
+
+    # Compute totals
+    total_model_bytes = sum(
+        f["size_bytes"]
+        for files in components.values()
+        for f in files
+        if f["filename"].endswith(".safetensors")
+    )
+
+    # Generate suggested Rust component mapping
+    rust_suggestions = []
+    for comp_name, comp_files in sorted(components.items()):
+        safetensors = [f for f in comp_files if f["filename"].endswith(".safetensors")]
+        is_sharded = len(safetensors) > 1
+        rust_comp = "ModelShard" if is_sharded else "Model"
+        if comp_name == "tokenizer":
+            rust_comp = "Tokenizer"
+        elif comp_name == "config":
+            rust_comp = "Config"
+        elif comp_name in ("text_encoder", "vae") and not is_sharded:
+            rust_comp = comp_name.title().replace("_", "")
+        for f in comp_files:
+            rust_suggestions.append({
+                "filename": f["filename"],
+                "component": rust_comp,
+                "size_bytes": f["size_bytes"],
+                "sha256": f["sha256"],
+                "gated": gated,
+            })
+
+    output_json(
+        {
+            "repo_id": args.repo_id,
+            "gated": gated,
+            "total_model_size": format_human_size(total_model_bytes),
+            "total_model_bytes": total_model_bytes,
+            "components": components,
+            "unclassified": unclassified if unclassified else None,
+            "rust_manifest_suggestion": rust_suggestions,
+        },
+        pretty=args.pretty,
+    )
 
 
 # ── manifest ─────────────────────────────────────────────────────────────────
@@ -174,12 +394,7 @@ def cmd_config(args: Any) -> None:
 def cmd_manifest(args: Any) -> None:
     token = load_token()
     api = HfApi(token=token)
-
-    try:
-        info = api.model_info(args.repo_id, files_metadata=True)
-    except (GatedRepoError, RepositoryNotFoundError) as e:
-        output_json({"error": str(e)})
-        sys.exit(1)
+    info = get_repo_info(api, args.repo_id)
 
     if not info.siblings:
         output_json({"error": f"No files found in repo '{args.repo_id}'"})
@@ -188,8 +403,21 @@ def cmd_manifest(args: Any) -> None:
     gated = bool(info.gated)
     sibling_map = {s.rfilename: s for s in info.siblings}
 
+    # Expand glob patterns in --files
+    expanded_files = []
+    for pattern in args.files:
+        if any(c in pattern for c in "*?["):
+            matches = sorted(
+                s.rfilename for s in info.siblings if fnmatch.fnmatch(s.rfilename, pattern)
+            )
+            if not matches:
+                print(f"Warning: glob '{pattern}' matched no files", file=sys.stderr)
+            expanded_files.extend(matches)
+        else:
+            expanded_files.append(pattern)
+
     # Parse component map
-    component_map = {}
+    component_map: dict[str, str] = {}
     if args.component_map:
         for pair in args.component_map:
             if "=" not in pair:
@@ -203,7 +431,7 @@ def cmd_manifest(args: Any) -> None:
     rust_lines = []
     errors = []
 
-    for fname in args.files:
+    for fname in expanded_files:
         sibling = sibling_map.get(fname)
         if sibling is None:
             errors.append(f"{fname}: not found in repo")
@@ -214,9 +442,15 @@ def cmd_manifest(args: Any) -> None:
         if args.sha256 and sibling.lfs:
             sha256 = sibling.lfs.sha256
 
-        # Resolve component name from map or filename stem
+        # Resolve component: explicit map > auto-classify > filename stem
         stem = Path(fname).stem.split("-")[0].split(".")[0]
-        component_name = component_map.get(stem, stem.title())
+        component_name = component_map.get(stem)
+        if component_name is None:
+            auto = classify_file(fname)
+            if auto:
+                component_name = auto.title().replace("_", "")
+            else:
+                component_name = stem.title()
 
         files_data.append(
             {
@@ -229,14 +463,14 @@ def cmd_manifest(args: Any) -> None:
 
         rust_lines.append("ModelFile {")
         rust_lines.append(f"    component: {enum_name}::{component_name},")
-        rust_lines.append(f'    hf_repo: "{args.repo_id}".to_string(),')
+        rust_lines.append(f'    hf_repo: repo.clone(),')
         rust_lines.append(f'    hf_filename: "{fname}".to_string(),')
         rust_lines.append(f"    size_bytes: {format_rust_size(size)},")
         rust_lines.append(f"    gated: {'true' if gated else 'false'},")
         rust_lines.append(f"    sha256: {make_sha256_literal(sha256)},")
         rust_lines.append("},")
 
-    result = {
+    result: dict[str, Any] = {
         "repo_id": args.repo_id,
         "gated": gated,
         "files": files_data,
@@ -309,7 +543,7 @@ def cmd_verify(args: Any) -> None:
             actual_size = sibling.size or 0
             actual_sha = sibling.lfs.sha256 if sibling.lfs else None
 
-            r = {
+            r: dict[str, Any] = {
                 "hf_repo": repo_id,
                 "hf_filename": fname,
                 "status": "ok",
@@ -332,7 +566,7 @@ def cmd_verify(args: Any) -> None:
     passed = sum(1 for r in results if r["status"] == "ok")
     failed = len(results) - passed
 
-    result = {
+    result: dict[str, Any] = {
         "total_checked": len(results),
         "passed": passed,
         "failed": failed,
@@ -359,18 +593,26 @@ def main():
     p_inspect.add_argument("--filter", help="Glob pattern to filter files (e.g. '*.safetensors')")
     p_inspect.add_argument("--sha256", action="store_true", help="Include SHA-256 hashes from LFS")
 
+    # tree
+    p_tree = subparsers.add_parser("tree", parents=[shared], help="Show repo directory structure")
+    p_tree.add_argument("repo_id", help="HuggingFace repo")
+
     # config
     p_config = subparsers.add_parser("config", parents=[shared], help="Fetch config JSON files from a HF repo")
     p_config.add_argument("repo_id", help="HuggingFace repo")
     p_config.add_argument("--file", default="config.json", help="Config filename (default: config.json)")
     p_config.add_argument("--all", action="store_true", help="Fetch all standard config files")
 
+    # autodetect
+    p_auto = subparsers.add_parser("autodetect", parents=[shared], help="Auto-detect model components")
+    p_auto.add_argument("repo_id", help="HuggingFace repo")
+
     # manifest
     p_manifest = subparsers.add_parser("manifest", parents=[shared], help="Generate Rust ModelFile snippet")
     p_manifest.add_argument("repo_id", help="HuggingFace repo")
-    p_manifest.add_argument("--files", nargs="+", required=True, help="Files to include")
+    p_manifest.add_argument("--files", nargs="+", required=True, help="Files or glob patterns to include")
     p_manifest.add_argument("--component-map", nargs="+", help="Stem=Component pairs (e.g. model=Transformer)")
-    p_manifest.add_argument("--component-enum", default="Component", help="Rust enum name (default: Component)")
+    p_manifest.add_argument("--component-enum", default="AiComponent", help="Rust enum name (default: AiComponent)")
     p_manifest.add_argument("--sha256", action="store_true", help="Include SHA-256 hashes")
 
     # verify
@@ -384,6 +626,8 @@ def main():
         "config": cmd_config,
         "manifest": cmd_manifest,
         "verify": cmd_verify,
+        "tree": cmd_tree,
+        "autodetect": cmd_autodetect,
     }
     commands[args.command](args)
 

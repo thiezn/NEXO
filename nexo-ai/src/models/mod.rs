@@ -1,4 +1,5 @@
 pub mod stub;
+pub mod shared;
 pub mod chat;
 pub mod tool;
 pub mod image;

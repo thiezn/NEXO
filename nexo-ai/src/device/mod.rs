@@ -129,7 +129,6 @@ pub fn preflight_memory_check(component_name: &str, size_bytes: u64) -> anyhow::
         Some(a) if a > 0 => a,
         _ => return Ok(()),
     };
-    let free = free_system_memory_bytes();
 
     if size_bytes > available * 90 / 100 {
         anyhow::bail!(
@@ -141,14 +140,13 @@ pub fn preflight_memory_check(component_name: &str, size_bytes: u64) -> anyhow::
         );
     }
 
-    if let Some(f) = free
-        && size_bytes > f * 2
-    {
+    if size_bytes > available * 70 / 100 {
         tracing::warn!(
-            "{} ({}) exceeds free memory ({}), will reclaim inactive pages",
+            "{} ({}) will use {:.0}% of available memory ({})",
             component_name,
             fmt_gb(size_bytes),
-            fmt_gb(f),
+            size_bytes as f64 / available as f64 * 100.0,
+            fmt_gb(available),
         );
     }
 

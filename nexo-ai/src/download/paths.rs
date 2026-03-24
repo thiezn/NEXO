@@ -18,6 +18,13 @@ pub fn default_models_dir() -> PathBuf {
     DIR.clone()
 }
 
+/// Return the storage directory for a specific model.
+///
+/// Applies the same colon-to-dash sanitization as `storage_path` in manifest.rs.
+pub fn model_storage_dir(model_name: &str) -> PathBuf {
+    default_models_dir().join(model_name.replace(':', "-"))
+}
+
 /// Internal hf-hub cache directory: `<models_dir>/.hf-cache/`.
 /// Hidden from users; files get hardlinked to clean paths after download.
 #[cfg(feature = "download")]

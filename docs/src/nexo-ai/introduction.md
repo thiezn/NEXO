@@ -72,7 +72,7 @@ The generic `Component`/`ModelManifest`/`ModelFile` types in `download/manifest.
 The `coordinator/` module manages model lifecycle:
 
 - **`Coordinator`** — Holds a `HashMap<String, ModelSlot>` of loaded models, active defaults per category, config, and a `StatsCollector`.
-- **`load.rs`** — `load_model()` with memory preflight checks, timing instrumentation, and stats recording. `load_defaults()` and `load_startup_models()` for batch loading.
+- **`load.rs`** — `load_model()` with memory preflight checks, timing instrumentation, and stats recording. `load_defaults()` and `load_startup_categories()` for batch loading.
 - **`unload.rs`** — `unload_model()`, `unload_all()`, and `free_memory(bytes_needed)` which evicts largest models first.
 
 ## Statistics
@@ -113,7 +113,7 @@ Behind the `cli` feature flag. Three subcommands:
 | `/listen` | Record and transcribe audio |
 | `/imagine <prompt>` | Generate an image from text |
 | `/image <path> <prompt>` | Analyze an image with a prompt |
-| `/start models <c,c>` | Load models for categories |
+| `/start categories <c,c>` | Load models for categories |
 | `/config <key> <value>` | Change a config setting |
 | `/list` | Show loaded/available models |
 | `/stats [model]` | Show inference performance statistics |

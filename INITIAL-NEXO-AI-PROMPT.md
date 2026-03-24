@@ -72,7 +72,7 @@ This will list the currently supported models, downloaded models and their confi
 
 This will initialize the default loaded models (chat and tool) and then provide an interactive REPL for issuing commands to the models.
 
-/start models chat,tool
+/start categories chat,tool
 /config default-chat "model-name"
 /list models
 

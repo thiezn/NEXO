@@ -22,7 +22,7 @@ impl Default for AiConfig {
     fn default() -> Self {
         Self {
             defaults: HashMap::new(),
-            startup_categories: vec!["chat".to_string()],
+            startup_categories: vec!["chat".to_string(), "talk".to_string()],
             models: HashMap::new(),
         }
     }
@@ -90,7 +90,10 @@ mod tests {
     #[test]
     fn default_config_has_chat_startup() {
         let cfg = AiConfig::default();
-        assert_eq!(cfg.startup_categories, vec!["chat".to_string()]);
+        assert_eq!(
+            cfg.startup_categories,
+            vec!["chat".to_string(), "talk".to_string()]
+        );
     }
 
     #[test]
@@ -200,10 +203,7 @@ mod tests {
             Some("flux-schnell")
         );
         assert_eq!(parsed.model_settings("qwen3-8b").temperature, Some(0.7));
-        assert_eq!(
-            parsed.model_settings("flux-schnell").default_steps,
-            Some(4)
-        );
+        assert_eq!(parsed.model_settings("flux-schnell").default_steps, Some(4));
     }
 
     #[test]
@@ -211,7 +211,7 @@ mod tests {
         let toml_str = "";
         let parsed: AiConfig = toml::from_str(toml_str).unwrap();
         // Should fall back to defaults
-        assert_eq!(parsed.startup_categories, vec!["chat".to_string()]);
+        assert_eq!(parsed.startup_categories, vec!["chat".to_string(), "talk".to_string()]);
         assert!(parsed.defaults.is_empty());
     }
 

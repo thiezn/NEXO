@@ -232,7 +232,32 @@ async fn download_file<P: Progress + Clone + Send + Sync + 'static>(
 /// these to their domain-specific model paths struct.
 pub async fn pull_model<C: Component>(
     manifest: &ModelManifest<C>,
+    force: bool,
 ) -> Result<Vec<(C, PathBuf)>, DownloadError> {
+    let mdir = default_models_dir();
+    let mut downloads: Vec<(C, PathBuf)> = Vec::new();
+    let mut files_to_download = Vec::new();
+
+    for file in &manifest.files {
+        let clean_path = mdir.join(storage_path(manifest, file));
+        if !force
+            && std::fs::metadata(&clean_path).is_ok_and(|m| m.len() == file.size_bytes)
+        {
+            eprintln!(
+                "  skipping {} (already downloaded, {:.1} MB)",
+                file.hf_filename,
+                file.size_bytes as f64 / 1_000_000.0
+            );
+            downloads.push((file.component.clone(), clean_path));
+        } else {
+            files_to_download.push(file);
+        }
+    }
+
+    if files_to_download.is_empty() {
+        return Ok(downloads);
+    }
+
     let mut builder = ApiBuilder::from_env().with_cache_dir(hf_cache_dir());
     if let Some(token) = resolve_hf_token() {
         builder = builder.with_token(Some(token));
@@ -247,10 +272,7 @@ pub async fn pull_model<C: Component>(
     .unwrap_or_else(|_| ProgressStyle::default_bar())
     .progress_chars("━╸─");
 
-    let mdir = default_models_dir();
-    let mut downloads: Vec<(C, PathBuf)> = Vec::new();
-
-    for file in &manifest.files {
+    for file in files_to_download {
         let bar = multi.add(ProgressBar::new(file.size_bytes));
         bar.set_style(bar_style.clone());
         bar.set_message(truncate_filename(&file.hf_filename, msg_width));
