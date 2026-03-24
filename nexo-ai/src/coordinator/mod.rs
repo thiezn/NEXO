@@ -1,10 +1,10 @@
 pub mod load;
-pub mod registry;
 pub mod unload;
 
 use crate::config::AiConfig;
 use crate::shared::model_traits::ModelInfo;
 use crate::shared::types::ModelCategory;
+use crate::statistics::StatsCollector;
 use std::collections::HashMap;
 
 pub struct ModelSlot {
@@ -37,6 +37,7 @@ pub struct Coordinator {
     config: AiConfig,
     slots: HashMap<String, ModelSlot>,
     active_defaults: HashMap<ModelCategory, String>,
+    stats: StatsCollector,
 }
 
 impl Coordinator {
@@ -45,16 +46,17 @@ impl Coordinator {
             .defaults
             .iter()
             .filter_map(|(cat_str, model_name)| {
-                ModelCategory::all()
-                    .iter()
-                    .find(|c| c.as_str() == cat_str)
-                    .map(|c| (*c, model_name.clone()))
+                cat_str
+                    .parse::<ModelCategory>()
+                    .ok()
+                    .map(|c| (c, model_name.clone()))
             })
             .collect();
         Self {
             config,
             slots: HashMap::new(),
             active_defaults,
+            stats: StatsCollector::new(),
         }
     }
 
@@ -63,6 +65,13 @@ impl Coordinator {
     }
     pub fn config_mut(&mut self) -> &mut AiConfig {
         &mut self.config
+    }
+
+    pub fn stats(&self) -> &StatsCollector {
+        &self.stats
+    }
+    pub fn stats_mut(&mut self) -> &mut StatsCollector {
+        &mut self.stats
     }
 
     pub fn loaded_models(&self) -> Vec<(&str, &[ModelCategory])> {
@@ -79,6 +88,14 @@ impl Coordinator {
 
     pub fn set_default(&mut self, category: ModelCategory, model_name: String) {
         self.active_defaults.insert(category, model_name);
+    }
+
+    pub fn is_model_loaded(&self, name: &str) -> bool {
+        self.slots.get(name).is_some_and(|s| s.is_loaded())
+    }
+
+    pub fn list_models(&self) -> Vec<crate::registry::ModelEntry> {
+        crate::registry::list_models(|name| self.is_model_loaded(name))
     }
 
     pub fn total_memory_used(&self) -> u64 {

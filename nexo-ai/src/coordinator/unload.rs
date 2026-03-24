@@ -5,6 +5,7 @@ impl super::Coordinator {
     pub fn unload_model(&mut self, model_name: &str) -> Result<()> {
         if let Some(slot) = self.slots.get_mut(model_name) {
             slot.model.unload();
+            self.stats.record_model_unloaded(model_name);
             tracing::info!("unloaded model '{}'", model_name);
             Ok(())
         } else {
@@ -13,10 +14,14 @@ impl super::Coordinator {
     }
 
     pub fn unload_all(&mut self) {
+        let names: Vec<String> = self.slots.keys().cloned().collect();
         for slot in self.slots.values_mut() {
             if slot.is_loaded() {
                 slot.model.unload();
             }
+        }
+        for name in &names {
+            self.stats.record_model_unloaded(name);
         }
         self.slots.clear();
         tracing::info!("unloaded all models");

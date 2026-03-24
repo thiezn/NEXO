@@ -1,5 +1,6 @@
 use crate::coordinator::Coordinator;
 use crate::shared::types::ModelCategory;
+use crate::statistics::display as stats_display;
 use anyhow::Result;
 
 #[derive(Debug, PartialEq)]
@@ -13,6 +14,7 @@ pub enum ReplCommand {
     StartModels { categories: Vec<String> },
     Config { key: String, value: String },
     ListModels,
+    Stats { model: Option<String> },
     Help,
     Quit,
     Empty,
@@ -82,6 +84,14 @@ pub fn parse_repl_input(input: &str) -> ReplCommand {
                 ReplCommand::Unknown(input.to_string())
             }
         }
+        "/stats" => {
+            let model = if args.is_empty() {
+                None
+            } else {
+                Some(args.to_string())
+            };
+            ReplCommand::Stats { model }
+        }
         "/list" => ReplCommand::ListModels,
         "/help" | "/h" | "/?" => ReplCommand::Help,
         "/quit" | "/q" | "/exit" => ReplCommand::Quit,
@@ -109,6 +119,9 @@ pub fn run_repl(coordinator: &mut Coordinator) -> Result<()> {
                     }
                     ReplCommand::Help => print_help(),
                     ReplCommand::Empty => {}
+                    ReplCommand::Stats { model } => {
+                        handle_stats(coordinator, model.as_deref());
+                    }
                     ReplCommand::ListModels => handle_list_models(coordinator),
                     ReplCommand::StartModels { categories } => {
                         handle_start_models(coordinator, &categories);
@@ -161,6 +174,7 @@ fn print_help() {
     println!("  /start models <c,c>     Load models for categories");
     println!("  /config <key> <value>   Change a config setting");
     println!("  /list models            Show loaded/available models");
+    println!("  /stats [model]          Show inference performance statistics");
     println!("  /ping                   Test command to check if REPL is responsive");
     println!("  /help                   Show this help");
     println!("  /quit                   Exit the REPL");
@@ -205,12 +219,7 @@ fn handle_list_models(coordinator: &mut Coordinator) {
 fn handle_start_models(coordinator: &mut Coordinator, categories: &[String]) {
     let parsed: Vec<ModelCategory> = categories
         .iter()
-        .filter_map(|s| {
-            ModelCategory::all()
-                .iter()
-                .find(|c| c.as_str() == s)
-                .copied()
-        })
+        .filter_map(|s| s.parse::<ModelCategory>().ok())
         .collect();
     if parsed.is_empty() {
         println!("  no valid categories. Available: chat, tool, image, listen, talk, imagine");
@@ -224,11 +233,11 @@ fn handle_start_models(coordinator: &mut Coordinator, categories: &[String]) {
 fn handle_config(coordinator: &mut Coordinator, key: &str, value: &str) {
     // Handle config keys like "default-chat", "default-tool", etc.
     if let Some(cat_str) = key.strip_prefix("default-") {
-        if let Some(category) = ModelCategory::all().iter().find(|c| c.as_str() == cat_str) {
-            coordinator.set_default(*category, value.to_string());
+        if let Ok(category) = cat_str.parse::<ModelCategory>() {
+            coordinator.set_default(category, value.to_string());
             coordinator
                 .config_mut()
-                .set_default(*category, value.to_string());
+                .set_default(category, value.to_string());
             println!("  set default {} model to '{}'", cat_str, value);
         } else {
             println!("  unknown category: {cat_str}");
@@ -280,6 +289,23 @@ fn handle_image(coordinator: &Coordinator, path: &str, prompt: &str) {
         ModelCategory::Image,
         &format!("{} - {}", path, prompt),
     );
+}
+
+fn handle_stats(coordinator: &Coordinator, model: Option<&str>) {
+    match model {
+        None => {
+            let all = coordinator.stats().all_stats();
+            stats_display::print_stats_table(&all);
+        }
+        Some(name) => {
+            let stats: Vec<_> = ModelCategory::all()
+                .iter()
+                .filter_map(|cat| coordinator.stats().model_stats(name, *cat))
+                .collect();
+            let lifecycle: Vec<_> = coordinator.stats().lifecycle_history(name);
+            stats_display::print_model_detail(&stats, &lifecycle);
+        }
+    }
 }
 
 // Unit tests for parse_repl_input
@@ -387,6 +413,24 @@ mod tests {
         assert_eq!(parse_repl_input("/quit"), ReplCommand::Quit);
         assert_eq!(parse_repl_input("/q"), ReplCommand::Quit);
         assert_eq!(parse_repl_input("/exit"), ReplCommand::Quit);
+    }
+
+    #[test]
+    fn parse_stats_no_arg() {
+        assert_eq!(
+            parse_repl_input("/stats"),
+            ReplCommand::Stats { model: None }
+        );
+    }
+
+    #[test]
+    fn parse_stats_with_model() {
+        assert_eq!(
+            parse_repl_input("/stats qwen3-8b"),
+            ReplCommand::Stats {
+                model: Some("qwen3-8b".to_string())
+            }
+        );
     }
 
     #[test]

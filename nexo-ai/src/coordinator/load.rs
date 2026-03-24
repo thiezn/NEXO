@@ -1,5 +1,5 @@
 use crate::device;
-use crate::download::find_manifest;
+use crate::registry::find_manifest;
 use crate::shared::types::ModelCategory;
 use anyhow::Result;
 
@@ -27,9 +27,14 @@ impl super::Coordinator {
             .slots
             .get_mut(model_name)
             .ok_or_else(|| anyhow::anyhow!("model slot for '{}' disappeared", model_name))?;
-        slot.model.load()?;
 
-        tracing::info!("loaded model '{}'", model_name);
+        let load_start = std::time::Instant::now();
+        slot.model.load()?;
+        let load_time_ms = load_start.elapsed().as_millis() as u64;
+        let memory_bytes = slot.memory_estimate_bytes();
+        self.stats.record_model_loaded(model_name, load_time_ms, memory_bytes);
+
+        tracing::info!("loaded model '{}' in {}ms", model_name, load_time_ms);
         Ok(())
     }
 
@@ -51,12 +56,7 @@ impl super::Coordinator {
             .config
             .startup_categories
             .iter()
-            .filter_map(|s| {
-                ModelCategory::all()
-                    .iter()
-                    .find(|c| c.as_str() == s)
-                    .copied()
-            })
+            .filter_map(|s| s.parse::<ModelCategory>().ok())
             .collect();
         self.load_defaults(&categories)
     }

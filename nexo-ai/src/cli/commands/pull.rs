@@ -1,6 +1,7 @@
 use anyhow::Result;
 use crate::shared::types::ModelCategory;
-use crate::download::{find_manifest, manifests_for_category, known_manifests, pull_model};
+use crate::registry::{find_manifest, manifests_for_category, known_manifests};
+use crate::download::pull_model;
 use crate::config::AiConfig;
 
 pub async fn run(model: &str, _force: bool) -> Result<()> {

@@ -1,121 +1,141 @@
 # Nexo-AI
 
-Build the nexo-ai crate.
+The `nexo-ai` crate provides a unified, trait-based framework for running AI models locally on Apple Silicon. It manages model discovery, lifecycle, memory, and inference across six model categories while exposing a clean interface for both CLI and gateway consumers.
 
-I have provided folder scaffolding for the crate in @nexo-ai/src.
+## Model Categories
 
-## Abstraction interface for AI models
+| Category | Trait | Purpose |
+|----------|-------|---------|
+| Chat | `ChatModel` | Text-to-text conversation and summarization |
+| Tool | `ToolModel` | Structured output for tool calling |
+| Image | `ImageModel` | Image analysis with text prompts |
+| Listen | `ListenModel` | Speech-to-text transcription |
+| Talk | `TalkModel` | Text-to-speech synthesis |
+| Imagine | `ImagineModel` | Text-to-image generation |
 
-I want to create traits for different type of AI models. These traits will provide a structured interface into the actual models. This will allow me to introduce support for other models in the future without having to change the interface into the rest of my code.
+All model traits extend `ModelInfo`, which provides lifecycle (`load`/`unload`/`is_loaded`), metadata (`name`/`family`/`categories`), and memory estimation.
 
-Create the following traits in @nexo-ai/src/shared/model_traits.rs:
+## Module Structure
 
- ChatModel - text to text for chatting and summarization
- ToolModel - for taking text prompts and outputting structured data for tool calling
- ImageModel - for analyzing images with text prompts, and outputting structured or unstructured data
- TalkModel - for text to speech
- ListenModel - for speech to text
- ImagineModel - For generating images from text prompts, this is different from the image recognition with text prompts, which will be image model
-
-We need a way to expose to the user of the library which models are currently supported, and which ones are loaded in memory. This should be handled in the @nexo-ai/src/coordinator/registry.rs file.
-
-## LoRA fine tuning
-
-We will be fine tuning LoRA models for the ImagineModel and the ToolModel. The ChatModel will be a more general model that is not fine tuned, but can be used for general chatting and summarization. The ToolModel will be fine tuned to output structured data for tool calling, and the ImagineModel will be fine tuned to generate images from text prompts. Think about a good way to allow us to provide the LoRA model we want to use when calling ToolModel and ImagineModel. 
-
-A generic LoRA trait could help decouple this from actual models. I want to be able to define clear categories of LoRA types like 'Hero Image LoRA', 'Background Image LoRA', 'Object LoRA' for the ImagineModel, and 'Tool Calling LoRA' for the ToolModel. This way we can easily swap out different LoRA models for different use cases without having to change the interface into the rest of the code.
-
-Put the trait definition in @nexo-ai/src/shared/lora_traits.rs
-
-## In-Memory Model Management - Coordinator
-
-We will be running nexo-ai on a local macbook M1/M4, so we need to be very mindful of the memory constraints. We will implement a model management system that allows us to load and unload models from memory on demand. This will allow us to have multiple models available for different use cases without having to have them all loaded in memory at the same time.
-
-We should use the nexo-ai.toml config file to:
-    - define the default model per model category.
-    - define which model categories should be loaded by default on startup.
-
-The coordinator module will be providing an interface to load/unload models from memory, and to get the currently loaded model for each category. The coordinator will also handle the logic for switching between different LoRA models for the ToolModel and ImagineModel. It will 
-
-## CLI interface
-
-The nexa-ai CLI interface is behind a feature flag.
-
-the code for starting the cli is in @nexo-ai/src/cli/base.rs.
-
-It will have the following commands:
-
-```bash
-nexo-ai pull
-nexo-ai list
-nexo-ai start
+```
+nexo-ai/src/
+├── shared/           Model traits, LoRA traits, request/response types
+├── registry/         Model manifests, discovery, download status
+├── download/         Generic manifest types, HF download (feature-gated)
+├── coordinator/      Model lifecycle, memory management, slot system
+├── statistics/       Inference metrics, running aggregates, display
+├── config/           nexo-ai.toml loading/saving (AiConfig)
+├── models/           Model implementations per category + multipurpose
+│   ├── chat/
+│   ├── tool/
+│   ├── image/
+│   ├── listen/
+│   ├── talk/
+│   ├── imagine/
+│   └── multipurpose/
+├── device/           Metal GPU detection, memory FFI, preflight checks
+├── audio/            Shared audio preprocessing
+├── vision/           Shared image preprocessing and resizing
+├── cli/              CLI commands and REPL (behind "cli" feature)
+└── lib.rs
 ```
 
-### nexo-ai pull
+## Model Traits
 
-This will generate the .nexo/nexo-ai.toml configuration file with the default configuration for the models. It will look at the .nexo/local_models directory to see if the supported models are already downloaded, if not it will download them.
+Defined in `shared/model_traits.rs`. Each category has a dedicated trait:
 
-There is a --force flag to force re-downloading the given model or models.
+- **`ModelInfo`** — Base trait: `name()`, `family()`, `categories()`, `memory_estimate_bytes()`, `is_loaded()`, `load()`, `unload()`
+- **`ChatModel`** — `fn chat(&mut self, request: &ChatRequest) -> Result<ChatResponse>`
+- **`ToolModel`** — `fn call_tools(&mut self, request: &ToolCallRequest) -> Result<ToolCallResponse>`
+- **`ImageModel`** — `fn analyze_image(&mut self, request: &ImageAnalysisRequest) -> Result<ImageAnalysisResponse>`
+- **`ListenModel`** — `fn transcribe(&mut self, request: &ListenRequest) -> Result<ListenResponse>`
+- **`TalkModel`** — `fn synthesize(&mut self, request: &TalkRequest) -> Result<TalkResponse>`
+- **`ImagineModel`** — `fn imagine(&mut self, request: &ImagineRequest) -> Result<ImagineResponse>`
 
-```bash
-nexo-ai pull --force <model-name or model-type>
-```
+Request/response types are in `shared/types.rs`. Each response includes `inference_time_ms` for statistics tracking.
 
-- model-type can be chat, tool, image, talk, listen, imagine or all.
-- model-name can be the specific name of the model as supported in the tool.
+## LoRA Support
 
-### nexo-ai list
+`shared/lora_traits.rs` defines `LoraCapable<C>` for models that support adapter hot-swapping. Category enums (`ImageLoraCategory`, `ToolLoraCategory`) classify adapters, and `LoraAdapter` holds the weights path, trigger words, and default strength.
 
-This will list the currently supported models, downloaded models and their configuration. It will look at the .nexo/nexo-ai.toml configuration file to see which models are configured, and then check the .nexo/local_models directory to see if they are downloaded. It will output a table with the model name, type, and whether it is downloaded or not.
+## Registry
 
-### nexo-ai start
+The `registry/` module handles model discovery:
 
-This will initialize the default loaded models (chat and tool) and then provide an interactive REPL for issuing commands to the models.
+- **`manifest.rs`** — `AiComponent` enum (Model, Tokenizer, Config, Vae, etc.), `AiModelManifest` linking a generic `ModelManifest<AiComponent>` to its supported categories. `known_manifests()` returns the static list; `find_manifest()` and `manifests_for_category()` provide lookups.
+- **`models.rs`** — `ModelEntry` struct and `list_models()` function that checks download status against `~/.nexo/local_models/`.
 
-/start models chat,tool
-/config default-chat "model-name"
-/list models
+The generic `Component`/`ModelManifest`/`ModelFile` types in `download/manifest.rs` are reusable across crates.
 
+## Coordinator
 
-The code for the REPL is in @nexo-ai/src/cli/repl.rs. It will use the coordinator to get the currently loaded models and call the appropriate methods on them based on the user input. The REPL commands code should go into separate files per command in the @nexo-ai/src/cli/commands directory.
+The `coordinator/` module manages model lifecycle:
 
-### Model invocation commands
+- **`Coordinator`** — Holds a `HashMap<String, ModelSlot>` of loaded models, active defaults per category, config, and a `StatsCollector`.
+- **`load.rs`** — `load_model()` with memory preflight checks, timing instrumentation, and stats recording. `load_defaults()` and `load_startup_models()` for batch loading.
+- **`unload.rs`** — `unload_model()`, `unload_all()`, and `free_memory(bytes_needed)` which evicts largest models first.
 
-These commands will invoke the currently running models. The cli will print an error message if there is no model loaded for the given command.
+## Statistics
 
-/chat What is the weather like?
-/tool generate_image --prompt "a cute cat"
-/tool switch_model image
-/tool generate_image --prompt "a cute cat"
-/tool switch_model chat
-/chat What is the weather like?
-/talk tell me a story
-/listen "audio.wav"
+The `statistics/` module tracks inference performance:
 
-### Crates to use
+- **`metrics.rs`** — `InferenceRecord` with `InferenceDetail` enum (TextGeneration, Transcription, Synthesis, ImageGeneration). Each variant derives category-specific metrics (tok/s, RTF, x realtime, img/s + step/s).
+- **`aggregates.rs`** — `RunningStat` (Welford's online algorithm) for memory-efficient running statistics. `ModelStats` for per-(model, category) aggregates.
+- **`backend.rs`** — `StatsBackend` trait with `InMemoryBackend` (VecDeque ring buffer + two-level HashMap aggregates). Designed for future persistence backends.
+- **`display.rs`** — CLI table formatting for `/stats` output.
+- **`StatsCollector`** — Facade with convenience recording methods and a pluggable backend.
 
-- Candle-core and candle-nn for model loading and inference. Only with metal feature enabled, no cuda.
-- The @shared/utl-helpers crate for common CLI utilities and helpers. Use the /cli-tool-builder skill.
-- viuer for displaying images in the terminal
-- rodio for audio playback in the terminal (wraps around cpal and symphonia for audio decoding)
-- cpal for audio recording in the terminal.
-- symphonia and hound for audio processing in the terminal (for instance to convert input audio files to the correct format for the listen model, and to convert output audio from the talk model to a playable format)
-- hf-hub for downloading models from Hugging Face and managing the local model cache.
+## Configuration
 
-## Nexo Gateway integration
+`config/mod.rs` defines `AiConfig` stored at `~/.nexo/nexo-ai.toml`:
 
-The Nexo Gateway will be the main interface into the Nexo-AI crate. The gateway will use the traits defined in the Nexo-AI crate to call the appropriate models for different use cases. NEXO gateway will import the crate without the cli feature.
+- `defaults` — Default model name per category (e.g. `chat = "qwen3-8b"`)
+- `startup_categories` — Categories to pre-load on startup
+- `models` — Per-model overrides (dtype, max tokens, temperature, etc.)
 
-## Models layout
+Uses `utl-helpers` config utilities for TOML load/save.
 
-We will be adding and removing support for different models over time, so we need to have a clear layout for where the code for each model will go. We should have a separate module for each model in the @nexo-ai/src/models directory. Each module should implement the appropriate trait for the model category it belongs to. For instance, the chat models should implement the ChatModel trait, the tool models should implement the ToolModel trait, and so on.
+## CLI
 
-The @nexo-ai/src/models directory has a folder per model category, and then inside each folder there is a folder per model. For instance, @nexo-ai/src/models/chat/image/google-gemma3 is the folder for the Google Gemma 3 chat model.
+Behind the `cli` feature flag. Three subcommands:
 
-In the future we might want to use a model that can be used for multiple categories, for instance a model that can be used for both chatting and tool calling. In that case we can have the model implement multiple traits and then we can decide which trait to use when calling the model from the gateway. These models should go in the multipurpose folder, for instance @nexo-ai/src/models/multipurpose/model-name.
+- **`nexo-ai pull [model]`** — Download models from HuggingFace with progress bars and SHA-256 verification
+- **`nexo-ai list`** — Show supported/downloaded/loaded models
+- **`nexo-ai start`** — Load startup models and enter the interactive REPL
 
-## Final notes
+### REPL Commands
 
-- Add unit tests and run coverage report `cargo llvm-cov --no-cfg-coverage --skip-functions --package nexo-ai`
-- Run /simplify after everything is fully working to clean up the code and remove any unnecessary complexity.
-- We already have similar code in the @tools/ai folder, but I want a clean slate for the nexo-ai crate to avoid any technical debt from the old code. We can of course reuse some of the code and logic from the old code, but we should not copy and paste it directly into the new crate. We should take the time to refactor and improve the code as we go along.
+| Command | Description |
+|---------|-------------|
+| `/chat <text>` | Chat with the loaded chat model |
+| `/tool <text>` | Send a tool-calling request |
+| `/talk <text>` | Synthesize speech from text |
+| `/listen` | Record and transcribe audio |
+| `/imagine <prompt>` | Generate an image from text |
+| `/image <path> <prompt>` | Analyze an image with a prompt |
+| `/start models <c,c>` | Load models for categories |
+| `/config <key> <value>` | Change a config setting |
+| `/list` | Show loaded/available models |
+| `/stats [model]` | Show inference performance statistics |
+| `/help` | Show help |
+| `/quit` | Exit |
+
+Text without a `/` prefix is treated as `/chat` input.
+
+## Device & Memory
+
+The `device/` module handles Metal GPU detection and memory management via FFI calls to macOS APIs. `preflight_memory_check()` verifies sufficient memory before loading a model. `memory_status_string()` provides a human-readable summary of available GPU/system memory.
+
+## Adding New Models
+
+Each model implementation lives under `models/<category>/<model-name>/`. A model must:
+
+1. Implement `ModelInfo` + the appropriate category trait(s)
+2. Register in `registry/manifest.rs` with an `AiModelManifest`
+3. Wire into the `create_model_slot()` factory in `coordinator/load.rs`
+
+Models that serve multiple categories go under `models/multipurpose/`.
+
+## Gateway Integration
+
+`nexo-gateway` imports `nexo-ai` without the `cli` feature, using the coordinator and traits directly to dispatch inference requests received over WebSocket.
