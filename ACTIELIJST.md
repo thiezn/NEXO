@@ -2,6 +2,8 @@
 
 Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, vervolgens zit ik openclaw na te bouwen, image generation pipelines te bouwen, scummvm assets extraction, vision OS game aan het maken in rust en swift en epub image generator te fixen...).
 
+- paginated reading view is taking some compute. Make this hydrated so we can store already computed pages in SwiftData. It will need to recompute lokely when we change the font size.
+- Fix switching between pagination and continuous reading that it resets. need to anchor it in some way to the ground truth of the book, perhaps the specific paragraph or even sentence (since pagination splits it into multiple paragraphs?)
 - Build interface with bluetooth naar Rowan's piano zodat hij kan zien wat voor midi hij speelt, soort guitar hero iets?
 - Update the Swift UX claude skill to use progressive disclosre for the different components
 - Review my epub exporter. It now included file paths AND base64 data. I want to change this to only generate one or the other.
@@ -23,8 +25,8 @@ Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, ve
 - WebSocket interface so I can get my LoRA training pipeline working with review feedback.
 - Make Question cards showing an image, tap an answer and horizontally scroll through them and submit. Backend stores my results
 - Build some kind of storage system for NEXO. Use sqlite, and rust sqlx to do type safety. Have a production sqlite database and a dev database. PRoduction NEXO instance should run on my macbook M1, dev instance is on my M4. I'd like to be able to iterate quickly and in parallel so i might have to consider creating separate sql databases per feature. This could then avoid complicating types and structs into one big entangled thing?
-- gguf with lama apparently performs a lot better than candle on ML. Consider rebuilding using that.
-
+- gguf with lama apparently performs a lot better than candle on ML. Consider rebuilding using that. For now, lets first get my models doing some actual work and integrated into NEXO
+- for the local inference cli's, can we have a nice tokens/sec counter?
 
 ## Ok, a bit of focus, I want to get something done.
 

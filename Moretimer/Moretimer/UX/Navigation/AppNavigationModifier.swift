@@ -28,12 +28,16 @@ struct AppNavigationDestinations: ViewModifier {
                 case .book(let id):
                     if let book = modelContext.model(for: id) as? BookEntity {
                         BookReaderView(book: book)
+                        #if os(iOS)
                             .navigationTransition(.zoom(sourceID: id, in: namespace))
+                        #endif
                     }
                 case .thread(let id):
                     if let thread = modelContext.model(for: id) as? ThreadEntity {
                         ThreadDetailView(thread: thread)
+                        #if os(iOS)
                             .navigationTransition(.zoom(sourceID: id, in: namespace))
+                        #endif
                     }
                 }
             }

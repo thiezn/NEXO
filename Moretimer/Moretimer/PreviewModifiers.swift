@@ -19,6 +19,7 @@ struct PreviewAppEnvironment: PreviewModifier {
         let themeManager: ThemeManager
         let userProfileManager: UserProfileManager
         let learningService: LearningService
+        let nexoService: NexoService
     }
 
     @MainActor
@@ -29,7 +30,8 @@ struct PreviewAppEnvironment: PreviewModifier {
             errorManager: appContext.errorManager,
             themeManager: appContext.themeManager,
             userProfileManager: appContext.userProfileManager,
-            learningService: appContext.learningService
+            learningService: appContext.learningService,
+            nexoService: appContext.nexoService
         )
     }
 
@@ -42,5 +44,6 @@ struct PreviewAppEnvironment: PreviewModifier {
             .environment(context.errorManager)
             .environment(context.userProfileManager)
             .environment(context.learningService)
+            .environment(context.nexoService)
     }
 }

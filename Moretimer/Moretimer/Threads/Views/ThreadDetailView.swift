@@ -8,6 +8,7 @@ struct ThreadDetailView: View {
     @State private var messageText = ""
     @State private var showSettings = false
     @State private var showDeckPicker = false
+    @FocusState private var isInputFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,17 +24,16 @@ struct ThreadDetailView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom)
+            .simultaneousGesture(TapGesture().onEnded { isInputFocused = false })
 
             Divider()
 
-            MessageInputBar(text: $messageText) { content in
+            MessageInputBar(text: $messageText, isFocused: $isInputFocused) { content in
                 sendMessage(content)
             }
         }
         .navigationTitle(thread.title)
-        #if !os(macOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
+        .toolbarTitleDisplayMode(.inline)
         .toolbar {
             DetailToolbarContent(
                 primaryAction: MenuAction(title: "Settings", icon: AppIcon.settings) {

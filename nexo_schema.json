@@ -1,0 +1,320 @@
+{
+  "connect": {
+    "$defs": {
+      "ClientInfo": {
+        "description": "Client identity included in the connect handshake.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "platform": {
+            "$ref": "#/$defs/Platform"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "platform"
+        ],
+        "type": "object"
+      },
+      "DeviceInfo": {
+        "description": "Stable device identity for pairing.",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "Platform": {
+        "description": "Platform the client is running on.",
+        "enum": [
+          "macos",
+          "ios",
+          "linux",
+          "windows"
+        ],
+        "type": "string"
+      },
+      "Role": {
+        "description": "Connection role: user (control-plane client) or node (capability host).",
+        "enum": [
+          "user",
+          "node"
+        ],
+        "type": "string"
+      },
+      "Scope": {
+        "description": "Authorization scopes for user-role connections.",
+        "enum": [
+          "user.read",
+          "user.write",
+          "user.admin"
+        ],
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "Parameters for the `connect` handshake request.",
+    "properties": {
+      "capabilities": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "client": {
+        "$ref": "#/$defs/ClientInfo"
+      },
+      "commands": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "device": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/DeviceInfo"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "maxProtocol": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "minProtocol": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "role": {
+        "$ref": "#/$defs/Role"
+      },
+      "scopes": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Scope"
+        },
+        "type": "array"
+      },
+      "userAgent": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "minProtocol",
+      "maxProtocol",
+      "client",
+      "role"
+    ],
+    "title": "ConnectParams",
+    "type": "object"
+  },
+  "errors": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "Wire-format error payload included in error responses.",
+    "properties": {
+      "code": {
+        "type": "string"
+      },
+      "message": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "code",
+      "message"
+    ],
+    "title": "ErrorPayload",
+    "type": "object"
+  },
+  "events": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "Server-push event kinds.",
+    "enum": [
+      "tick",
+      "agent",
+      "presence",
+      "shutdown",
+      "heartbeat",
+      "cron"
+    ],
+    "title": "EventKind",
+    "type": "string"
+  },
+  "frames": {
+    "$defs": {
+      "ErrorPayload": {
+        "description": "Wire-format error payload included in error responses.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "EventKind": {
+        "description": "Server-push event kinds.",
+        "enum": [
+          "tick",
+          "agent",
+          "presence",
+          "shutdown",
+          "heartbeat",
+          "cron"
+        ],
+        "type": "string"
+      },
+      "Method": {
+        "description": "Available request methods in the gateway protocol.",
+        "enum": [
+          "connect",
+          "health",
+          "status",
+          "send",
+          "agent",
+          "system-presence",
+          "tools.catalog"
+        ],
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "Top-level WebSocket frame envelope.\n\n Wire format uses `\"type\"` as the discriminator tag:\n - `{\"type\":\"request\", \"id\":\"...\", \"method\":\"...\", \"params\":{...}}`\n - `{\"type\":\"response\", \"id\":\"...\", \"ok\":true, \"payload\":{...}}`\n - `{\"type\":\"event\", \"event\":\"...\", \"payload\":{...}}`",
+    "oneOf": [
+      {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/$defs/Method"
+          },
+          "params": true,
+          "type": {
+            "const": "request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ErrorPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "payload": true,
+          "type": {
+            "const": "response",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "ok"
+        ],
+        "type": "object"
+      },
+      {
+        "properties": {
+          "event": {
+            "$ref": "#/$defs/EventKind"
+          },
+          "payload": true,
+          "seq": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "stateVersion": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "type": {
+            "const": "event",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "event",
+          "payload"
+        ],
+        "type": "object"
+      }
+    ],
+    "title": "Frame"
+  },
+  "methods": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "Available request methods in the gateway protocol.",
+    "enum": [
+      "connect",
+      "health",
+      "status",
+      "send",
+      "agent",
+      "system-presence",
+      "tools.catalog"
+    ],
+    "title": "Method",
+    "type": "string"
+  }
+}

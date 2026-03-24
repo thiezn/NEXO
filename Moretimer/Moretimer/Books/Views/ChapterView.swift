@@ -8,7 +8,7 @@ struct ChapterView: View {
 
     var body: some View {
         Section {
-            ForEach(chapter.sortedParagraphs) { paragraph in
+            ForEach(chapter.displayParagraphs) { paragraph in
                 ParagraphView(
                     paragraph: paragraph,
                     fontSize: fontSize,

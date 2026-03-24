@@ -2,12 +2,15 @@ import SwiftUI
 
 struct AvatarView: View {
     let imageData: Data?
+    var cropData: AvatarCropData = .default
     var initials: String = "?"
     var size: CGFloat = 56
 
     var body: some View {
         if let data = imageData {
             imageFromData(data, contentMode: .fill)
+                .scaleEffect(cropData.scale)
+                .offset(x: cropData.offsetX * size, y: cropData.offsetY * size)
                 .frame(width: size, height: size)
                 .clipShape(.circle)
         } else if size <= 32 {

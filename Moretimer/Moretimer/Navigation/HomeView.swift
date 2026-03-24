@@ -41,9 +41,11 @@ struct HomeView: View {
             .padding(.vertical)
         }
         .navigationTitle("Home")
+        .toolbarTitleDisplayMode(.inline)
         .toolbar {
             TopLevelToolbarContent(
                 avatarData: userProfile.avatarImageData,
+                avatarCrop: userProfile.avatarCropData,
                 avatarInitials: userProfile.initials,
                 onAvatarTap: { navManager.presentSheet(.settings) }
             )
@@ -63,7 +65,7 @@ struct HomeView: View {
                     ForEach(recentBooks) { book in
                         NavigationLink(value: AppDestination.book(book.persistentModelID)) {
                             LargeCard(
-                                imageData: book.images.first?.imageData,
+                                imageData: book.coverImage?.imageData,
                                 placeholderIcon: AppIcon.bookFilled,
                                 subtext: book.author,
                                 title: book.title,
@@ -94,7 +96,7 @@ struct HomeView: View {
                         NavigationLink(value: AppDestination.thread(thread.persistentModelID)) {
                             SmallCard(
                                 imageData: nil,
-                                placeholderIcon: AppIcon.threads,
+                                placeholderIcon: thread.threadCategory?.systemImage ?? AppIcon.threads,
                                 title: thread.title,
                                 subtitle: thread.category,
                                 tint: themeColors.accent

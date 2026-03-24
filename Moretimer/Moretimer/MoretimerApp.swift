@@ -22,6 +22,7 @@ struct MoretimerApp: App {
     @State private var themeManager: ThemeManager
     @State private var userProfileManager: UserProfileManager
     @State private var learningService: LearningService
+    @State private var nexoService: NexoService
 
     init() {
         do {
@@ -31,6 +32,7 @@ struct MoretimerApp: App {
             self._themeManager = State(initialValue: context.themeManager)
             self._userProfileManager = State(initialValue: context.userProfileManager)
             self._learningService = State(initialValue: context.learningService)
+            self._nexoService = State(initialValue: context.nexoService)
         } catch {
             fatalError("Failed to initialize AppContext after store reset: \(error)")
         }
@@ -43,6 +45,7 @@ struct MoretimerApp: App {
                 .environment(themeManager)
                 .environment(userProfileManager)
                 .environment(learningService)
+                .environment(nexoService)
                 .preferredColorScheme(themeManager.preferredColorScheme)
         }
         .modelContainer(container)
@@ -57,12 +60,14 @@ struct WindowSceneView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(ErrorManager.self) private var errorManager
     @Environment(UserProfileManager.self) private var userProfile
+    @Environment(NexoService.self) private var nexoService
 
     var body: some View {
         MainTabView()
             .environment(navManager)
             .resolveThemeColors()
             .loadingErrorOverlay()
+            .task { await nexoService.connect() }
             .sheet(item: $navManager.currentSheet) { sheet in
                 switch sheet {
                 case .settings:
@@ -73,6 +78,7 @@ struct WindowSceneView: View {
                     .environment(themeManager)
                     .environment(errorManager)
                     .environment(userProfile)
+                    .environment(nexoService)
                 }
             }
     }

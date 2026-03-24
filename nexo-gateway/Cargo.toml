@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 nexo-ws-schema = { path = "../shared/nexo-ws-schema" }
 nexo-tool-spec = { path = "../shared/nexo-tool-spec" }
-utl-helpers = { path = "../shared/utl-helpers" }
+utl-helpers = { path = "../shared/utl-helpers", features = ["config", "interactive"] }
 sqlx = { version = "0", features = [
     "runtime-tokio",
     "tls-native-tls",
@@ -18,9 +18,19 @@ sqlx = { version = "0", features = [
     "uuid",
     "chrono",
     "json",
+    "migrate",
 ] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0"
+uuid = { version = "1", features = ["v7"] }
+chrono = "0"
+dirs = "6"
+http = "1"
 
 [lints]
 workspace = true

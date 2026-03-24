@@ -14,6 +14,7 @@ nonisolated enum UserProfileKeys {
     static let fullName = "appleUserFullName"
     static let email = "appleUserEmail"
     static let avatar = "userAvatarImage"
+    static let avatarCrop = "userAvatarCropData"
 }
 
 @MainActor @Observable
@@ -23,6 +24,7 @@ final class UserProfileManager {
     private(set) var fullName: String?
     private(set) var email: String?
     private(set) var avatarImageData: Data?
+    private(set) var avatarCropData: AvatarCropData
 
     var isSignedIn: Bool { userID != nil }
 
@@ -39,6 +41,12 @@ final class UserProfileManager {
         self.fullName = UserDefaults.standard.string(forKey: UserProfileKeys.fullName)
         self.email = UserDefaults.standard.string(forKey: UserProfileKeys.email)
         self.avatarImageData = UserDefaults.standard.data(forKey: UserProfileKeys.avatar)
+        if let cropJSON = UserDefaults.standard.data(forKey: UserProfileKeys.avatarCrop),
+           let crop = try? JSONDecoder().decode(AvatarCropData.self, from: cropJSON) {
+            self.avatarCropData = crop
+        } else {
+            self.avatarCropData = .default
+        }
     }
 
     func handleSignIn(_ result: Result<ASAuthorization, Error>) {
@@ -79,8 +87,9 @@ final class UserProfileManager {
         fullName = nil
         email = nil
         avatarImageData = nil
+        avatarCropData = .default
 
-        for key in [UserProfileKeys.userID, UserProfileKeys.fullName, UserProfileKeys.email, UserProfileKeys.avatar] {
+        for key in [UserProfileKeys.userID, UserProfileKeys.fullName, UserProfileKeys.email, UserProfileKeys.avatar, UserProfileKeys.avatarCrop] {
             UserDefaults.standard.removeObject(forKey: key)
         }
 
@@ -101,13 +110,36 @@ final class UserProfileManager {
         }
     }
 
-    func updateAvatar(_ imageData: Data) {
+    func updateFullName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        fullName = trimmed.isEmpty ? nil : trimmed
+        if let fullName {
+            UserDefaults.standard.set(fullName, forKey: UserProfileKeys.fullName)
+        } else {
+            UserDefaults.standard.removeObject(forKey: UserProfileKeys.fullName)
+        }
+    }
+
+    func updateAvatar(_ imageData: Data, crop: AvatarCropData = .default) {
         avatarImageData = imageData
+        avatarCropData = crop
         UserDefaults.standard.set(imageData, forKey: UserProfileKeys.avatar)
+        if let cropJSON = try? JSONEncoder().encode(crop) {
+            UserDefaults.standard.set(cropJSON, forKey: UserProfileKeys.avatarCrop)
+        }
+    }
+
+    func updateAvatarCrop(_ crop: AvatarCropData) {
+        avatarCropData = crop
+        if let cropJSON = try? JSONEncoder().encode(crop) {
+            UserDefaults.standard.set(cropJSON, forKey: UserProfileKeys.avatarCrop)
+        }
     }
 
     func removeAvatar() {
         avatarImageData = nil
+        avatarCropData = .default
         UserDefaults.standard.removeObject(forKey: UserProfileKeys.avatar)
+        UserDefaults.standard.removeObject(forKey: UserProfileKeys.avatarCrop)
     }
 }

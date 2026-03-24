@@ -17,7 +17,42 @@ async fn main() {
 
 async fn run(command: Command) -> anyhow::Result<()> {
     match command {
-        Command::Describe {
+        Command::Text {
+            prompt,
+            model,
+            max_tokens,
+            temperature,
+            top_p,
+            output,
+        } => {
+            let app_config = AppConfig::load()?;
+            let model_name = model.unwrap_or(app_config.default_model.clone());
+
+            let config = multimodal::TextGenerationConfig {
+                model: model_name,
+                prompt,
+                max_tokens,
+                temperature,
+                top_p,
+            };
+
+            let result = multimodal::generate_text(&config, &app_config)?;
+
+            if let Some(output_path) = output {
+                std::fs::write(&output_path, &result.text)?;
+                tracing::info!("output written to {output_path}");
+            } else {
+                println!("{}", result.text);
+            }
+
+            tracing::info!(
+                tokens = result.tokens_generated,
+                elapsed_ms = result.inference_time_ms,
+                "done"
+            );
+        }
+
+        Command::Image {
             image,
             prompt,
             model,
@@ -39,6 +74,44 @@ async fn run(command: Command) -> anyhow::Result<()> {
 
             let path = utl_helpers::resolve_path_str(&image)?;
             let result = multimodal::describe_image(&config, &path, &app_config)?;
+
+            if let Some(output_path) = output {
+                std::fs::write(&output_path, &result.text)?;
+                tracing::info!("output written to {output_path}");
+            } else {
+                println!("{}", result.text);
+            }
+
+            tracing::info!(
+                tokens = result.tokens_generated,
+                elapsed_ms = result.inference_time_ms,
+                "done"
+            );
+        }
+
+        Command::Video {
+            video,
+            prompt,
+            fps,
+            model,
+            max_tokens,
+            temperature,
+            top_p,
+            output,
+        } => {
+            let app_config = AppConfig::load()?;
+            let model_name = model.unwrap_or(app_config.default_model.clone());
+
+            let config = multimodal::DescriptionConfig {
+                model: model_name,
+                prompt,
+                max_tokens,
+                temperature,
+                top_p,
+            };
+
+            let path = utl_helpers::resolve_path_str(&video)?;
+            let result = multimodal::describe_video(&config, &path, fps, &app_config)?;
 
             if let Some(output_path) = output {
                 std::fs::write(&output_path, &result.text)?;

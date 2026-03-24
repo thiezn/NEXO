@@ -3,6 +3,7 @@ import SwiftUI
 struct MessageInputBar: View {
     @Binding var text: String
     var placeholder: String = "Message..."
+    var isFocused: FocusState<Bool>.Binding
     let onSend: (String) -> Void
 
     private var trimmedText: String {
@@ -12,6 +13,7 @@ struct MessageInputBar: View {
     var body: some View {
         HStack(spacing: 12) {
             TextField(placeholder, text: $text, axis: .vertical)
+                .focused(isFocused)
                 .lineLimit(1...5)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12)

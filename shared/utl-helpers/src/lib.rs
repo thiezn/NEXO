@@ -1,6 +1,8 @@
 #[cfg(feature = "config")]
 pub mod config;
 pub mod error;
+#[cfg(feature = "interactive")]
+pub mod interactive;
 #[cfg(feature = "output")]
 pub mod output;
 pub mod paths;

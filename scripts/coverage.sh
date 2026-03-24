@@ -10,8 +10,8 @@
 set -euo pipefail
 
 if [ "${1:-}" = "--html" ]; then
-    cargo cargo llvm-cov --workspace --html --no-cfg-coverage --output-dir target/coverage
+    cargo llvm-cov --workspace --html --no-cfg-coverage --output-dir target/coverage
     echo "Coverage report: target/coverage/html/index.html"
 else
-    cargo cargo llvm-cov --workspace --no-cfg-coverage --skip-functions
+    cargo llvm-cov --workspace --no-cfg-coverage --skip-functions
 fi

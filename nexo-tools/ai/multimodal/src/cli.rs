@@ -19,8 +19,35 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Generate text from a text prompt (no vision input)
+    Text {
+        /// The text prompt
+        #[arg(value_name = "PROMPT")]
+        prompt: String,
+
+        /// Model name (e.g. qwen3.5-9b)
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Maximum tokens to generate
+        #[arg(long, default_value_t = 512)]
+        max_tokens: usize,
+
+        /// Sampling temperature (0.0 = greedy)
+        #[arg(long, default_value_t = 0.0)]
+        temperature: f64,
+
+        /// Top-p (nucleus) sampling threshold
+        #[arg(long, default_value_t = 0.9)]
+        top_p: f64,
+
+        /// Output file path (stdout if not specified)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+
     /// Describe an image or ask a question about it
-    Describe {
+    Image {
         /// Path to the image file (PNG, JPEG, WebP)
         #[arg(value_name = "IMAGE")]
         image: String,
@@ -28,6 +55,41 @@ pub enum Command {
         /// Prompt/question about the image
         #[arg(short, long, default_value = "Describe this image in detail.")]
         prompt: String,
+
+        /// Model name (e.g. qwen3.5-9b)
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Maximum tokens to generate
+        #[arg(long, default_value_t = 512)]
+        max_tokens: usize,
+
+        /// Sampling temperature (0.0 = greedy)
+        #[arg(long, default_value_t = 0.0)]
+        temperature: f64,
+
+        /// Top-p (nucleus) sampling threshold
+        #[arg(long, default_value_t = 0.9)]
+        top_p: f64,
+
+        /// Output file path (stdout if not specified)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+
+    /// Describe a video or ask a question about it
+    Video {
+        /// Path to the video file
+        #[arg(value_name = "VIDEO")]
+        video: String,
+
+        /// Prompt/question about the video
+        #[arg(short, long, default_value = "Describe this video in detail.")]
+        prompt: String,
+
+        /// Frame sampling rate (frames per second to extract)
+        #[arg(long, default_value_t = 2.0)]
+        fps: f64,
 
         /// Model name (e.g. qwen3.5-9b)
         #[arg(short, long)]

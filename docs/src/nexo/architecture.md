@@ -21,7 +21,7 @@
 ### Clients (macOS / iOS app / CLI)
 
 - One WS connection per client.
-- Provide a user identity in `connect` and client identity; pairing is **user‑based** (role `user`), client identity if informational (e.g. `cli`, `iOS`, `macOS`)
+- Provide a user identity in `connect` and client identity; pairing is **user‑based** (`role: "user"`), client identity is informational (e.g. `cli`, `iOS`, `macOS`). The `role` field is the sole discriminator between users and nodes.
 - Send requests (`health`, `status`, `send`, `agent`, `system-presence`).
 - Subscribe to events (`tick`, `agent`, `presence`, `shutdown`).
 

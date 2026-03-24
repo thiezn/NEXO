@@ -1,8 +1,6 @@
 use anyhow::Context;
-use local_inference_helpers::candle_core::{DType, Device, Tensor};
 use std::path::Path;
 
-/// Default Qwen3.5 image preprocessing parameters.
 const IMAGE_MEAN: [f32; 3] = [0.5, 0.5, 0.5];
 const IMAGE_STD: [f32; 3] = [0.5, 0.5, 0.5];
 
@@ -22,8 +20,8 @@ impl Default for ImagePreprocessor {
             patch_size: 16,
             spatial_merge_size: 2,
             temporal_patch_size: 2,
-            min_pixels: 65536,     // from preprocessor_config shortest_edge
-            max_pixels: 16_777_216, // from preprocessor_config longest_edge
+            min_pixels: 65536,
+            max_pixels: 16_777_216,
             image_mean: IMAGE_MEAN,
             image_std: IMAGE_STD,
         }
@@ -31,7 +29,6 @@ impl Default for ImagePreprocessor {
 }
 
 impl ImagePreprocessor {
-    /// Load preprocessor params from a `preprocessor_config.json` file, falling back to defaults.
     pub fn from_config_file(path: Option<&Path>) -> anyhow::Result<Self> {
         let Some(path) = path else {
             return Ok(Self::default());
@@ -46,7 +43,6 @@ impl ImagePreprocessor {
 
         let mut config = Self::default();
 
-        // Support both flat min/max_pixels and nested size.shortest_edge/longest_edge
         if let Some(size) = json.get("size") {
             if let Some(v) = size.get("shortest_edge").and_then(|v| v.as_u64()) {
                 config.min_pixels = v as usize;
@@ -92,27 +88,25 @@ impl ImagePreprocessor {
         Ok(config)
     }
 
-    /// The factor that image dimensions must be divisible by.
-    fn grid_unit(&self) -> usize {
+    pub fn grid_unit(&self) -> usize {
         self.patch_size * self.spatial_merge_size
     }
 }
 
+/// Framework-agnostic preprocessed image data.
 pub struct PreprocessedImage {
-    /// Pixel values: shape `(total_patches, C * temporal_patch_size * patch_size * patch_size)`
-    pub pixel_values: Tensor,
-    /// Grid dimensions: shape `(1, 3)` = `[t, h_patches, w_patches]`
-    pub image_grid_thw: Tensor,
-    /// Number of image tokens after spatial merging
+    /// Flat pixel data: shape (total_patches, C * temporal_patch_size * patch_size * patch_size)
+    pub pixel_data: Vec<f32>,
+    pub total_patches: usize,
+    pub patch_dim: usize,
+    /// Grid: [t, h_patches, w_patches]
+    pub grid_thw: [u32; 3],
     pub num_image_tokens: usize,
 }
 
-/// Load, resize, normalize an image and produce tensors for Qwen3.5.
 pub fn preprocess_image(
     image_path: &Path,
     config: &ImagePreprocessor,
-    device: &Device,
-    dtype: DType,
 ) -> anyhow::Result<PreprocessedImage> {
     let img = image::open(image_path)
         .with_context(|| format!("failed to open image: {}", image_path.display()))?
@@ -129,11 +123,7 @@ pub fn preprocess_image(
         config.max_pixels,
     )?;
 
-    tracing::info!(
-        target_width = target_w,
-        target_height = target_h,
-        "resized dimensions"
-    );
+    tracing::info!(target_width = target_w, target_height = target_h, "resized dimensions");
 
     let resized = image::imageops::resize(
         &img,
@@ -142,9 +132,6 @@ pub fn preprocess_image(
         image::imageops::FilterType::Lanczos3,
     );
 
-    // Normalize and patchify in a single pass.
-    // PatchEmbed expects: (num_patches, C * temporal_patch_size * patch_size * patch_size)
-    // For a single image, all temporal slots contain the same frame.
     let pixels = resized.as_raw();
     let ps = config.patch_size;
     let tps = config.temporal_patch_size;
@@ -166,7 +153,6 @@ pub fn preprocess_image(
                         let val = pixels[(src_y * target_w + src_x) * 3 + c] as f32 / 255.0;
                         let normalized = (val - config.image_mean[c]) / config.image_std[c];
                         let spatial_offset = py * ps + px;
-                        // Write the same normalized value into each temporal slot
                         let channel_base = base + c * (tps * single_frame);
                         for t in 0..tps {
                             patch_data[channel_base + t * single_frame + spatial_offset] =
@@ -178,20 +164,6 @@ pub fn preprocess_image(
         }
     }
 
-    let pixel_values =
-        Tensor::from_vec(patch_data, (total_patches, patch_dim), device)?.to_dtype(dtype)?;
-
-    // grid_thw: (1, 3) = [temporal_patches, h_patches, w_patches]
-    // For a single image: temporal_patches = 1 (the temporal patching produces 1 temporal slice
-    // from 2 duplicated frames with temporal_patch_size=2)
-    let grid_thw = Tensor::from_vec(
-        vec![1u32, h_patches as u32, w_patches as u32],
-        (1, 3),
-        device,
-    )?;
-
-    // After spatial merging, the number of image tokens is:
-    // t * (h_patches / merge_size) * (w_patches / merge_size)
     let ms = config.spatial_merge_size;
     let num_image_tokens = (h_patches / ms) * (w_patches / ms);
 
@@ -202,17 +174,15 @@ pub fn preprocess_image(
     );
 
     Ok(PreprocessedImage {
-        pixel_values,
-        image_grid_thw: grid_thw,
+        pixel_data: patch_data,
+        total_patches,
+        patch_dim,
+        grid_thw: [1, h_patches as u32, w_patches as u32],
         num_image_tokens,
     })
 }
 
-/// Find optimal (height, width) that:
-/// - preserves aspect ratio as closely as possible
-/// - both dimensions divisible by `grid_unit`
-/// - total pixels between `min_pixels` and `max_pixels`
-fn smart_resize(
+pub fn smart_resize(
     orig_h: usize,
     orig_w: usize,
     grid_unit: usize,
@@ -222,7 +192,6 @@ fn smart_resize(
     let aspect = orig_h as f64 / orig_w as f64;
     let total = orig_h * orig_w;
 
-    // Scale to fit within bounds
     let (mut h, mut w) = if total < min_pixels {
         let scale = (min_pixels as f64 / total as f64).sqrt();
         ((orig_h as f64 * scale) as usize, (orig_w as f64 * scale) as usize)
@@ -233,15 +202,12 @@ fn smart_resize(
         (orig_h, orig_w)
     };
 
-    // Round to nearest grid_unit
     h = round_to_multiple(h, grid_unit);
     w = round_to_multiple(w, grid_unit);
 
-    // Ensure minimums
     h = h.max(grid_unit);
     w = w.max(grid_unit);
 
-    // If rounding pushed us over max_pixels, reduce the larger dimension
     while h * w > max_pixels {
         if h as f64 / w as f64 > aspect {
             h -= grid_unit;
@@ -250,7 +216,6 @@ fn smart_resize(
         }
     }
 
-    // Ensure we're still at minimum size
     h = h.max(grid_unit);
     w = w.max(grid_unit);
 

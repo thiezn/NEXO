@@ -1,6 +1,11 @@
 .DS_Store
 hugging_token.txt
 
+# mdBook
+docs/book
+mermaid-init.js
+mermaid.min.js
+
 # Large datasets
 /datasets/games
 /games

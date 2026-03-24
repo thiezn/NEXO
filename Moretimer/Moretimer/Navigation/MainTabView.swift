@@ -3,7 +3,6 @@ import SwiftData
 
 struct MainTabView: View {
     @Environment(NavigationManager.self) private var navManager
-    @Environment(UserProfileManager.self) private var userProfile
     @Environment(\.modelContext) private var modelContext
 
     @Query(filter: #Predicate<ThreadEntity> { $0.isRead == false })
@@ -13,16 +12,10 @@ struct MainTabView: View {
         @Bindable var navManager = navManager
 
         TabView(selection: $navManager.selectedTab) {
-            Tab(value: .home) {
+            Tab(AppTab.home.title, systemImage: AppTab.home.systemImage, value: .home) {
                 NavigationStack(path: $navManager.homePath) {
                     HomeView()
                         .appNavigationDestinations()
-                }
-            } label: {
-                Label {
-                    Text("Home")
-                } icon: {
-                    AvatarView(imageData: userProfile.avatarImageData, size: 24)
                 }
             }
 
@@ -49,7 +42,9 @@ struct MainTabView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        #if os(iOS)
         .tabBarMinimizeBehavior(.onScrollDown)
+        #endif
     }
 }
 

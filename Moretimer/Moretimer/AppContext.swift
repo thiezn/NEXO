@@ -29,6 +29,9 @@ struct AppContext {
 
         /// The Learning Service
         let learningService: LearningService
+
+        /// The NEXO Gateway Service
+        let nexoService: NexoService
     }
 
     /// Builds a shared application environment with all models registered.
@@ -93,12 +96,16 @@ struct AppContext {
         Logger.storage.log("Building AppContext LearningService")
         let learningService = LearningService(modelContext: container.mainContext)
 
+        Logger.storage.log("Building AppContext NexoService")
+        let nexoService = NexoService(errorManager: errorManager)
+
         return Context(
             container: container,
             errorManager: errorManager,
             themeManager: themeManager,
             userProfileManager: userProfileManager,
-            learningService: learningService
+            learningService: learningService,
+            nexoService: nexoService
         )
     }
 

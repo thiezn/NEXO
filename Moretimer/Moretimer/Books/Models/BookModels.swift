@@ -29,6 +29,13 @@ final class BookEntity {
         chapters.sorted { $0.index < $1.index }
     }
 
+    var coverImage: ImageRefEntity? {
+        images.first(where: {
+            $0.path.localizedCaseInsensitiveContains("cover") ||
+            $0.imageId.localizedCaseInsensitiveContains("cover")
+        }) ?? images.first
+    }
+
     init(
         title: String,
         author: String,
@@ -66,6 +73,18 @@ final class ChapterEntity {
 
     var sortedParagraphs: [ParagraphEntity] {
         paragraphs.sorted { $0.order < $1.order }
+    }
+
+    /// Paragraphs excluding the first one if it duplicates the chapter title.
+    var displayParagraphs: [ParagraphEntity] {
+        let sorted = paragraphs.sorted { $0.order < $1.order }
+        guard let first = sorted.first else { return sorted }
+        let firstText = normalizeWhitespace(first.fullText)
+        let titleText = normalizeWhitespace(title)
+        if firstText == titleText {
+            return Array(sorted.dropFirst())
+        }
+        return sorted
     }
 
     init(title: String, index: Int) {
@@ -198,6 +217,14 @@ enum BookReaderKeys {
     static let fontSize = "bookReaderFontSize"
     static let mode = "bookReaderMode"
     static let fontDesign = "bookReaderFontDesign"
+}
+
+// MARK: - Helpers
+
+nonisolated private func normalizeWhitespace(_ string: String) -> String {
+    string.components(separatedBy: .whitespacesAndNewlines)
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
 }
 
 // MARK: - Image from Data

@@ -25,8 +25,7 @@ Client → Gateway:
     "client": {
       "id": "cli",
       "version": "1.2.3",
-      "platform": "macos",
-      "mode": "user"
+      "platform": "macos"
     },
     "role": "user",
     "scopes": ["user.read", "user.write"],
@@ -65,8 +64,7 @@ Gateway → Client:
     "client": {
       "id": "rust-node",
       "version": "1.2.3",
-      "platform": "macos",
-      "mode": "node"
+      "platform": "macos"
     },
     "role": "node",
     "scopes": [],

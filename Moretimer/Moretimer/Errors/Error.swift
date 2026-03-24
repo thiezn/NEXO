@@ -29,6 +29,9 @@ enum AppError: LocalizedError, Sendable, Equatable {
     // Storage
     case storageFailed(String)
 
+    // NEXO Gateway
+    case nexoConnectionLost
+
     var errorDescription: String? {
         switch self {
         case .unknown(let msg): "An unexpected error occurred: \(msg)"
@@ -41,6 +44,7 @@ enum AppError: LocalizedError, Sendable, Equatable {
         case .signInCancelled: "Sign in was cancelled"
         case .credentialRevoked: "Your Apple ID credential has been revoked"
         case .storageFailed(let msg): "Storage error: \(msg)"
+        case .nexoConnectionLost: "Unable to connect to gateway. Please check your network connection or try again later."
         }
     }
 }

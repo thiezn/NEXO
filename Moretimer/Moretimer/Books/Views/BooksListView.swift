@@ -10,6 +10,7 @@ struct BooksListView: View {
     @State private var showFileImporter = false
     @State private var importError: String?
     @State private var showError = false
+    @State private var isEditing = false
 
     var body: some View {
         List {
@@ -21,18 +22,24 @@ struct BooksListView: View {
             }
             .onDelete(perform: deleteBooks)
         }
+        #if os(iOS)
+        .environment(\.editMode, Binding(
+            get: { isEditing ? .active : .inactive },
+            set: { isEditing = ($0 == .active) }
+        ))
+        #endif
         .navigationTitle("Library")
+        .toolbarTitleDisplayMode(.inline)
         .toolbar {
-            #if os(iOS)
-            ToolbarItem(placement: .navigationBarTrailing) {
-                EditButton()
-            }
-            #endif
             TopLevelToolbarContent(
                 avatarData: userProfile.avatarImageData,
+                avatarCrop: userProfile.avatarCropData,
                 avatarInitials: userProfile.initials,
                 onAvatarTap: { navManager.presentSheet(.settings) },
                 listSections: [[
+                    MenuAction(title: isEditing ? "Done Editing" : "Edit Library", icon: isEditing ? AppIcon.done : AppIcon.edit) {
+                        withAnimation { isEditing.toggle() }
+                    },
                     MenuAction(title: "Import Book", icon: AppIcon.importBook) {
                         showFileImporter = true
                     },

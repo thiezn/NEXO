@@ -56,6 +56,7 @@ struct SearchView: View {
         .toolbar {
             TopLevelToolbarContent(
                 avatarData: userProfile.avatarImageData,
+                avatarCrop: userProfile.avatarCropData,
                 avatarInitials: userProfile.initials,
                 onAvatarTap: { navManager.presentSheet(.settings) }
             )

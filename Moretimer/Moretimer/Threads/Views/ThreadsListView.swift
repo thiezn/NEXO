@@ -33,9 +33,11 @@ struct ThreadsListView: View {
             }
         }
         .navigationTitle("Threads")
+        .toolbarTitleDisplayMode(.inline)
         .toolbar {
             TopLevelToolbarContent(
                 avatarData: userProfile.avatarImageData,
+                avatarCrop: userProfile.avatarCropData,
                 avatarInitials: userProfile.initials,
                 onAvatarTap: { navManager.presentSheet(.settings) },
                 listSections: [

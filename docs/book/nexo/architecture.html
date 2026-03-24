@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-9ad0ee7a.js";
+            window.path_to_searchindex_js = "../searchindex-a9c2ee70.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-4a50eb69.js"></script>
@@ -195,7 +195,7 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
 <h3 id="clients-macos--ios-app--cli"><a class="header" href="#clients-macos--ios-app--cli">Clients (macOS / iOS app / CLI)</a></h3>
 <ul>
 <li>One WS connection per client.</li>
-<li>Provide a user identity in <code>connect</code> and client identity; pairing is <strong>user‑based</strong> (role <code>user</code>), client identity if informational (e.g. <code>cli</code>, <code>iOS</code>, <code>macOS</code>)</li>
+<li>Provide a user identity in <code>connect</code> and client identity; pairing is <strong>user‑based</strong> (<code>role: "user"</code>), client identity is informational (e.g. <code>cli</code>, <code>iOS</code>, <code>macOS</code>). The <code>role</code> field is the sole discriminator between users and nodes.</li>
 <li>Send requests (<code>health</code>, <code>status</code>, <code>send</code>, <code>agent</code>, <code>system-presence</code>).</li>
 <li>Subscribe to events (<code>tick</code>, <code>agent</code>, <code>presence</code>, <code>shutdown</code>).</li>
 </ul>

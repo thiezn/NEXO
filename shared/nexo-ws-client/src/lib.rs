@@ -1,14 +1,7 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod connection;
+pub mod error;
+pub mod handshake;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use connection::NexoConnection;
+pub use error::{ClientError, Result};
+pub use handshake::{default_user_connect_params, perform_handshake};

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct TopLevelToolbarContent: ToolbarContent {
     let avatarData: Data?
+    var avatarCrop: AvatarCropData = .default
     let avatarInitials: String
     let onAvatarTap: () -> Void
     var quickActions: [MenuAction] = []
@@ -29,7 +30,7 @@ struct TopLevelToolbarContent: ToolbarContent {
             Button {
                 onAvatarTap()
             } label: {
-                AvatarView(imageData: avatarData, initials: avatarInitials, size: 28)
+                AvatarView(imageData: avatarData, cropData: avatarCrop, initials: avatarInitials, size: 28)
             }
             .buttonStyle(.plain)
         }
