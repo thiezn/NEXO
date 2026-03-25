@@ -224,7 +224,9 @@ pub fn imagine(state: &mut LoadedState, request: &ImagineRequest) -> Result<Imag
     drop(transformer);
     drop(flux_state);
     drop(txt_emb);
+    let sync_start = Instant::now();
     device.synchronize()?;
+    tracing::info!("device sync in {:?}", sync_start.elapsed());
 
     // Phase 3: VAE decode
     tracing::info!("VAE decode");
@@ -265,10 +267,12 @@ fn seeded_randn(
     device: &Device,
     dtype: DType,
 ) -> Result<Tensor> {
-    let cpu_device = Device::Cpu;
-    let t = Tensor::randn(0f32, 1.0, shape, &cpu_device)?;
-    // Apply seed by multiplying with a deterministic value
-    // For proper seeding, use the candle random with seed
-    let _ = seed; // TODO: proper seeded RNG via candle
+    use rand::prelude::*;
+    use rand_distr::StandardNormal;
+
+    let elem_count: usize = shape.iter().product();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let data: Vec<f32> = (0..elem_count).map(|_| rng.sample(StandardNormal)).collect();
+    let t = Tensor::from_vec(data, shape, &Device::Cpu)?;
     Ok(t.to_dtype(dtype)?.to_device(device)?)
 }

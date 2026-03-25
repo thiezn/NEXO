@@ -3,6 +3,7 @@
 Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, vervolgens zit ik openclaw na te bouwen, image generation pipelines te bouwen, scummvm assets extraction, vision OS game aan het maken in rust en swift en epub image generator te fixen...).
 
 
+- Investigate Z-Image-turbo and especially its editing version: https://medium.com/@302.AI/z-image-turbo-vs-flux-2-dev-heres-what-we-found-e7a31327be40. Theres a whole site with z-image stuff https://z-image.me/en/resources/pixel-art-lora
 - Can i print out text tokens as they come in, seems to print it now at the end.
 - Implement KV Cache management. Probably easiest is to 'guess' the cache by incoming tokens, and clear them when it hits a certain threshold. I can also on a cron job clear stale sessions, or summarize sessions, store the summary in a session history and then clear it. Then as a client we can perhaps pull in old summaries to provide an initial context for the model. Check the KV_CACHE_MANAGEMENT.md for more details. It seems the prefill bit is where i can load things? It mentions this flow:  summary → clear/recreate → compact prefill. The best strategy is probably this approach, managing this outside the models in my rust code by counting incoming tokens:
 

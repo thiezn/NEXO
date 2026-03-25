@@ -1469,8 +1469,8 @@ fn handle_imagine(coordinator: &mut Coordinator, prompt: &str) {
 
     let request = crate::shared::types::ImagineRequest {
         prompt: prompt.to_string(),
-        width: settings.default_width.unwrap_or(1024),
-        height: settings.default_height.unwrap_or(1024),
+        width: settings.default_width.unwrap_or(512),
+        height: settings.default_height.unwrap_or(512),
         steps: settings.default_steps.unwrap_or(family_steps),
         guidance: settings.default_guidance.unwrap_or(family_guidance),
         seed: settings.seed.unwrap_or(0),
@@ -1513,8 +1513,16 @@ fn handle_imagine(coordinator: &mut Coordinator, prompt: &str) {
                 response.inference_time_ms,
             );
             for img in &response.images {
-                let path = std::env::temp_dir()
-                    .join(format!("nexo_imagine_{}.png", response.seed_used));
+                let output_dir = std::path::PathBuf::from("datasets/images/generated");
+                if let Err(e) = std::fs::create_dir_all(&output_dir) {
+                    println!("  error creating output dir: {e}");
+                    continue;
+                }
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let path = output_dir.join(format!("{timestamp}_{}.png", response.seed_used));
                 if let Err(e) = std::fs::write(&path, &img.data) {
                     println!("  error saving image: {e}");
                 } else {

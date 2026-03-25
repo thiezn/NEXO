@@ -28,6 +28,8 @@ candle-nn = "0"
 candle-transformers = "0"
 safetensors = "0"
 tokenizers = "0"
+rand = "0.9"
+rand_distr = "0.5"
 
 # Audio
 symphonia = { version = "0", features = [

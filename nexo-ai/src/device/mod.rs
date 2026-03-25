@@ -28,9 +28,11 @@ pub fn create_device(on_info: impl Fn(&str)) -> anyhow::Result<Device> {
 
 /// Determine the appropriate dtype for the given device.
 ///
-/// Always F32 — BF16 has precision issues on Apple GPU.
-pub fn gpu_dtype(_device: &Device) -> DType {
-    DType::F32
+/// F16 on GPU (Metal supports F16 natively, halves memory vs F32).
+/// BF16 is NOT used — it has precision issues on Apple GPU.
+/// F32 on CPU.
+pub fn gpu_dtype(device: &Device) -> DType {
+    if device.is_cpu() { DType::F32 } else { DType::F16 }
 }
 
 // ── macOS VM statistics FFI ─────────────────────────────────────────────────
@@ -210,6 +212,7 @@ mod tests {
 
     #[test]
     fn gpu_dtype_returns_f32_for_cpu() {
+        // CPU always gets F32 regardless of Metal availability
         assert_eq!(gpu_dtype(&Device::Cpu), DType::F32);
     }
 
