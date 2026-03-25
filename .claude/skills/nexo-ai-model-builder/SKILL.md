@@ -7,14 +7,14 @@ description: Use when adding a new AI model to the nexo-ai framework. Covers mod
 
 ## Model Categories
 
-| Category | Trait | Input → Output |
-|----------|-------|----------------|
-| Chat | `ChatModel` | text → text |
-| Tool | `ToolModel` | text + tool specs → structured tool calls |
-| Image | `ImageModel` | image + text → text |
-| Listen | `ListenModel` | audio → text |
-| Talk | `TalkModel` | text → audio |
-| Imagine | `ImagineModel` | text → image |
+| Category | Trait | Input -> Output |
+|----------|-------|-----------------|
+| Chat | `ChatModel` | text -> text |
+| Tool | `ToolModel` | text + tool specs -> structured tool calls |
+| Image | `ImageModel` | image + text -> text |
+| Listen | `ListenModel` | audio -> text |
+| Talk | `TalkModel` | text -> audio |
+| Imagine | `ImagineModel` | text -> image |
 
 Models serving multiple categories go under `models/multipurpose/`.
 
@@ -45,154 +45,79 @@ python3 $SCRIPT manifest <repo_id> \
   --component-enum AiComponent --sha256 --pretty
 ```
 
-**Token resolution order:** `HF_TOKEN` env var → `hugging_token.txt` at project root → `~/.nexo/hf_token.txt` → huggingface-cli cached token.
+**Token resolution order:** `HF_TOKEN` env var -> `hugging_token.txt` at project root -> `~/.nexo/hf_token.txt` -> huggingface-cli cached token.
 
-**Important:** Always run `tree` first to understand the repo layout. Model repos vary widely — some use subdirectories (`transformer/`, `vae/`, `text_encoder/`), others put everything at the root. The `autodetect` command will classify files into components and suggest Rust `AiComponent` mappings.
+Always run `tree` first. Model repos vary widely -- some use subdirectories, others put everything at the root. The `autodetect` command classifies files into components and suggests `AiComponent` mappings.
 
 ### 2. Create the model directory
 
 ```
 nexo-ai/src/models/<category>/<family>/
-├── mod.rs         # Model struct, ModelInfo impl, category trait impl
-├── config.rs      # Model-specific config types + variant enum if needed
-├── pipeline.rs    # Inference pipeline (load, run, sequential load-use-drop)
-├── sampling.rs    # Sampling/scheduling utilities (if applicable)
-├── transformer.rs # Core model architecture (if porting from Python)
-└── vae.rs         # VAE decoder (if applicable, e.g. image models)
+  mod.rs         # Model struct, ModelInfo impl, category trait impl
+  pipeline.rs    # Inference pipeline (load, generate, sequential load-use-drop)
+  template.rs    # ChatTemplate impl (if model supports chat/tool categories)
 ```
 
-### 3. Implement traits and register the model
+Follow existing models as the reference implementation. Read 2-3 existing models during planning.
 
-Read `references/trait_registration.md` for the detailed guide on implementing `ModelInfo` + category traits, defining `AiComponent` variants, adding manifest entries, and wiring into the coordinator factory.
+### 3. Implement traits and register
 
-### 4. Build the inference pipeline
+Follow this sequence -- read the existing code at each location:
 
-Read `references/inference_pipeline.md` for the detailed guide on Candle model loading, tokenizer setup, forward pass implementation, token sampling, device/dtype handling, and Metal considerations.
+1. **Implement `ModelInfo` + category trait(s)** -- See `shared/model_traits.rs` and any existing model's `mod.rs`
+2. **Add manifest** -- In `registry/manifest.rs`, add to `build_all_manifests()` and update the test assertion count
+3. **Wire coordinator factory** -- In `coordinator/load.rs`, add family match in `create_model_slot()`
+4. **Register module** -- In `models/<category>/mod.rs`, add `pub mod <family>`
 
-**Key patterns:**
-- **Sequential load-use-drop** for large models: load component → use → `drop()` → load next. This minimizes peak memory (critical for >10GB models on unified memory).
-- **Config inference from safetensor headers**: For model families with multiple variants (e.g. Flux Klein-4B vs Dev), read the first safetensor file's JSON header to discover architecture params rather than hardcoding for every variant.
-- **Avoid `Clone` on large structs**: Never derive `Clone` on structs holding model weights or GPU tensors — an accidental `.clone()` would silently duplicate gigabytes of data.
+### 4. Implement ChatTemplate (for chat/tool models)
 
-### 5. Record statistics
+Models that support Chat or Tool categories **must** implement the `ChatTemplate` trait. This is how the framework formats conversation history into model-specific prompt strings and parses tool calls from output.
 
-After inference completes, call the appropriate `StatsCollector` method on the coordinator:
+See [references/conversation_and_templates.md](references/conversation_and_templates.md) for the full `ChatTemplate` trait API, `ReasoningMode` mapping, and how `ConversationManager` handles multi-turn conversation in the REPL.
 
-```rust
-self.stats.record_text_generation(model_name, category, tokens_generated, inference_time_ms);
-self.stats.record_transcription(model_name, audio_duration_ms, inference_time_ms);
-self.stats.record_synthesis(model_name, samples_generated, sample_rate, inference_time_ms);
-self.stats.record_image_generation(model_name, images, steps, total_pixels, inference_time_ms);
-```
+See [references/tool_use.md](references/tool_use.md) for implementing `format_with_tools` and `parse_tool_calls`.
+
+**Key files:**
+- Trait definition: `shared/templates/mod.rs`
+- Existing implementations: `models/multipurpose/qwen3/template.rs`, `models/multipurpose/gemma3/template.rs`
+
+### 5. Build the inference pipeline
+
+Check `candle-transformers` first -- it includes many architectures (parler_tts, whisper, t5, flux, llama, qwen3, siglip, etc.). Use them directly before porting from Python.
+
+**Non-obvious patterns:**
+- **Sequential load-use-drop** for multi-component pipelines: load encoder -> use -> `drop()` -> load main model. Minimizes peak memory on unified memory.
+- **CPU-seeded RNG for diffusion**: Never use `Tensor::randn()` on Metal -- it's non-deterministic. Generate noise on CPU with a seeded RNG, then `.to_device()`.
+- **Avoid `Clone` on weight structs**: An accidental `.clone()` silently duplicates gigabytes.
 
 ### 6. Test
 
-Before working on a new model, add a integration test in `tests/model_inference.rs` that loads the model and runs a simple inference pass. 
+Add integration tests in `tests/model_inference.rs`. Use the existing macros (`listen_test!`, `talk_test!`, `imagine_test!`, `chat_test!`, `tool_test!`, `perf_test!`). Every model must have a performance test.
 
-Mark it with `#[ignore]`, `#[timeout]`, and `#[serial]` to prevent it from running in CI or alongside other tests. Use the integration test to validate you have correctly implemented the full pipeline.
+See [references/testing.md](references/testing.md) for the full testing guide including attribute ordering, download workflow, and test macros.
 
-## Shared Modules
+### 7. Performance validation
 
-Reusable modules live in `nexo-ai/src/models/shared/`. These are generic building blocks used across model families.
-
-### Encoders (`models/shared/encoders/`)
-
-| Module | Purpose | Used by |
-|--------|---------|---------|
-| `t5.rs` | Tokenize text → `[1, seq_len]` tensor via `encode_text()` | Parler TTS |
-| `dac.rs` | Decode DAC audio codes → PCM `Vec<f32>` via `decode_to_pcm()` | Parler TTS |
-| `qwen3.rs` | Qwen3 BF16 text encoder for Flux.2 image generation | Flux.2 |
-
-**When to add a shared encoder:** If the same encoder architecture (T5, CLIP, Qwen3, etc.) is used by multiple model families, extract it into `models/shared/encoders/`. Family-specific components stay in `models/<category>/<family>/`.
-
-### Weights (`models/shared/weights.rs`)
-
-`find_safetensor_files(model_dir)` — discovers `model.safetensors` (single) or `model-*.safetensors` (sharded) files in a directory. Use this when model files follow the standard `model*.safetensors` naming convention.
-
-**Note:** Some model families use different naming (e.g. `diffusion_pytorch_model.safetensors` for Flux). In those cases, use a local helper that matches `*.safetensors` instead.
-
-### Download Paths (`download/paths.rs`)
-
-`model_storage_dir(model_name)` — returns `~/.nexo/local_models/<sanitized-name>/` with colon-to-dash sanitization. Use this instead of manually joining `default_models_dir()` with the model name.
-
-## Category Dispatch
-
-Models implement `as_<category>()` overrides on `ModelInfo` to enable dynamic dispatch through `ModelSlot`:
-
-```rust
-// In your model's ModelInfo impl:
-fn as_talk(&mut self) -> Option<&mut dyn TalkModel> { Some(self) }
-```
-
-The coordinator uses these to downcast `Box<dyn ModelInfo>` to specific category trait objects at runtime.
-
-## Constructor Pattern
-
-Model constructors receive `memory_bytes` from the coordinator factory (which already has the manifest), rather than re-querying the registry:
-
-```rust
-// In coordinator/load.rs — factory passes memory_bytes:
-let memory_bytes = (manifest.manifest.size_gb * 1_000_000_000.0) as u64;
-Box::new(MyModel::new(model_name.to_string(), memory_bytes, model_dir))
-
-// In the model struct:
-pub fn new(name: String, memory_bytes: u64, model_dir: PathBuf) -> Self { ... }
-```
-
-## Manifest Pattern
-
-`ModelFile` is imported at the module level in `registry/manifest.rs`. Use a local `repo` variable to avoid repeating `hf_repo` strings per file entry:
-
-```rust
-fn my_model_manifest() -> AiModelManifest {
-    let repo = "org/model-name".to_string();
-    AiModelManifest {
-        manifest: ModelManifest { ..., files: vec![
-            ModelFile { hf_repo: repo.clone(), ... },
-            ModelFile { hf_repo: repo, ... },
-        ]},
-        ...
-    }
-}
-```
-
-Wire into `build_all_manifests()` and update the test assertion count.
-
-## REPL Handler Pattern
-
-When adding a new category's handler to the REPL (`cli/repl.rs`):
-- Use `coordinator.default_for(category)` to find the model — don't hardcode model names
-- Use `coordinator.config().model_settings(&model_name)` for per-model config overrides
-- Derive sensible defaults from the manifest family, not from model-specific types (avoid coupling the REPL to a specific model family's config module)
-- Use `coordinator.model_mut(&model_name)` + `as_<category>()` for dispatch
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `nexo-ai/src/shared/model_traits.rs` | `ModelInfo` + category trait definitions |
-| `nexo-ai/src/shared/types.rs` | Request/response types per category |
-| `nexo-ai/src/shared/lora_traits.rs` | `LoraCapable<C>` trait for adapter hot-swapping |
-| `nexo-ai/src/models/shared/encoders/` | Reusable encoder modules (T5, DAC, Qwen3) |
-| `nexo-ai/src/models/shared/weights.rs` | `find_safetensor_files()` for model loading |
-| `nexo-ai/src/download/paths.rs` | `model_storage_dir()`, `default_models_dir()` |
-| `nexo-ai/src/registry/manifest.rs` | `AiComponent` enum + manifest registry |
-| `nexo-ai/src/coordinator/load.rs` | `create_model_slot()` factory |
-| `nexo-ai/src/statistics/mod.rs` | `StatsCollector` recording methods |
-| `nexo-ai/src/device/` | Metal GPU detection, memory checks |
+See [references/performance.md](references/performance.md) for common Metal pitfalls (BF16, `.contiguous()`, debug builds) and the per-model checklist.
 
 ## Implemented Models
 
-| Model | Family | Category | HF Repo | Size |
-|-------|--------|----------|---------|------|
-| `parler-mini` | parler | Talk | `parler-tts/parler-tts-mini-v1.1` | 3.5 GB |
-| `parler-large` | parler | Talk | `parler-tts/parler-tts-large-v1` | 8.7 GB |
-| `whisper-large-v3` | whisper | Listen | `openai/whisper-large-v3` | 2.9 GB |
-| `whisper-large-v3-turbo` | whisper | Listen | `openai/whisper-large-v3-turbo` | 1.5 GB |
-| `distil-large-v3` | whisper | Listen | `distil-whisper/distil-large-v3` | 1.4 GB |
-| `flux-2-klein-4b` | flux | Imagine | `black-forest-labs/FLUX.2-klein-4b` | 22 GB |
-| `flux-2-klein-9b` | flux | Imagine | `black-forest-labs/FLUX.2-klein-9b` | 49 GB |
-| `flux-2-dev` | flux | Imagine | `black-forest-labs/FLUX.2-dev` | 165 GB |
+| Model | Family | Category | Size |
+|-------|--------|----------|------|
+| `parler-mini` | parler | Talk | 3.5 GB |
+| `parler-large` | parler | Talk | 8.7 GB |
+| `whisper-large-v3` | whisper | Listen | 2.9 GB |
+| `whisper-large-v3-turbo` | whisper | Listen | 1.5 GB |
+| `distil-large-v3` | whisper | Listen | 1.4 GB |
+| `flux-2-klein-4b` | flux | Imagine | 22 GB |
+| `flux-2-klein-9b` | flux | Imagine | 49 GB |
+| `flux-2-dev` | flux | Imagine | 165 GB |
+| `gemma-3-4b-it` | gemma3 | Chat, Tool, Image | ~8 GB |
+| `gemma-3-12b-it` | gemma3 | Chat, Tool, Image | ~24 GB |
+| `gemma-3-27b-it` | gemma3 | Chat, Tool, Image | ~54 GB |
+| `qwen3-4b-q5km` | qwen3 | Chat, Tool | ~2.9 GB |
+| `qwen3-30b-a3b-q4km` | qwen3 | Chat, Tool | ~18.6 GB |
+| `qwen3-vl-4b` | qwen3 | Chat, Tool, Image | ~3.0 GB |
 
 ## After Implementation
 

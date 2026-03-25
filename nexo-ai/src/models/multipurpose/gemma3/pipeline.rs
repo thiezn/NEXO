@@ -6,6 +6,7 @@ use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use serde::Deserialize;
 
+use crate::shared::templates::ChatTemplate;
 use crate::shared::types::*;
 
 use super::gemma3_model;
@@ -202,7 +203,8 @@ fn generate(
 // ── Chat ────────────────────────────────────────────────────────────────────
 
 pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatResponse> {
-    let prompt = template::format_chat_prompt(&request.messages);
+    let tmpl = template::Gemma3Template;
+    let prompt = tmpl.format_prompt(&request.messages, &crate::shared::templates::ReasoningMode::Disabled);
     let encoding = state
         .tokenizer
         .encode(prompt, false)
@@ -232,7 +234,8 @@ pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatRespon
 // ── Tool calling ────────────────────────────────────────────────────────────
 
 pub fn call_tools(state: &mut LoadedState, request: &ToolCallRequest) -> Result<ToolCallResponse> {
-    let prompt = template::format_tool_prompt(&request.messages, &request.tools);
+    let tmpl = template::Gemma3Template;
+    let prompt = tmpl.format_with_tools(&request.messages, &request.tools, &crate::shared::templates::ReasoningMode::Disabled);
     let encoding = state
         .tokenizer
         .encode(prompt, false)
@@ -259,7 +262,7 @@ pub fn call_tools(state: &mut LoadedState, request: &ToolCallRequest) -> Result<
         .decode(&generated, true)
         .map_err(|e| anyhow::anyhow!("tokenizer decode failed: {e}"))?;
 
-    let (tool_calls, reasoning) = template::parse_tool_response(&text);
+    let (tool_calls, reasoning) = tmpl.parse_tool_calls(&text);
 
     Ok(ToolCallResponse {
         tool_calls,

@@ -1,5 +1,6 @@
 .DS_Store
 hugging_token.txt
+.claude/settings.local.json
 
 # mdBook
 docs/book

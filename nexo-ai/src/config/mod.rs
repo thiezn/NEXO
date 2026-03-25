@@ -10,8 +10,10 @@ use crate::shared::types::ModelCategory;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiConfig {
-    /// Default model name for each category (e.g. `"chat" -> "qwen3-8b"`).
-    pub defaults: HashMap<String, String>,
+    /// Active model name for each category (e.g. `"chat" -> "qwen3-8b"`).
+    /// Persisted across sessions — loading/unloading updates this.
+    #[serde(alias = "defaults")]
+    pub active_models: HashMap<String, String>,
     /// Categories to pre-load on startup.
     pub startup_categories: Vec<String>,
     /// Per-model overrides keyed by model name.
@@ -21,7 +23,7 @@ pub struct AiConfig {
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
-            defaults: HashMap::new(),
+            active_models: HashMap::new(),
             startup_categories: vec!["chat".to_string(), "talk".to_string()],
             models: HashMap::new(),
         }
@@ -47,14 +49,25 @@ impl AiConfig {
         utl_helpers::config::save(self, &Self::config_path())
     }
 
-    /// Look up the default model name for a given category.
-    pub fn default_for(&self, category: ModelCategory) -> Option<&str> {
-        self.defaults.get(category.as_str()).map(String::as_str)
+    /// Look up the active model name for a given category.
+    pub fn active_model_for(&self, category: ModelCategory) -> Option<&str> {
+        self.active_models.get(category.as_str()).map(String::as_str)
     }
 
-    /// Set the default model name for a given category.
-    pub fn set_default(&mut self, category: ModelCategory, model: String) {
-        self.defaults.insert(category.as_str().to_string(), model);
+    /// Set the active model name for a given category.
+    pub fn set_active_model(&mut self, category: ModelCategory, model: String) {
+        self.active_models
+            .insert(category.as_str().to_string(), model);
+    }
+
+    /// Remove the active model for a given category.
+    pub fn remove_active_model(&mut self, category: ModelCategory) {
+        self.active_models.remove(category.as_str());
+    }
+
+    /// Remove all active model assignments.
+    pub fn clear_active_models(&mut self) {
+        self.active_models.clear();
     }
 
     /// Return the per-model settings, falling back to defaults if unset.
@@ -97,9 +110,9 @@ mod tests {
     }
 
     #[test]
-    fn default_config_has_empty_defaults() {
+    fn default_config_has_empty_active_models() {
         let cfg = AiConfig::default();
-        assert!(cfg.defaults.is_empty());
+        assert!(cfg.active_models.is_empty());
     }
 
     #[test]
@@ -109,25 +122,37 @@ mod tests {
     }
 
     #[test]
-    fn default_for_returns_none_when_unset() {
+    fn active_model_for_returns_none_when_unset() {
         let cfg = AiConfig::default();
-        assert!(cfg.default_for(ModelCategory::Chat).is_none());
-        assert!(cfg.default_for(ModelCategory::Imagine).is_none());
+        assert!(cfg.active_model_for(ModelCategory::Chat).is_none());
+        assert!(cfg.active_model_for(ModelCategory::Imagine).is_none());
     }
 
     #[test]
-    fn set_default_and_retrieve() {
+    fn set_active_model_and_retrieve() {
         let mut cfg = AiConfig::default();
-        cfg.set_default(ModelCategory::Chat, "qwen3-8b".to_string());
-        assert_eq!(cfg.default_for(ModelCategory::Chat), Some("qwen3-8b"));
+        cfg.set_active_model(ModelCategory::Chat, "qwen3-8b".to_string());
+        assert_eq!(cfg.active_model_for(ModelCategory::Chat), Some("qwen3-8b"));
     }
 
     #[test]
-    fn set_default_overwrites() {
+    fn set_active_model_overwrites() {
         let mut cfg = AiConfig::default();
-        cfg.set_default(ModelCategory::Chat, "old-model".to_string());
-        cfg.set_default(ModelCategory::Chat, "new-model".to_string());
-        assert_eq!(cfg.default_for(ModelCategory::Chat), Some("new-model"));
+        cfg.set_active_model(ModelCategory::Chat, "old-model".to_string());
+        cfg.set_active_model(ModelCategory::Chat, "new-model".to_string());
+        assert_eq!(
+            cfg.active_model_for(ModelCategory::Chat),
+            Some("new-model")
+        );
+    }
+
+    #[test]
+    fn remove_active_model() {
+        let mut cfg = AiConfig::default();
+        cfg.set_active_model(ModelCategory::Chat, "qwen3-8b".to_string());
+        assert!(cfg.active_model_for(ModelCategory::Chat).is_some());
+        cfg.remove_active_model(ModelCategory::Chat);
+        assert!(cfg.active_model_for(ModelCategory::Chat).is_none());
     }
 
     #[test]
@@ -161,14 +186,14 @@ mod tests {
         let toml_str = toml::to_string(&cfg).unwrap();
         let parsed: AiConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.startup_categories, cfg.startup_categories);
-        assert_eq!(parsed.defaults.len(), cfg.defaults.len());
+        assert_eq!(parsed.active_models.len(), cfg.active_models.len());
     }
 
     #[test]
     fn serde_roundtrip_with_values() {
         let mut cfg = AiConfig::default();
-        cfg.set_default(ModelCategory::Chat, "qwen3-8b".to_string());
-        cfg.set_default(ModelCategory::Imagine, "flux-schnell".to_string());
+        cfg.set_active_model(ModelCategory::Chat, "qwen3-8b".to_string());
+        cfg.set_active_model(ModelCategory::Imagine, "flux-schnell".to_string());
         cfg.models.insert(
             "qwen3-8b".to_string(),
             ModelSettings {
@@ -197,9 +222,12 @@ mod tests {
         let toml_str = toml::to_string(&cfg).unwrap();
         let parsed: AiConfig = toml::from_str(&toml_str).unwrap();
 
-        assert_eq!(parsed.default_for(ModelCategory::Chat), Some("qwen3-8b"));
         assert_eq!(
-            parsed.default_for(ModelCategory::Imagine),
+            parsed.active_model_for(ModelCategory::Chat),
+            Some("qwen3-8b")
+        );
+        assert_eq!(
+            parsed.active_model_for(ModelCategory::Imagine),
             Some("flux-schnell")
         );
         assert_eq!(parsed.model_settings("qwen3-8b").temperature, Some(0.7));
@@ -212,7 +240,7 @@ mod tests {
         let parsed: AiConfig = toml::from_str(toml_str).unwrap();
         // Should fall back to defaults
         assert_eq!(parsed.startup_categories, vec!["chat".to_string(), "talk".to_string()]);
-        assert!(parsed.defaults.is_empty());
+        assert!(parsed.active_models.is_empty());
     }
 
     #[test]

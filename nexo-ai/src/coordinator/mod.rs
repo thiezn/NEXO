@@ -36,14 +36,14 @@ impl ModelSlot {
 pub struct Coordinator {
     config: AiConfig,
     slots: HashMap<String, ModelSlot>,
-    active_defaults: HashMap<ModelCategory, String>,
+    active_models: HashMap<ModelCategory, String>,
     stats: StatsCollector,
 }
 
 impl Coordinator {
     pub fn new(config: AiConfig) -> Self {
-        let active_defaults = config
-            .defaults
+        let active_models = config
+            .active_models
             .iter()
             .filter_map(|(cat_str, model_name)| {
                 cat_str
@@ -55,7 +55,7 @@ impl Coordinator {
         Self {
             config,
             slots: HashMap::new(),
-            active_defaults,
+            active_models,
             stats: StatsCollector::new(),
         }
     }
@@ -82,12 +82,36 @@ impl Coordinator {
             .collect()
     }
 
-    pub fn default_for(&self, category: ModelCategory) -> Option<&str> {
-        self.active_defaults.get(&category).map(String::as_str)
+    pub fn loaded_model_count(&self) -> usize {
+        self.slots.values().filter(|s| s.is_loaded()).count()
     }
 
-    pub fn set_default(&mut self, category: ModelCategory, model_name: String) {
-        self.active_defaults.insert(category, model_name);
+    pub fn active_model_for(&self, category: ModelCategory) -> Option<&str> {
+        self.active_models.get(&category).map(String::as_str)
+    }
+
+    pub fn set_active_model(&mut self, category: ModelCategory, model_name: String) {
+        self.active_models.insert(category, model_name.clone());
+        self.config.set_active_model(category, model_name);
+        if let Err(e) = self.config.save() {
+            tracing::warn!("failed to persist config: {e}");
+        }
+    }
+
+    pub fn remove_active_model(&mut self, category: ModelCategory) {
+        self.active_models.remove(&category);
+        self.config.remove_active_model(category);
+        if let Err(e) = self.config.save() {
+            tracing::warn!("failed to persist config: {e}");
+        }
+    }
+
+    pub fn clear_active_models(&mut self) {
+        self.active_models.clear();
+        self.config.clear_active_models();
+        if let Err(e) = self.config.save() {
+            tracing::warn!("failed to persist config: {e}");
+        }
     }
 
     pub fn is_model_loaded(&self, name: &str) -> bool {
@@ -117,49 +141,43 @@ mod tests {
     use super::*;
     use crate::models::stub::StubModel;
 
-    fn config_with_defaults() -> AiConfig {
+    fn config_with_active_models() -> AiConfig {
         let mut config = AiConfig::default();
         config
-            .defaults
+            .active_models
             .insert("chat".to_string(), "test-chat".to_string());
         config
-            .defaults
+            .active_models
             .insert("image".to_string(), "test-image".to_string());
         config
     }
 
     #[test]
-    fn new_coordinator_parses_defaults() {
-        let coord = Coordinator::new(config_with_defaults());
-        assert_eq!(coord.active_defaults.len(), 2);
+    fn new_coordinator_parses_active_models() {
+        let coord = Coordinator::new(config_with_active_models());
+        assert_eq!(coord.active_models.len(), 2);
         assert_eq!(
-            coord.active_defaults.get(&ModelCategory::Chat).unwrap(),
+            coord.active_models.get(&ModelCategory::Chat).unwrap(),
             "test-chat"
         );
         assert_eq!(
-            coord.active_defaults.get(&ModelCategory::Image).unwrap(),
+            coord.active_models.get(&ModelCategory::Image).unwrap(),
             "test-image"
         );
     }
 
     #[test]
-    fn default_for_returns_correct_model() {
-        let coord = Coordinator::new(config_with_defaults());
-        assert_eq!(coord.default_for(ModelCategory::Chat), Some("test-chat"));
-        assert_eq!(coord.default_for(ModelCategory::Image), Some("test-image"));
-        assert_eq!(coord.default_for(ModelCategory::Talk), None);
-    }
-
-    #[test]
-    fn set_default_updates_active_default() {
-        let mut coord = Coordinator::new(AiConfig::default());
-        assert!(coord.default_for(ModelCategory::Chat).is_none());
-
-        coord.set_default(ModelCategory::Chat, "new-model".to_string());
-        assert_eq!(coord.default_for(ModelCategory::Chat), Some("new-model"));
-
-        coord.set_default(ModelCategory::Chat, "newer-model".to_string());
-        assert_eq!(coord.default_for(ModelCategory::Chat), Some("newer-model"));
+    fn active_model_for_returns_correct_model() {
+        let coord = Coordinator::new(config_with_active_models());
+        assert_eq!(
+            coord.active_model_for(ModelCategory::Chat),
+            Some("test-chat")
+        );
+        assert_eq!(
+            coord.active_model_for(ModelCategory::Image),
+            Some("test-image")
+        );
+        assert_eq!(coord.active_model_for(ModelCategory::Talk), None);
     }
 
     #[test]

@@ -33,6 +33,7 @@ pub trait ModelInfo: Send {
     fn as_listen(&mut self) -> Option<&mut dyn ListenModel> { None }
     fn as_talk(&mut self) -> Option<&mut dyn TalkModel> { None }
     fn as_imagine(&mut self) -> Option<&mut dyn ImagineModel> { None }
+    fn as_embed(&mut self) -> Option<&mut dyn EmbedModel> { None }
 }
 
 /// Text chat completion.
@@ -63,4 +64,9 @@ pub trait TalkModel: ModelInfo {
 /// Text-to-image generation.
 pub trait ImagineModel: ModelInfo {
     fn imagine(&mut self, request: &ImagineRequest) -> Result<ImagineResponse>;
+}
+
+/// Text embedding.
+pub trait EmbedModel: ModelInfo {
+    fn embed(&mut self, request: &EmbedRequest) -> Result<EmbedResponse>;
 }

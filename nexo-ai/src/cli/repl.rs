@@ -1,5 +1,6 @@
 use crate::coordinator::Coordinator;
 use crate::registry::{find_manifest, known_manifests};
+use crate::shared::templates::conversation::ConversationManager;
 use crate::shared::types::{ChatMessage, ChatRole, ModelCategory};
 use crate::statistics::display as stats_display;
 use anyhow::Result;
@@ -19,15 +20,17 @@ pub enum ReplCommand {
     Listen { file: Option<String> },
     Imagine { prompt: String },
     Image { path: String, prompt: String },
-    StartCategories { categories: Vec<String> },
-    StartModels { models: Vec<String> },
-    StopModels { models: Vec<String> },
-    StopCategories { categories: Vec<String> },
-    StopAll,
+    Embed { text: String },
+    LoadCategories { categories: Vec<String> },
+    LoadModels { models: Vec<String> },
+    UnloadModels { models: Vec<String> },
+    UnloadCategories { categories: Vec<String> },
+    UnloadAll,
     Set { key: String, value: String },
     Get { key: Option<String> },
     ListModels { model: Option<String> },
     Stats { model: Option<String> },
+    Clear,
     Help { command: Option<String> },
     Quit,
     Empty,
@@ -82,6 +85,9 @@ pub fn parse_repl_input(input: &str) -> ReplCommand {
         "/imagine" => ReplCommand::Imagine {
             prompt: args.to_string(),
         },
+        "/embed" => ReplCommand::Embed {
+            text: args.to_string(),
+        },
         "/image" => {
             let img_parts: Vec<&str> = args.splitn(2, ' ').collect();
             if img_parts.len() == 2 {
@@ -93,35 +99,35 @@ pub fn parse_repl_input(input: &str) -> ReplCommand {
                 ReplCommand::Unknown(input.to_string())
             }
         }
-        "/start" => {
+        "/load" => {
             if let Some(rest) = args.strip_prefix("models ") {
-                ReplCommand::StartModels {
+                ReplCommand::LoadModels {
                     models: parse_comma_list(rest),
                 }
             } else if let Some(rest) = args.strip_prefix("categories ") {
-                ReplCommand::StartCategories {
+                ReplCommand::LoadCategories {
                     categories: parse_comma_list(rest),
                 }
             } else if !args.is_empty() {
                 // Bare args treated as categories for backwards compat.
-                ReplCommand::StartCategories {
+                ReplCommand::LoadCategories {
                     categories: parse_comma_list(args),
                 }
             } else {
                 ReplCommand::Unknown(input.to_string())
             }
         }
-        "/stop" => {
+        "/unload" => {
             if let Some(rest) = args.strip_prefix("models ") {
-                ReplCommand::StopModels {
+                ReplCommand::UnloadModels {
                     models: parse_comma_list(rest),
                 }
             } else if let Some(rest) = args.strip_prefix("categories ") {
-                ReplCommand::StopCategories {
+                ReplCommand::UnloadCategories {
                     categories: parse_comma_list(rest),
                 }
             } else if args == "all" {
-                ReplCommand::StopAll
+                ReplCommand::UnloadAll
             } else {
                 ReplCommand::Unknown(input.to_string())
             }
@@ -178,6 +184,7 @@ pub fn parse_repl_input(input: &str) -> ReplCommand {
                 }
             }
         }
+        "/clear" => ReplCommand::Clear,
         "/quit" | "/q" | "/exit" => ReplCommand::Quit,
         _ => ReplCommand::Unknown(input.to_string()),
     }
@@ -186,13 +193,13 @@ pub fn parse_repl_input(input: &str) -> ReplCommand {
 // ── Auto-completion ─────────────────────────────────────────────────────────
 
 const COMMANDS: &[&str] = &[
-    "/chat", "/tool", "/talk", "/listen", "/imagine", "/image", "/start", "/stop", "/set", "/get",
-    "/list", "/stats", "/help", "/quit", "/exit", "/ping",
+    "/chat", "/tool", "/talk", "/listen", "/imagine", "/image", "/embed", "/load", "/unload",
+    "/set", "/get", "/list", "/stats", "/clear", "/help", "/quit", "/exit", "/ping",
 ];
 
 const HELP_TOPICS: &[&str] = &[
-    "chat", "tool", "talk", "listen", "imagine", "image", "start", "stop", "set", "get", "list",
-    "stats", "quit",
+    "chat", "tool", "talk", "listen", "imagine", "image", "embed", "load", "unload", "set", "get",
+    "list", "stats", "clear", "quit",
 ];
 
 struct CompletionData {
@@ -240,6 +247,7 @@ impl CompletionData {
 
 struct ReplHelper {
     data: CompletionData,
+    file_completer: rustyline::completion::FilenameCompleter,
 }
 
 impl Completer for ReplHelper {
@@ -249,8 +257,21 @@ impl Completer for ReplHelper {
         &self,
         line: &str,
         pos: usize,
-        _ctx: &Context<'_>,
+        ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let trimmed = line[..pos].trim_start();
+        // Delegate to file completer for /listen and /image commands.
+        if trimmed.starts_with("/listen ") || trimmed.starts_with("/image ") {
+            // For /image, only complete the first argument (file path).
+            if trimmed.starts_with("/image ") {
+                let after_cmd = &trimmed["/image ".len()..];
+                // If there's already a space after the first arg, we're on the prompt — no completion.
+                if after_cmd.contains(' ') {
+                    return Ok((pos, vec![]));
+                }
+            }
+            return self.file_completer.complete(line, pos, ctx);
+        }
         Ok(complete_repl(&line[..pos], &self.data))
     }
 }
@@ -302,7 +323,7 @@ fn complete_args(
 ) -> (usize, Vec<Pair>) {
     match cmd {
         "/list" | "/stats" => complete_from_list(args, trailing_space, line, &data.model_names),
-        "/start" => {
+        "/load" => {
             if args.is_empty() || (args.len() == 1 && !trailing_space) {
                 let subs: Vec<String> = ["categories", "models"]
                     .iter()
@@ -327,7 +348,7 @@ fn complete_args(
                 }
             }
         }
-        "/stop" => {
+        "/unload" => {
             if args.is_empty() || (args.len() == 1 && !trailing_space) {
                 let subs: Vec<String> = ["models", "categories", "all"]
                     .iter()
@@ -425,19 +446,25 @@ fn complete_comma_sep(
 
 // ── REPL main loop ──────────────────────────────────────────────────────────
 
-pub fn run_repl(coordinator: &mut Coordinator) -> Result<()> {
+pub fn run_repl(
+    coordinator: &mut Coordinator,
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<()> {
     let config = rustyline::Config::builder()
         .completion_type(rustyline::CompletionType::List)
         .build();
 
     let helper = ReplHelper {
         data: CompletionData::from_coordinator(coordinator),
+        file_completer: rustyline::completion::FilenameCompleter::new(),
     };
 
     let mut rl: rustyline::Editor<ReplHelper, rustyline::history::DefaultHistory> =
         rustyline::Editor::with_config(config)
             .map_err(|e| anyhow::anyhow!("failed to initialize REPL: {e}"))?;
     rl.set_helper(Some(helper));
+
+    let mut conversation = ConversationManager::new();
 
     println!("nexo-ai REPL. Type /help for commands, /quit to exit.");
     println!();
@@ -454,16 +481,17 @@ pub fn run_repl(coordinator: &mut Coordinator) -> Result<()> {
         match readline {
             Ok(line) => {
                 let _ = rl.add_history_entry(&line);
+                let command = parse_repl_input(&line);
                 let needs_refresh = matches!(
-                    parse_repl_input(&line),
-                    ReplCommand::StartCategories { .. }
-                        | ReplCommand::StartModels { .. }
-                        | ReplCommand::StopModels { .. }
-                        | ReplCommand::StopCategories { .. }
-                        | ReplCommand::StopAll
+                    command,
+                    ReplCommand::LoadCategories { .. }
+                        | ReplCommand::LoadModels { .. }
+                        | ReplCommand::UnloadModels { .. }
+                        | ReplCommand::UnloadCategories { .. }
+                        | ReplCommand::UnloadAll
                         | ReplCommand::Set { .. }
                 );
-                match parse_repl_input(&line) {
+                match command {
                     ReplCommand::Quit => {
                         coordinator.unload_all();
                         println!("goodbye.");
@@ -477,20 +505,20 @@ pub fn run_repl(coordinator: &mut Coordinator) -> Result<()> {
                     ReplCommand::ListModels { model } => {
                         handle_list_models(coordinator, model.as_deref());
                     }
-                    ReplCommand::StartCategories { categories } => {
-                        handle_start_categories(coordinator, &categories);
+                    ReplCommand::LoadCategories { categories } => {
+                        handle_load_categories(coordinator, &categories);
                     }
-                    ReplCommand::StartModels { models } => {
-                        handle_start_models(coordinator, &models);
+                    ReplCommand::LoadModels { models } => {
+                        handle_load_models(coordinator, &models);
                     }
-                    ReplCommand::StopModels { models } => {
-                        handle_stop_models(coordinator, &models);
+                    ReplCommand::UnloadModels { models } => {
+                        handle_unload_models(coordinator, &models);
                     }
-                    ReplCommand::StopCategories { categories } => {
-                        handle_stop_categories(coordinator, &categories);
+                    ReplCommand::UnloadCategories { categories } => {
+                        handle_unload_categories(coordinator, &categories);
                     }
-                    ReplCommand::StopAll => {
-                        handle_stop_all(coordinator);
+                    ReplCommand::UnloadAll => {
+                        handle_unload_all(coordinator);
                     }
                     ReplCommand::Set { key, value } => {
                         handle_set(coordinator, &key, &value);
@@ -498,7 +526,13 @@ pub fn run_repl(coordinator: &mut Coordinator) -> Result<()> {
                     ReplCommand::Get { key } => {
                         handle_get(coordinator, key.as_deref());
                     }
-                    ReplCommand::Chat { text } => handle_chat(&mut *coordinator, &text),
+                    ReplCommand::Clear => {
+                        conversation.clear();
+                        println!("  conversation cleared.");
+                    }
+                    ReplCommand::Chat { text } => {
+                        handle_chat(&mut *coordinator, &text, &mut conversation);
+                    }
                     ReplCommand::Tool { text } => handle_tool(&mut *coordinator, &text),
                     ReplCommand::Talk { text } => handle_talk(coordinator, &text),
                     ReplCommand::Listen { file } => {
@@ -508,6 +542,7 @@ pub fn run_repl(coordinator: &mut Coordinator) -> Result<()> {
                     ReplCommand::Image { path, prompt } => {
                         handle_image(&mut *coordinator, &path, &prompt);
                     }
+                    ReplCommand::Embed { text } => handle_embed(coordinator, &text),
                     ReplCommand::Unknown(s) => {
                         println!("unknown command: {s}. Type /help for commands.");
                     }
@@ -520,6 +555,11 @@ pub fn run_repl(coordinator: &mut Coordinator) -> Result<()> {
                 }
             }
             Err(rustyline::error::ReadlineError::Interrupted) => {
+                if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                    coordinator.unload_all();
+                    println!("goodbye (interrupted).");
+                    break;
+                }
                 println!("^C");
                 continue;
             }
@@ -554,14 +594,16 @@ fn print_help_overview() {
     println!("  /listen [file]                   Record or transcribe audio");
     println!("  /imagine <prompt>                Generate an image from text");
     println!("  /image <path> <prompt>           Analyze an image with a prompt");
-    println!("  /start categories <c,c,...>      Load default models for categories");
-    println!("  /start models <m,m,...>          Load specific models by name");
-    println!("  /stop models <m,m,...>           Stop specific models");
-    println!("  /stop categories <c,c,...>       Stop models for categories");
-    println!("  /stop all                        Stop all loaded models");
+    println!("  /embed <text>                    Generate text embeddings");
+    println!("  /load categories <c,c,...>       Load default models for categories");
+    println!("  /load models <m,m,...>           Load specific models by name");
+    println!("  /unload models <m,m,...>         Unload specific models");
+    println!("  /unload categories <c,c,...>     Unload models for categories");
+    println!("  /unload all                      Unload all loaded models");
     println!("  /set <key> <value>               Set a configuration value");
     println!("  /get [key]                       Get configuration value(s)");
     println!("  /list [model]                    List models or show model details");
+    println!("  /clear                           Clear conversation history");
     println!("  /stats [model]                   Show inference statistics");
     println!("  /ping                            Test REPL responsiveness");
     println!("  /help [command]                  Show help (or help for a command)");
@@ -625,34 +667,42 @@ fn print_help_detail(cmd: &str) {
             println!("Examples:");
             println!("  /image photo.jpg What do you see in this image?");
         }
-        "start" => {
-            println!("Usage: /start categories <category>,<category>,...");
-            println!("       /start models <model>,<model>,...");
+        "embed" => {
+            println!("Usage: /embed <text>");
+            println!();
+            println!("Generate an embedding vector for the given text.");
+            println!();
+            println!("Examples:");
+            println!("  /embed The quick brown fox jumps over the lazy dog");
+        }
+        "load" => {
+            println!("Usage: /load categories <category>,<category>,...");
+            println!("       /load models <model>,<model>,...");
             println!();
             println!("Load models into memory for inference.");
             println!("  categories  Load the default model for each given category.");
             println!("  models      Load specific models by name.");
             println!();
-            println!("Categories: chat, tool, image, listen, talk, imagine");
+            println!("Categories: chat, tool, image, listen, talk, imagine, embed");
             println!();
             println!("Examples:");
-            println!("  /start categories chat,talk");
-            println!("  /start models parler-mini");
+            println!("  /load categories chat,talk");
+            println!("  /load models parler-mini");
         }
-        "stop" => {
-            println!("Usage: /stop models <model>,<model>,...");
-            println!("       /stop categories <category>,<category>,...");
-            println!("       /stop all");
+        "unload" => {
+            println!("Usage: /unload models <model>,<model>,...");
+            println!("       /unload categories <category>,<category>,...");
+            println!("       /unload all");
             println!();
             println!("Unload models from memory.");
-            println!("  models      Stop specific models by name.");
-            println!("  categories  Stop models serving given categories.");
-            println!("  all         Stop all loaded models.");
+            println!("  models      Unload specific models by name.");
+            println!("  categories  Unload models serving given categories.");
+            println!("  all         Unload all loaded models.");
             println!();
             println!("Examples:");
-            println!("  /stop models parler-mini");
-            println!("  /stop categories talk");
-            println!("  /stop all");
+            println!("  /unload models parler-mini");
+            println!("  /unload categories talk");
+            println!("  /unload all");
         }
         "set" => {
             println!("Usage: /set <key> <value>");
@@ -702,6 +752,12 @@ fn print_help_detail(cmd: &str) {
             println!("Examples:");
             println!("  /stats");
             println!("  /stats parler-mini");
+        }
+        "clear" => {
+            println!("Usage: /clear");
+            println!();
+            println!("Clear conversation history. Keeps the system prompt if one was set.");
+            println!("Use this to start a fresh conversation with the chat model.");
         }
         "quit" | "exit" => {
             println!("Usage: /quit  (or /q, /exit)");
@@ -766,7 +822,7 @@ fn handle_list_all(coordinator: &mut Coordinator) {
             .iter()
             .filter(|cat| {
                 coordinator
-                    .default_for(**cat)
+                    .active_model_for(**cat)
                     .is_some_and(|default| default == name)
             })
             .map(|cat| cat.as_str())
@@ -820,7 +876,7 @@ fn handle_list_detail(coordinator: &mut Coordinator, name: &str) {
         .iter()
         .filter(|cat| {
             coordinator
-                .default_for(**cat)
+                .active_model_for(**cat)
                 .is_some_and(|d| d == model.name)
         })
         .map(|c| c.as_str())
@@ -842,7 +898,7 @@ fn handle_list_detail(coordinator: &mut Coordinator, name: &str) {
     }
 }
 
-fn handle_start_categories(coordinator: &mut Coordinator, categories: &[String]) {
+fn handle_load_categories(coordinator: &mut Coordinator, categories: &[String]) {
     let parsed: Vec<ModelCategory> = categories
         .iter()
         .filter_map(|s| s.parse::<ModelCategory>().ok())
@@ -853,30 +909,77 @@ fn handle_start_categories(coordinator: &mut Coordinator, categories: &[String])
         return;
     }
 
-    if let Err(e) = coordinator.load_defaults(&parsed) {
+    if let Err(e) = coordinator.load_active_models(&parsed) {
         println!("  error loading models: {e}");
     }
 }
 
-fn handle_start_models(coordinator: &mut Coordinator, models: &[String]) {
+fn handle_load_models(coordinator: &mut Coordinator, models: &[String]) {
     for name in models {
+        let manifest = find_manifest(name);
+
+        // For each category of this model, unload any existing active model first.
+        if let Some(ref manifest) = manifest {
+            let loaded: Vec<(String, Vec<ModelCategory>)> = coordinator
+                .loaded_models()
+                .iter()
+                .map(|(n, cats)| (n.to_string(), cats.to_vec()))
+                .collect();
+            for cat in &manifest.categories {
+                if let Some(current) = coordinator.active_model_for(*cat).map(str::to_string) {
+                    if current != *name && coordinator.is_model_loaded(&current) {
+                        let still_needed = loaded.iter().any(|(n, cats)| {
+                            *n == current
+                                && cats.iter().any(|c| {
+                                    c != cat
+                                        && coordinator.active_model_for(*c).is_some_and(|a| a == current)
+                                })
+                        });
+                        if !still_needed {
+                            if let Err(e) = coordinator.unload_model(&current) {
+                                println!("  error unloading {current}: {e}");
+                            } else {
+                                println!("  unloaded {current} ({cat})");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         match coordinator.load_model(name) {
-            Ok(()) => println!("  loaded {name}"),
+            Ok(()) => {
+                println!("  loaded {name}");
+                if let Some(ref manifest) = manifest {
+                    for cat in &manifest.categories {
+                        coordinator.set_active_model(*cat, name.clone());
+                    }
+                }
+            }
             Err(e) => println!("  error loading {name}: {e}"),
         }
     }
 }
 
-fn handle_stop_models(coordinator: &mut Coordinator, models: &[String]) {
+fn handle_unload_models(coordinator: &mut Coordinator, models: &[String]) {
     for name in models {
         match coordinator.unload_model(name) {
-            Ok(()) => println!("  stopped {name}"),
-            Err(e) => println!("  error stopping {name}: {e}"),
+            Ok(()) => {
+                println!("  unloaded {name}");
+                if let Some(manifest) = find_manifest(name) {
+                    for cat in &manifest.categories {
+                        if coordinator.active_model_for(*cat).is_some_and(|a| a == name.as_str()) {
+                            coordinator.remove_active_model(*cat);
+                        }
+                    }
+                }
+            }
+            Err(e) => println!("  error unloading {name}: {e}"),
         }
     }
 }
 
-fn handle_stop_categories(coordinator: &mut Coordinator, categories: &[String]) {
+fn handle_unload_categories(coordinator: &mut Coordinator, categories: &[String]) {
     let parsed: Vec<ModelCategory> = categories
         .iter()
         .filter_map(|s| s.parse::<ModelCategory>().ok())
@@ -887,41 +990,46 @@ fn handle_stop_categories(coordinator: &mut Coordinator, categories: &[String]) 
         return;
     }
 
+    let loaded: Vec<(String, Vec<ModelCategory>)> = coordinator
+        .loaded_models()
+        .iter()
+        .map(|(n, cats)| (n.to_string(), cats.to_vec()))
+        .collect();
+
     for category in &parsed {
-        let to_stop: Vec<String> = coordinator
-            .loaded_models()
+        let to_unload: Vec<&str> = loaded
             .iter()
             .filter(|(_, cats)| cats.contains(category))
-            .map(|(name, _)| name.to_string())
+            .map(|(name, _)| name.as_str())
             .collect();
 
-        if to_stop.is_empty() {
+        if to_unload.is_empty() {
             println!("  no loaded models for {category}");
         } else {
-            for name in to_stop {
+            for name in to_unload {
                 match coordinator.unload_model(&name) {
-                    Ok(()) => println!("  stopped {name} ({category})"),
-                    Err(e) => println!("  error stopping {name}: {e}"),
+                    Ok(()) => {
+                        println!("  unloaded {name} ({category})");
+                        coordinator.remove_active_model(*category);
+                    }
+                    Err(e) => println!("  error unloading {name}: {e}"),
                 }
             }
         }
     }
 }
 
-fn handle_stop_all(coordinator: &mut Coordinator) {
-    let count = coordinator.loaded_models().len();
+fn handle_unload_all(coordinator: &mut Coordinator) {
+    let count = coordinator.loaded_model_count();
     coordinator.unload_all();
-    println!("  stopped {count} model(s)");
+    coordinator.clear_active_models();
+    println!("  unloaded {count} model(s)");
 }
 
 fn handle_set(coordinator: &mut Coordinator, key: &str, value: &str) {
     if let Some(cat_str) = key.strip_prefix("default-") {
         if let Ok(category) = cat_str.parse::<ModelCategory>() {
-            coordinator.set_default(category, value.to_string());
-            coordinator
-                .config_mut()
-                .set_default(category, value.to_string());
-            save_config(coordinator);
+            coordinator.set_active_model(category, value.to_string());
             println!("  set default-{cat_str} = {value}");
         } else {
             println!("  unknown category: {cat_str}");
@@ -1000,13 +1108,13 @@ fn handle_get(coordinator: &Coordinator, key: Option<&str>) {
                 config.startup_categories.join(",")
             );
             println!();
-            println!("  defaults:");
-            if config.defaults.is_empty() {
+            println!("  active models:");
+            if config.active_models.is_empty() {
                 println!("    (none)");
             } else {
-                let mut defaults: Vec<_> = config.defaults.iter().collect();
-                defaults.sort_by_key(|(k, _)| k.as_str());
-                for (cat, model) in defaults {
+                let mut active: Vec<_> = config.active_models.iter().collect();
+                active.sort_by_key(|(k, _)| k.as_str());
+                for (cat, model) in active {
                     println!("    default-{cat} = {model}");
                 }
             }
@@ -1027,7 +1135,7 @@ fn handle_get(coordinator: &Coordinator, key: Option<&str>) {
         Some(key) => {
             if let Some(cat_str) = key.strip_prefix("default-") {
                 if let Ok(category) = cat_str.parse::<ModelCategory>() {
-                    match config.default_for(category) {
+                    match config.active_model_for(category) {
                         Some(model) => println!("  default-{cat_str} = {model}"),
                         None => println!("  default-{cat_str} is not set"),
                     }
@@ -1087,21 +1195,23 @@ const DEFAULT_CHAT_MAX_TOKENS: usize = 2048;
 const DEFAULT_CHAT_TEMPERATURE: f64 = 0.7;
 const DEFAULT_CHAT_TOP_P: f64 = 0.9;
 
-fn handle_chat(coordinator: &mut Coordinator, text: &str) {
+fn handle_chat(coordinator: &mut Coordinator, text: &str, conversation: &mut ConversationManager) {
     let Some(model_name) = coordinator
-        .default_for(ModelCategory::Chat)
+        .active_model_for(ModelCategory::Chat)
         .map(str::to_string)
     else {
-        println!("  no chat model loaded. Use /start categories chat");
+        println!("  no chat model loaded. Use /load chat");
         return;
     };
 
+    conversation.push(ChatMessage {
+        role: ChatRole::User,
+        content: text.to_string(),
+    });
+
     let settings = coordinator.config().model_settings(&model_name);
     let request = crate::shared::types::ChatRequest {
-        messages: vec![ChatMessage {
-            role: ChatRole::User,
-            content: text.to_string(),
-        }],
+        messages: conversation.messages().to_vec(),
         max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
         temperature: settings.temperature.unwrap_or(DEFAULT_CHAT_TEMPERATURE),
         top_p: settings.top_p.unwrap_or(DEFAULT_CHAT_TOP_P),
@@ -1109,18 +1219,32 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str) {
 
     println!("  [chat via {model_name}] thinking...");
 
-    let model = coordinator.model_mut(&model_name);
-    let chat = model.and_then(|m| m.as_chat());
-    let Some(chat) = chat else {
-        println!("  error: model '{model_name}' does not support chat");
-        return;
+    let result = {
+        let model = coordinator.model_mut(&model_name);
+        let chat = model.and_then(|m| m.as_chat());
+        let Some(chat) = chat else {
+            println!("  error: model '{model_name}' does not support chat");
+            return;
+        };
+        chat.chat(&request)
     };
 
-    match chat.chat(&request) {
+    match result {
         Ok(response) => {
+            conversation.push(ChatMessage {
+                role: ChatRole::Assistant,
+                content: response.text.clone(),
+            });
+
             println!();
             println!("  {}", response.text);
             print_token_stats(response.tokens_generated, response.inference_time_ms);
+            coordinator.stats_mut().record_text_generation(
+                &model_name,
+                ModelCategory::Chat,
+                response.tokens_generated,
+                response.inference_time_ms,
+            );
         }
         Err(e) => println!("  error: {e}"),
     }
@@ -1128,10 +1252,10 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str) {
 
 fn handle_tool(coordinator: &mut Coordinator, text: &str) {
     let Some(model_name) = coordinator
-        .default_for(ModelCategory::Tool)
+        .active_model_for(ModelCategory::Tool)
         .map(str::to_string)
     else {
-        println!("  no tool model loaded. Use /start categories tool");
+        println!("  no tool model loaded. Use /load tool");
         return;
     };
 
@@ -1148,14 +1272,17 @@ fn handle_tool(coordinator: &mut Coordinator, text: &str) {
 
     println!("  [tool via {model_name}] thinking...");
 
-    let model = coordinator.model_mut(&model_name);
-    let tool = model.and_then(|m| m.as_tool());
-    let Some(tool) = tool else {
-        println!("  error: model '{model_name}' does not support tool calling");
-        return;
+    let result = {
+        let model = coordinator.model_mut(&model_name);
+        let tool = model.and_then(|m| m.as_tool());
+        let Some(tool) = tool else {
+            println!("  error: model '{model_name}' does not support tool calling");
+            return;
+        };
+        tool.call_tools(&request)
     };
 
-    match tool.call_tools(&request) {
+    match result {
         Ok(response) => {
             if let Some(reasoning) = &response.reasoning {
                 println!("\n  reasoning: {reasoning}");
@@ -1172,6 +1299,12 @@ fn handle_tool(coordinator: &mut Coordinator, text: &str) {
                 "\n  ({} tokens in {:.1}s)",
                 response.tokens_generated, secs,
             );
+            coordinator.stats_mut().record_text_generation(
+                &model_name,
+                ModelCategory::Tool,
+                response.tokens_generated,
+                response.inference_time_ms,
+            );
         }
         Err(e) => println!("  error: {e}"),
     }
@@ -1184,10 +1317,10 @@ const DEFAULT_TALK_SEED: u64 = 0;
 
 fn handle_talk(coordinator: &mut Coordinator, text: &str) {
     let Some(model_name) = coordinator
-        .default_for(ModelCategory::Talk)
+        .active_model_for(ModelCategory::Talk)
         .map(str::to_string)
     else {
-        println!("  no talk model loaded. Use /start categories talk");
+        println!("  no talk model loaded. Use /load talk");
         return;
     };
 
@@ -1204,21 +1337,33 @@ fn handle_talk(coordinator: &mut Coordinator, text: &str) {
 
     println!("  [talk via {model_name}] synthesizing...");
 
-    let model = coordinator.model_mut(&model_name);
-    let talk = model.and_then(|m| m.as_talk());
-    let Some(talk) = talk else {
-        println!("  error: model '{model_name}' does not support talk");
-        return;
+    let result = {
+        let model = coordinator.model_mut(&model_name);
+        let talk = model.and_then(|m| m.as_talk());
+        let Some(talk) = talk else {
+            println!("  error: model '{model_name}' does not support talk");
+            return;
+        };
+        talk.synthesize(&request)
     };
 
-    match talk.synthesize(&request) {
+    match result {
         Ok(response) => {
+            let samples_generated = response.pcm_samples.len();
+            let sample_rate = response.sample_rate;
+            let inference_time_ms = response.inference_time_ms;
             let buffer =
                 crate::audio::AudioBuffer::new(response.pcm_samples, response.sample_rate, 1);
             println!(
                 "  generated {:.1}s of audio in {:.1}s",
                 buffer.duration_secs(),
-                response.inference_time_ms as f64 / 1000.0,
+                inference_time_ms as f64 / 1000.0,
+            );
+            coordinator.stats_mut().record_synthesis(
+                &model_name,
+                samples_generated,
+                sample_rate,
+                inference_time_ms,
             );
             if let Err(e) = crate::audio::play(&buffer) {
                 println!("  error playing audio: {e}");
@@ -1259,29 +1404,33 @@ fn handle_listen(coordinator: &mut Coordinator, file: Option<&str>) {
     );
 
     let Some(model_name) = coordinator
-        .default_for(ModelCategory::Listen)
+        .active_model_for(ModelCategory::Listen)
         .map(str::to_string)
     else {
-        println!("  no listen model loaded. Use /start categories listen");
+        println!("  no listen model loaded. Use /load listen");
         return;
     };
 
     println!("  [listen via {model_name}] transcribing...");
 
+    let audio_duration_ms = (audio.duration_secs() * 1000.0) as u64;
     let request = crate::shared::types::ListenRequest {
         pcm_samples: audio.samples,
         sample_rate: audio.sample_rate,
         language: None,
     };
 
-    let model = coordinator.model_mut(&model_name);
-    let listen = model.and_then(|m| m.as_listen());
-    let Some(listen) = listen else {
-        println!("  error: model '{model_name}' does not support listen");
-        return;
+    let result = {
+        let model = coordinator.model_mut(&model_name);
+        let listen = model.and_then(|m| m.as_listen());
+        let Some(listen) = listen else {
+            println!("  error: model '{model_name}' does not support listen");
+            return;
+        };
+        listen.transcribe(&request)
     };
 
-    match listen.transcribe(&request) {
+    match result {
         Ok(response) => {
             println!();
             println!("  {}", response.text);
@@ -1289,6 +1438,11 @@ fn handle_listen(coordinator: &mut Coordinator, file: Option<&str>) {
                 println!("  language: {lang}");
             }
             println!("  ({:.1}s)", response.inference_time_ms as f64 / 1000.0,);
+            coordinator.stats_mut().record_transcription(
+                &model_name,
+                audio_duration_ms,
+                response.inference_time_ms,
+            );
         }
         Err(e) => println!("  error: {e}"),
     }
@@ -1296,10 +1450,10 @@ fn handle_listen(coordinator: &mut Coordinator, file: Option<&str>) {
 
 fn handle_imagine(coordinator: &mut Coordinator, prompt: &str) {
     let Some(model_name) = coordinator
-        .default_for(ModelCategory::Imagine)
+        .active_model_for(ModelCategory::Imagine)
         .map(str::to_string)
     else {
-        println!("  no imagine model loaded. Use /start categories imagine");
+        println!("  no imagine model loaded. Use /load imagine");
         return;
     };
 
@@ -1328,20 +1482,35 @@ fn handle_imagine(coordinator: &mut Coordinator, prompt: &str) {
         request.width, request.height, request.steps
     );
 
-    let model = coordinator.model_mut(&model_name);
-    let imagine = model.and_then(|m| m.as_imagine());
-    let Some(imagine) = imagine else {
-        println!("  error: model '{model_name}' does not support imagine");
-        return;
+    let result = {
+        let model = coordinator.model_mut(&model_name);
+        let imagine = model.and_then(|m| m.as_imagine());
+        let Some(imagine) = imagine else {
+            println!("  error: model '{model_name}' does not support imagine");
+            return;
+        };
+        imagine.imagine(&request)
     };
 
-    match imagine.imagine(&request) {
+    match result {
         Ok(response) => {
             println!(
                 "  generated {} image(s) in {:.1}s (seed={})",
                 response.images.len(),
                 response.inference_time_ms as f64 / 1000.0,
                 response.seed_used,
+            );
+            let total_pixels = response
+                .images
+                .iter()
+                .map(|i| i.width as u64 * i.height as u64)
+                .sum();
+            coordinator.stats_mut().record_image_generation(
+                &model_name,
+                response.images.len() as u32,
+                request.steps,
+                total_pixels,
+                response.inference_time_ms,
             );
             for img in &response.images {
                 let path = std::env::temp_dir()
@@ -1359,10 +1528,10 @@ fn handle_imagine(coordinator: &mut Coordinator, prompt: &str) {
 
 fn handle_image(coordinator: &mut Coordinator, path: &str, prompt: &str) {
     let Some(model_name) = coordinator
-        .default_for(ModelCategory::Image)
+        .active_model_for(ModelCategory::Image)
         .map(str::to_string)
     else {
-        println!("  no image model loaded. Use /start categories image");
+        println!("  no image model loaded. Use /load image");
         return;
     };
 
@@ -1384,18 +1553,69 @@ fn handle_image(coordinator: &mut Coordinator, path: &str, prompt: &str) {
 
     println!("  [image via {model_name}] analyzing...");
 
-    let model = coordinator.model_mut(&model_name);
-    let image = model.and_then(|m| m.as_image());
-    let Some(image) = image else {
-        println!("  error: model '{model_name}' does not support image analysis");
-        return;
+    let result = {
+        let model = coordinator.model_mut(&model_name);
+        let image = model.and_then(|m| m.as_image());
+        let Some(image) = image else {
+            println!("  error: model '{model_name}' does not support image analysis");
+            return;
+        };
+        image.analyze_image(&request)
     };
 
-    match image.analyze_image(&request) {
+    match result {
         Ok(response) => {
             println!();
             println!("  {}", response.text);
             print_token_stats(response.tokens_generated, response.inference_time_ms);
+            coordinator.stats_mut().record_text_generation(
+                &model_name,
+                ModelCategory::Image,
+                response.tokens_generated,
+                response.inference_time_ms,
+            );
+        }
+        Err(e) => println!("  error: {e}"),
+    }
+}
+
+fn handle_embed(coordinator: &mut Coordinator, text: &str) {
+    let Some(model_name) = coordinator
+        .active_model_for(ModelCategory::Embed)
+        .map(str::to_string)
+    else {
+        println!("  no embed model loaded. Use /load embed");
+        return;
+    };
+
+    let request = crate::shared::types::EmbedRequest {
+        texts: vec![text.to_string()],
+    };
+
+    println!("  [embed via {model_name}] computing...");
+
+    let result = {
+        let model = coordinator.model_mut(&model_name);
+        let embed = model.and_then(|m| m.as_embed());
+        let Some(embed) = embed else {
+            println!("  error: model '{model_name}' does not support embed");
+            return;
+        };
+        embed.embed(&request)
+    };
+
+    match result {
+        Ok(response) => {
+            if let Some(emb) = response.embeddings.first() {
+                let preview: Vec<String> = emb.iter().take(8).map(|v| format!("{v:.4}")).collect();
+                let suffix = if emb.len() > 8 {
+                    format!(", ... ({} dims)", emb.len())
+                } else {
+                    String::new()
+                };
+                println!("  [{}{}]", preview.join(", "), suffix);
+            }
+            println!("  ({:.1}s)", response.inference_time_ms as f64 / 1000.0);
         }
         Err(e) => println!("  error: {e}"),
     }
@@ -1499,59 +1719,59 @@ mod tests {
     }
 
     #[test]
-    fn parse_start_categories() {
+    fn parse_load_categories() {
         assert_eq!(
-            parse_repl_input("/start categories chat,tool"),
-            ReplCommand::StartCategories {
+            parse_repl_input("/load categories chat,tool"),
+            ReplCommand::LoadCategories {
                 categories: vec!["chat".to_string(), "tool".to_string()]
             }
         );
     }
 
     #[test]
-    fn parse_start_models() {
+    fn parse_load_models() {
         assert_eq!(
-            parse_repl_input("/start models parler-mini,parler-large"),
-            ReplCommand::StartModels {
+            parse_repl_input("/load models parler-mini,parler-large"),
+            ReplCommand::LoadModels {
                 models: vec!["parler-mini".to_string(), "parler-large".to_string()]
             }
         );
     }
 
     #[test]
-    fn parse_start_bare_categories() {
+    fn parse_load_bare_categories() {
         // Bare args (no subcommand) → treated as categories for backwards compat.
         assert_eq!(
-            parse_repl_input("/start chat,tool"),
-            ReplCommand::StartCategories {
+            parse_repl_input("/load chat,tool"),
+            ReplCommand::LoadCategories {
                 categories: vec!["chat".to_string(), "tool".to_string()]
             }
         );
     }
 
     #[test]
-    fn parse_stop_models() {
+    fn parse_unload_models() {
         assert_eq!(
-            parse_repl_input("/stop models parler-mini"),
-            ReplCommand::StopModels {
+            parse_repl_input("/unload models parler-mini"),
+            ReplCommand::UnloadModels {
                 models: vec!["parler-mini".to_string()]
             }
         );
     }
 
     #[test]
-    fn parse_stop_categories() {
+    fn parse_unload_categories() {
         assert_eq!(
-            parse_repl_input("/stop categories talk,chat"),
-            ReplCommand::StopCategories {
+            parse_repl_input("/unload categories talk,chat"),
+            ReplCommand::UnloadCategories {
                 categories: vec!["talk".to_string(), "chat".to_string()]
             }
         );
     }
 
     #[test]
-    fn parse_stop_all() {
-        assert_eq!(parse_repl_input("/stop all"), ReplCommand::StopAll);
+    fn parse_unload_all() {
+        assert_eq!(parse_repl_input("/unload all"), ReplCommand::UnloadAll);
     }
 
     #[test]
@@ -1637,9 +1857,9 @@ mod tests {
     #[test]
     fn parse_help_with_command() {
         assert_eq!(
-            parse_repl_input("/help start"),
+            parse_repl_input("/help load"),
             ReplCommand::Help {
-                command: Some("start".to_string())
+                command: Some("load".to_string())
             }
         );
     }
@@ -1700,6 +1920,7 @@ mod tests {
                 "listen".to_string(),
                 "talk".to_string(),
                 "imagine".to_string(),
+                "embed".to_string(),
             ],
             config_keys: vec![
                 "default-chat".to_string(),
@@ -1734,16 +1955,16 @@ mod tests {
     }
 
     #[test]
-    fn complete_start_subcommands() {
+    fn complete_load_subcommands() {
         let data = test_data();
-        let (_, candidates) = complete_repl("/start ", &data);
+        let (_, candidates) = complete_repl("/load ", &data);
         assert_eq!(candidates.len(), 2); // categories, models
     }
 
     #[test]
-    fn complete_stop_subcommands() {
+    fn complete_unload_subcommands() {
         let data = test_data();
-        let (_, candidates) = complete_repl("/stop ", &data);
+        let (_, candidates) = complete_repl("/unload ", &data);
         assert_eq!(candidates.len(), 3); // models, categories, all
     }
 
@@ -1759,8 +1980,6 @@ mod tests {
         let data = test_data();
         let (_, candidates) = complete_repl("/help s", &data);
         let displays: Vec<&str> = candidates.iter().map(|c| c.display.as_str()).collect();
-        assert!(displays.contains(&"start"));
-        assert!(displays.contains(&"stop"));
         assert!(displays.contains(&"set"));
         assert!(displays.contains(&"stats"));
     }

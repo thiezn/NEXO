@@ -147,7 +147,9 @@ fn repeat_kv(xs: Tensor, n_rep: usize) -> Result<Tensor> {
         Ok(xs)
     } else {
         let (b_sz, n_kv_head, seq_len, head_dim) = xs.dims4()?;
-        Tensor::cat(&vec![&xs; n_rep], 2)?.reshape((b_sz, n_kv_head * n_rep, seq_len, head_dim))
+        xs.unsqueeze(2)?
+            .expand((b_sz, n_kv_head, n_rep, seq_len, head_dim))?
+            .reshape((b_sz, n_kv_head * n_rep, seq_len, head_dim))
     }
 }
 
@@ -253,8 +255,8 @@ impl Attention {
             KvCache::Rotating(cache) => cache.append(&key_states, &value_states)?,
         };
 
-        let key_states = repeat_kv(key_states, self.num_kv_groups)?.contiguous()?;
-        let value_states = repeat_kv(value_states, self.num_kv_groups)?.contiguous()?;
+        let key_states = repeat_kv(key_states, self.num_kv_groups)?;
+        let value_states = repeat_kv(value_states, self.num_kv_groups)?;
 
         let scale = 1f64 / f64::sqrt(self.head_dim as f64);
         let attn_weights = (query_states.matmul(&key_states.transpose(2, 3)?)? * scale)?;

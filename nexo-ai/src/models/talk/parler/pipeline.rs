@@ -394,10 +394,7 @@ fn remap_residual_unit(block_pfx: &str, rest: &str) -> String {
 pub fn load(model_dir: &Path) -> Result<LoadedState> {
     let start = Instant::now();
 
-    // Force CPU — candle-transformers' parler_tts::Model::generate() creates
-    // internal u32 tensors that trigger Metal device mismatch in index_select.
-    let device = Device::Cpu;
-    tracing::info!("using CPU for Parler (Metal has u32 index_select issues)");
+    let device = crate::device::create_device(|msg| tracing::info!("{msg}"))?;
     let dtype = crate::device::gpu_dtype(&device);
     tracing::info!("device ready in {:.1}s", start.elapsed().as_secs_f64());
 
@@ -452,8 +449,9 @@ pub fn synthesize(state: &mut LoadedState, request: &TalkRequest) -> Result<Talk
             .model
             .generate(&prompt_tokens, &description_tokens, lp, request.max_tokens)?;
 
-    // generate() returns [num_codebooks, seq_len]; decode_codes expects [batch, num_codebooks, seq_len]
-    let audio_tokens = audio_tokens.unsqueeze(0)?;
+    // generate() returns [num_codebooks, seq_len] on CPU; decode_codes expects
+    // [batch, num_codebooks, seq_len] on the model's device.
+    let audio_tokens = audio_tokens.to_device(&state.device)?.unsqueeze(0)?;
     let pcm_tensor = state.model.audio_encoder.decode_codes(&audio_tokens)?;
     let pcm_samples = dac::decode_to_pcm(&pcm_tensor)?;
 

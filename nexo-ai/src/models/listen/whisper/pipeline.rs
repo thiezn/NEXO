@@ -237,8 +237,8 @@ fn transcribe_chunk(
         }
 
         decoded_tokens.push(next_token);
-        // For next step, only feed the new token (KV cache handles history)
-        token_ids = vec![next_token];
+        // Accumulate full token history — the decoder needs the complete sequence
+        token_ids.push(next_token);
     }
 
     let n_timestamps = decoded_tokens.iter()

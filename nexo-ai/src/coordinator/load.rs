@@ -39,14 +39,14 @@ impl super::Coordinator {
         Ok(())
     }
 
-    pub fn load_defaults(&mut self, categories: &[ModelCategory]) -> Result<()> {
+    pub fn load_active_models(&mut self, categories: &[ModelCategory]) -> Result<()> {
         for category in categories {
-            if let Some(model_name) = self.config.default_for(*category) {
+            if let Some(model_name) = self.config.active_model_for(*category) {
                 let model_name = model_name.to_string();
-                tracing::info!("loading default {} model: {}", category, model_name);
+                tracing::info!("loading active {} model: {}", category, model_name);
                 self.load_model(&model_name)?;
             } else {
-                tracing::warn!("no default model configured for {}", category);
+                tracing::warn!("no active model configured for {}", category);
             }
         }
         Ok(())
@@ -59,7 +59,7 @@ impl super::Coordinator {
             .iter()
             .filter_map(|s| s.parse::<ModelCategory>().ok())
             .collect();
-        self.load_defaults(&categories)
+        self.load_active_models(&categories)
     }
 
     fn create_model_slot(&self, model_name: &str) -> Result<super::ModelSlot> {
@@ -89,6 +89,20 @@ impl super::Coordinator {
                 )),
                 "gemma3" => Box::new(
                     crate::models::multipurpose::gemma3::Gemma3Model::new(
+                        model_name.to_string(),
+                        memory_bytes,
+                        model_dir,
+                    ),
+                ),
+                "qwen3" => Box::new(
+                    crate::models::multipurpose::qwen3::Qwen3Model::new(
+                        model_name.to_string(),
+                        memory_bytes,
+                        model_dir,
+                    ),
+                ),
+                "qwen3_embed" => Box::new(
+                    crate::models::embed::qwen3_embed::Qwen3EmbedModel::new(
                         model_name.to_string(),
                         memory_bytes,
                         model_dir,

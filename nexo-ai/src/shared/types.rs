@@ -16,6 +16,7 @@ pub enum ModelCategory {
     Listen,
     Talk,
     Imagine,
+    Embed,
 }
 
 impl ModelCategory {
@@ -28,6 +29,7 @@ impl ModelCategory {
             Self::Listen => "listen",
             Self::Talk => "talk",
             Self::Imagine => "imagine",
+            Self::Embed => "embed",
         }
     }
 
@@ -40,6 +42,7 @@ impl ModelCategory {
             Self::Listen,
             Self::Talk,
             Self::Imagine,
+            Self::Embed,
         ]
     }
 }
@@ -61,6 +64,7 @@ impl FromStr for ModelCategory {
             "listen" => Ok(Self::Listen),
             "talk" => Ok(Self::Talk),
             "imagine" => Ok(Self::Imagine),
+            "embed" => Ok(Self::Embed),
             other => Err(format!("unknown model category: {other}")),
         }
     }
@@ -77,6 +81,7 @@ pub enum ChatRole {
     System,
     User,
     Assistant,
+    Tool,
 }
 
 /// A single message in a chat conversation.
@@ -238,6 +243,24 @@ pub struct ImagineResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Embed (text-to-embedding)
+// ---------------------------------------------------------------------------
+
+/// Request to generate text embeddings.
+#[derive(Debug, Clone)]
+pub struct EmbedRequest {
+    pub texts: Vec<String>,
+}
+
+/// Response containing embedding vectors.
+#[derive(Debug, Clone)]
+pub struct EmbedResponse {
+    pub embeddings: Vec<Vec<f32>>,
+    pub dimensions: usize,
+    pub inference_time_ms: u64,
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -283,6 +306,10 @@ mod tests {
             serde_json::to_string(&ModelCategory::Imagine).unwrap(),
             "\"imagine\""
         );
+        assert_eq!(
+            serde_json::to_string(&ModelCategory::Embed).unwrap(),
+            "\"embed\""
+        );
     }
 
     // -- ModelCategory::all() completeness --
@@ -290,13 +317,14 @@ mod tests {
     #[test]
     fn model_category_all_is_complete() {
         let all = ModelCategory::all();
-        assert_eq!(all.len(), 6);
+        assert_eq!(all.len(), 7);
         assert!(all.contains(&ModelCategory::Chat));
         assert!(all.contains(&ModelCategory::Tool));
         assert!(all.contains(&ModelCategory::Image));
         assert!(all.contains(&ModelCategory::Listen));
         assert!(all.contains(&ModelCategory::Talk));
         assert!(all.contains(&ModelCategory::Imagine));
+        assert!(all.contains(&ModelCategory::Embed));
     }
 
     // -- as_str --
@@ -309,6 +337,7 @@ mod tests {
         assert_eq!(ModelCategory::Listen.as_str(), "listen");
         assert_eq!(ModelCategory::Talk.as_str(), "talk");
         assert_eq!(ModelCategory::Imagine.as_str(), "imagine");
+        assert_eq!(ModelCategory::Embed.as_str(), "embed");
     }
 
     // -- Display --
@@ -547,5 +576,24 @@ mod tests {
         };
         assert!(resp.images.is_empty());
         assert_eq!(resp.seed_used, 42);
+    }
+
+    #[test]
+    fn embed_request_can_be_constructed() {
+        let req = EmbedRequest {
+            texts: vec!["hello".into(), "world".into()],
+        };
+        assert_eq!(req.texts.len(), 2);
+    }
+
+    #[test]
+    fn embed_response_can_be_constructed() {
+        let resp = EmbedResponse {
+            embeddings: vec![vec![0.1, 0.2, 0.3]],
+            dimensions: 3,
+            inference_time_ms: 10,
+        };
+        assert_eq!(resp.embeddings.len(), 1);
+        assert_eq!(resp.dimensions, 3);
     }
 }

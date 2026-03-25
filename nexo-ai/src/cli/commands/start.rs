@@ -3,6 +3,8 @@ use crate::config::AiConfig;
 use crate::coordinator::Coordinator;
 use crate::shared::types::ModelCategory;
 use anyhow::Result;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub async fn run(categories: Option<Vec<String>>) -> Result<()> {
     let config = AiConfig::load().unwrap_or_default();
@@ -21,7 +23,7 @@ pub async fn run(categories: Option<Vec<String>>) -> Result<()> {
             .collect();
 
         if !parsed.is_empty()
-            && let Err(e) = coordinator.load_defaults(&parsed)
+            && let Err(e) = coordinator.load_active_models(&parsed)
         {
             tracing::warn!("failed to load some models: {e}");
         }
@@ -32,7 +34,7 @@ pub async fn run(categories: Option<Vec<String>>) -> Result<()> {
     // Show what's loaded.
     let loaded = coordinator.loaded_models();
     if loaded.is_empty() {
-        println!("no models loaded. Use /start categories <category> to load models.");
+        println!("no models loaded. Use /load categories <category> to load models.");
     } else {
         println!("loaded models:");
         for (name, cats) in loaded {
@@ -42,6 +44,18 @@ pub async fn run(categories: Option<Vec<String>>) -> Result<()> {
     }
     println!();
 
+    // Set up Ctrl+C handler.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_hook = shutdown.clone();
+    ctrlc::set_handler(move || {
+        if shutdown_hook.swap(true, Ordering::SeqCst) {
+            // Second Ctrl+C — force exit.
+            std::process::exit(1);
+        }
+        eprintln!("\nreceived ctrl+c, press again to force quit...");
+    })
+    .ok();
+
     // Enter REPL.
-    repl::run_repl(&mut coordinator)
+    repl::run_repl(&mut coordinator, shutdown)
 }

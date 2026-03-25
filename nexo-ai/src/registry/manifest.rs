@@ -13,6 +13,7 @@ pub enum AiComponent {
     TextEncoder,
     ClipEncoder,
     T5Encoder,
+    VisionProjector,
 }
 
 impl Component for AiComponent {
@@ -26,12 +27,14 @@ impl Component for AiComponent {
             Self::TextEncoder => "text_encoder",
             Self::ClipEncoder => "clip_encoder",
             Self::T5Encoder => "t5_encoder",
+            Self::VisionProjector => "vision_projector",
         }
     }
 
     fn is_model_specific(&self) -> bool {
         match self {
-            Self::Model | Self::ModelShard | Self::Tokenizer | Self::Config => true,
+            Self::Model | Self::ModelShard | Self::Tokenizer | Self::Config
+            | Self::VisionProjector => true,
             Self::Vae | Self::TextEncoder | Self::ClipEncoder | Self::T5Encoder => false,
         }
     }
@@ -807,6 +810,175 @@ fn gemma_3_27b_it_manifest() -> AiModelManifest {
     }
 }
 
+fn qwen3_4b_q5km_manifest() -> AiModelManifest {
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen3-4b-q5km".to_string(),
+            family: "qwen3".to_string(),
+            description: "Qwen3 4B Q5_K_M — fast quantized chat & tool calling (~2.9 GB)"
+                .to_string(),
+            size_gb: 2.9,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: "Qwen/Qwen3-4B-GGUF".to_string(),
+                    hf_filename: "Qwen3-4B-Q5_K_M.gguf".to_string(),
+                    size_bytes: 2_889_513_184,
+                    gated: false,
+                    sha256: Some(
+                        "aca596860e8cb40af6539e3f2ea40df305f42515deac56d49c08d39a02e6533f",
+                    ),
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: "Qwen/Qwen3-4B".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 11_422_654,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Chat, ModelCategory::Tool],
+    }
+}
+
+fn qwen3_30b_a3b_q4km_manifest() -> AiModelManifest {
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen3-30b-a3b-q4km".to_string(),
+            family: "qwen3".to_string(),
+            description: "Qwen3 30B-A3B Q4_K_M — MoE quantized chat & tool calling (~18.6 GB)"
+                .to_string(),
+            size_gb: 18.6,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: "Qwen/Qwen3-30B-A3B-GGUF".to_string(),
+                    hf_filename: "Qwen3-30B-A3B-Q4_K_M.gguf".to_string(),
+                    size_bytes: 18_556_685_824,
+                    gated: false,
+                    sha256: Some(
+                        "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5",
+                    ),
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: "Qwen/Qwen3-30B-A3B".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 11_422_654,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Chat, ModelCategory::Tool],
+    }
+}
+
+fn qwen3_8b_q5km_manifest() -> AiModelManifest {
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen3-8b-q5km".to_string(),
+            family: "qwen3".to_string(),
+            description: "Qwen3 8B Q5_K_M — quantized chat & tool calling (~5.5 GB)".to_string(),
+            size_gb: 5.5,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: "Qwen/Qwen3-8B-GGUF".to_string(),
+                    hf_filename: "Qwen3-8B-Q5_K_M.gguf".to_string(),
+                    size_bytes: 5_851_112_224,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: "Qwen/Qwen3-8B".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 11_422_654,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Chat, ModelCategory::Tool],
+    }
+}
+
+fn qwen3_vl_4b_manifest() -> AiModelManifest {
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen3-vl-4b".to_string(),
+            family: "qwen3".to_string(),
+            description:
+                "Qwen3-VL 4B — quantized multimodal chat, tool & vision (~3.0 GB)".to_string(),
+            size_gb: 3.0,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: "Qwen/Qwen3-VL-4B-Instruct-GGUF".to_string(),
+                    hf_filename: "Qwen3VL-4B-Instruct-Q4_K_M.gguf".to_string(),
+                    size_bytes: 2_497_281_664,
+                    gated: false,
+                    sha256: Some(
+                        "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a",
+                    ),
+                },
+                ModelFile {
+                    component: AiComponent::VisionProjector,
+                    hf_repo: "Qwen/Qwen3-VL-4B-Instruct-GGUF".to_string(),
+                    hf_filename: "mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf".to_string(),
+                    size_bytes: 453_974_304,
+                    gated: false,
+                    sha256: Some(
+                        "30ba2c7dd3127a4561b6cba9d13d0f711c91bdb38742e2f56d73c8cb596bd06d",
+                    ),
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: "Qwen/Qwen3-VL-4B-Instruct".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 7_032_403,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Chat, ModelCategory::Tool, ModelCategory::Image],
+    }
+}
+
+fn qwen3_embed_8b_q5km_manifest() -> AiModelManifest {
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen3-embed-8b-q5km".to_string(),
+            family: "qwen3_embed".to_string(),
+            description: "Qwen3 Embedding 8B Q5_K_M — text embeddings (~5.1 GB)".to_string(),
+            size_gb: 5.1,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: "Qwen/Qwen3-Embedding-8B-GGUF".to_string(),
+                    hf_filename: "Qwen3-Embedding-8B-Q5_K_M.gguf".to_string(),
+                    size_bytes: 5_422_342_464,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: "Qwen/Qwen3-Embedding-8B".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 11_422_947,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Embed],
+    }
+}
+
 fn build_all_manifests() -> Vec<AiModelManifest> {
     vec![
         parler_mini_manifest(),
@@ -820,6 +992,11 @@ fn build_all_manifests() -> Vec<AiModelManifest> {
         gemma_3_4b_it_manifest(),
         gemma_3_12b_it_manifest(),
         gemma_3_27b_it_manifest(),
+        qwen3_4b_q5km_manifest(),
+        qwen3_8b_q5km_manifest(),
+        qwen3_30b_a3b_q4km_manifest(),
+        qwen3_vl_4b_manifest(),
+        qwen3_embed_8b_q5km_manifest(),
     ]
 }
 
@@ -858,6 +1035,7 @@ mod tests {
         assert_eq!(AiComponent::TextEncoder.name(), "text_encoder");
         assert_eq!(AiComponent::ClipEncoder.name(), "clip_encoder");
         assert_eq!(AiComponent::T5Encoder.name(), "t5_encoder");
+        assert_eq!(AiComponent::VisionProjector.name(), "vision_projector");
     }
 
     #[test]
@@ -868,6 +1046,8 @@ mod tests {
         assert!(AiComponent::Config.is_model_specific());
 
         assert!(!AiComponent::Vae.is_model_specific());
+        assert!(AiComponent::VisionProjector.is_model_specific());
+
         assert!(!AiComponent::TextEncoder.is_model_specific());
         assert!(!AiComponent::ClipEncoder.is_model_specific());
         assert!(!AiComponent::T5Encoder.is_model_specific());
@@ -876,7 +1056,7 @@ mod tests {
     #[test]
     fn known_manifests_contains_parler() {
         let manifests = known_manifests();
-        assert!(manifests.len() >= 11);
+        assert!(manifests.len() >= 16);
         assert!(manifests.iter().any(|m| m.manifest.name == "parler-mini"));
         assert!(manifests.iter().any(|m| m.manifest.name == "parler-large"));
     }
@@ -1026,5 +1206,67 @@ mod tests {
     fn flux_dev_is_gated() {
         let m = find_manifest("flux-2-dev").unwrap();
         assert!(m.manifest.files.iter().any(|f| f.gated));
+    }
+
+    #[test]
+    fn known_manifests_contains_qwen3() {
+        let manifests = known_manifests();
+        assert!(manifests
+            .iter()
+            .any(|m| m.manifest.name == "qwen3-4b-q5km"));
+        assert!(manifests
+            .iter()
+            .any(|m| m.manifest.name == "qwen3-8b-q5km"));
+        assert!(manifests
+            .iter()
+            .any(|m| m.manifest.name == "qwen3-30b-a3b-q4km"));
+        assert!(manifests
+            .iter()
+            .any(|m| m.manifest.name == "qwen3-vl-4b"));
+    }
+
+    #[test]
+    fn qwen3_text_models_are_chat_and_tool() {
+        for name in ["qwen3-4b-q5km", "qwen3-8b-q5km", "qwen3-30b-a3b-q4km"] {
+            let m = find_manifest(name).unwrap();
+            assert_eq!(m.manifest.family, "qwen3");
+            assert!(m.categories.contains(&ModelCategory::Chat));
+            assert!(m.categories.contains(&ModelCategory::Tool));
+            assert!(!m.categories.contains(&ModelCategory::Image));
+        }
+    }
+
+    #[test]
+    fn qwen3_vl_is_multipurpose() {
+        let m = find_manifest("qwen3-vl-4b").unwrap();
+        assert_eq!(m.manifest.family, "qwen3");
+        assert!(m.categories.contains(&ModelCategory::Chat));
+        assert!(m.categories.contains(&ModelCategory::Tool));
+        assert!(m.categories.contains(&ModelCategory::Image));
+    }
+
+    #[test]
+    fn qwen3_models_are_ungated() {
+        for name in ["qwen3-4b-q5km", "qwen3-8b-q5km", "qwen3-30b-a3b-q4km", "qwen3-vl-4b"] {
+            let m = find_manifest(name).unwrap();
+            assert!(m.manifest.files.iter().all(|f| !f.gated));
+        }
+    }
+
+    #[test]
+    fn qwen3_vl_has_vision_projector() {
+        let m = find_manifest("qwen3-vl-4b").unwrap();
+        assert!(m
+            .manifest
+            .files
+            .iter()
+            .any(|f| f.component == AiComponent::VisionProjector));
+    }
+
+    #[test]
+    fn qwen3_embed_is_embed_category() {
+        let m = find_manifest("qwen3-embed-8b-q5km").unwrap();
+        assert_eq!(m.manifest.family, "qwen3_embed");
+        assert_eq!(m.categories, vec![ModelCategory::Embed]);
     }
 }

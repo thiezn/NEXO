@@ -7,3 +7,4 @@ pub mod listen;
 pub mod talk;
 pub mod imagine;
 pub mod multipurpose;
+pub mod embed;
