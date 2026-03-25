@@ -13,6 +13,8 @@ pub fn encode_text(
     let encoding = tokenizer
         .encode(text, true)
         .map_err(|e| anyhow::anyhow!("tokenization failed: {e}"))?;
-    let ids = Tensor::new(encoding.get_ids(), device)?.unsqueeze(0)?;
+    let token_ids = encoding.get_ids().to_vec();
+    let seq_len = token_ids.len();
+    let ids = Tensor::from_vec(token_ids, (1, seq_len), device)?;
     Ok(ids)
 }

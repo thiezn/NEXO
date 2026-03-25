@@ -87,6 +87,13 @@ impl super::Coordinator {
                     memory_bytes,
                     model_dir,
                 )),
+                "gemma3" => Box::new(
+                    crate::models::multipurpose::gemma3::Gemma3Model::new(
+                        model_name.to_string(),
+                        memory_bytes,
+                        model_dir,
+                    ),
+                ),
                 other => anyhow::bail!("unsupported model family '{other}'"),
             };
 

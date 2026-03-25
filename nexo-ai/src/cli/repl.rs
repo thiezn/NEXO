@@ -1,6 +1,6 @@
 use crate::coordinator::Coordinator;
 use crate::registry::{find_manifest, known_manifests};
-use crate::shared::types::ModelCategory;
+use crate::shared::types::{ChatMessage, ChatRole, ModelCategory};
 use crate::statistics::display as stats_display;
 use anyhow::Result;
 use rustyline::completion::{Completer, Pair};
@@ -498,15 +498,15 @@ pub fn run_repl(coordinator: &mut Coordinator) -> Result<()> {
                     ReplCommand::Get { key } => {
                         handle_get(coordinator, key.as_deref());
                     }
-                    ReplCommand::Chat { text } => handle_chat(coordinator, &text),
-                    ReplCommand::Tool { text } => handle_tool(coordinator, &text),
+                    ReplCommand::Chat { text } => handle_chat(&mut *coordinator, &text),
+                    ReplCommand::Tool { text } => handle_tool(&mut *coordinator, &text),
                     ReplCommand::Talk { text } => handle_talk(coordinator, &text),
                     ReplCommand::Listen { file } => {
                         handle_listen(coordinator, file.as_deref());
                     }
                     ReplCommand::Imagine { prompt } => handle_imagine(coordinator, &prompt),
                     ReplCommand::Image { path, prompt } => {
-                        handle_image(coordinator, &path, &prompt);
+                        handle_image(&mut *coordinator, &path, &prompt);
                     }
                     ReplCommand::Unknown(s) => {
                         println!("unknown command: {s}. Type /help for commands.");
@@ -1069,28 +1069,112 @@ fn save_config(coordinator: &Coordinator) {
     }
 }
 
-fn dispatch_stub(coordinator: &Coordinator, category: ModelCategory, context: &str) {
-    if let Some(model_name) = coordinator.default_for(category) {
-        if context.is_empty() {
-            println!("  [{} via {}]", category, model_name);
-        } else {
-            println!("  [{} via {}] {}", category, model_name, context);
-        }
-        println!("  (inference not yet implemented for {} models)", category);
+
+fn print_token_stats(tokens_generated: usize, inference_time_ms: u64) {
+    let secs = inference_time_ms as f64 / 1000.0;
+    let tok_s = if secs > 0.0 {
+        tokens_generated as f64 / secs
     } else {
-        println!(
-            "  no {} model loaded. Use /start categories {}",
-            category, category
-        );
+        0.0
+    };
+    println!(
+        "\n  ({} tokens in {:.1}s, {:.1} tok/s)",
+        tokens_generated, secs, tok_s,
+    );
+}
+
+const DEFAULT_CHAT_MAX_TOKENS: usize = 2048;
+const DEFAULT_CHAT_TEMPERATURE: f64 = 0.7;
+const DEFAULT_CHAT_TOP_P: f64 = 0.9;
+
+fn handle_chat(coordinator: &mut Coordinator, text: &str) {
+    let Some(model_name) = coordinator
+        .default_for(ModelCategory::Chat)
+        .map(str::to_string)
+    else {
+        println!("  no chat model loaded. Use /start categories chat");
+        return;
+    };
+
+    let settings = coordinator.config().model_settings(&model_name);
+    let request = crate::shared::types::ChatRequest {
+        messages: vec![ChatMessage {
+            role: ChatRole::User,
+            content: text.to_string(),
+        }],
+        max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
+        temperature: settings.temperature.unwrap_or(DEFAULT_CHAT_TEMPERATURE),
+        top_p: settings.top_p.unwrap_or(DEFAULT_CHAT_TOP_P),
+    };
+
+    println!("  [chat via {model_name}] thinking...");
+
+    let model = coordinator.model_mut(&model_name);
+    let chat = model.and_then(|m| m.as_chat());
+    let Some(chat) = chat else {
+        println!("  error: model '{model_name}' does not support chat");
+        return;
+    };
+
+    match chat.chat(&request) {
+        Ok(response) => {
+            println!();
+            println!("  {}", response.text);
+            print_token_stats(response.tokens_generated, response.inference_time_ms);
+        }
+        Err(e) => println!("  error: {e}"),
     }
 }
 
-fn handle_chat(coordinator: &Coordinator, text: &str) {
-    dispatch_stub(coordinator, ModelCategory::Chat, text);
-}
+fn handle_tool(coordinator: &mut Coordinator, text: &str) {
+    let Some(model_name) = coordinator
+        .default_for(ModelCategory::Tool)
+        .map(str::to_string)
+    else {
+        println!("  no tool model loaded. Use /start categories tool");
+        return;
+    };
 
-fn handle_tool(coordinator: &Coordinator, text: &str) {
-    dispatch_stub(coordinator, ModelCategory::Tool, text);
+    let settings = coordinator.config().model_settings(&model_name);
+    let request = crate::shared::types::ToolCallRequest {
+        messages: vec![ChatMessage {
+            role: ChatRole::User,
+            content: text.to_string(),
+        }],
+        tools: vec![],
+        max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
+        temperature: settings.temperature.unwrap_or(0.3),
+    };
+
+    println!("  [tool via {model_name}] thinking...");
+
+    let model = coordinator.model_mut(&model_name);
+    let tool = model.and_then(|m| m.as_tool());
+    let Some(tool) = tool else {
+        println!("  error: model '{model_name}' does not support tool calling");
+        return;
+    };
+
+    match tool.call_tools(&request) {
+        Ok(response) => {
+            if let Some(reasoning) = &response.reasoning {
+                println!("\n  reasoning: {reasoning}");
+            }
+            if response.tool_calls.is_empty() {
+                println!("  (no tool calls produced)");
+            } else {
+                for tc in &response.tool_calls {
+                    println!("  tool call: {} {}", tc.name, tc.arguments);
+                }
+            }
+            let secs = response.inference_time_ms as f64 / 1000.0;
+            println!(
+                "\n  ({} tokens in {:.1}s)",
+                response.tokens_generated, secs,
+            );
+        }
+        Err(e) => println!("  error: {e}"),
+    }
 }
 
 const DEFAULT_VOICE_DESCRIPTION: &str = "A clear female speaker with a warm tone.";
@@ -1273,12 +1357,48 @@ fn handle_imagine(coordinator: &mut Coordinator, prompt: &str) {
     }
 }
 
-fn handle_image(coordinator: &Coordinator, path: &str, prompt: &str) {
-    dispatch_stub(
-        coordinator,
-        ModelCategory::Image,
-        &format!("{} - {}", path, prompt),
-    );
+fn handle_image(coordinator: &mut Coordinator, path: &str, prompt: &str) {
+    let Some(model_name) = coordinator
+        .default_for(ModelCategory::Image)
+        .map(str::to_string)
+    else {
+        println!("  no image model loaded. Use /start categories image");
+        return;
+    };
+
+    let image_data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(e) => {
+            println!("  error reading image file: {e}");
+            return;
+        }
+    };
+
+    let settings = coordinator.config().model_settings(&model_name);
+    let request = crate::shared::types::ImageAnalysisRequest {
+        image_data,
+        prompt: prompt.to_string(),
+        max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
+        temperature: settings.temperature.unwrap_or(DEFAULT_CHAT_TEMPERATURE),
+    };
+
+    println!("  [image via {model_name}] analyzing...");
+
+    let model = coordinator.model_mut(&model_name);
+    let image = model.and_then(|m| m.as_image());
+    let Some(image) = image else {
+        println!("  error: model '{model_name}' does not support image analysis");
+        return;
+    };
+
+    match image.analyze_image(&request) {
+        Ok(response) => {
+            println!();
+            println!("  {}", response.text);
+            print_token_stats(response.tokens_generated, response.inference_time_ms);
+        }
+        Err(e) => println!("  error: {e}"),
+    }
 }
 
 fn handle_stats(coordinator: &Coordinator, model: Option<&str>) {

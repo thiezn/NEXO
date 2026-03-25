@@ -3,21 +3,29 @@
   "effortLevel": "high",
   "permissions": {
     "allow": [
-      "Bash(cargo:*)",
-      "Bash(xargs cat:*)",
-      "Bash(find:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(mkdir:*)",
-      "Bash(grep:*)",
-      "Bash(curl:*)",
+      "Bash(cargo *)",
+      "Bash(xargs cat *)",
+      "Bash(find *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(mkdir *)",
+      "Bash(grep *)",
+      "Bash(curl *)",
+      "Bash(cat *)",
+      "Bash(python3 -c *)",
+      "Bash(| head *)",
+      "Read",
+      "Edit",
+      "Write",
       "mcp__xcode",
-      "Edit(.claude/**)",
-      "Write(.claude/**)",
-      "Bash(python3 .claude/skills/nexo-ai-model-builder/scripts/hf_downloader.py:*)"
+      "Bash(python3 .claude/skills/nexo-ai-model-builder/scripts/hf_downloader.py:*)",
     ],
     "deny": [
       "WebFetch"
+    ],
+    "additionalDirectories": [
+      "//Users/Mathijs.Mortimer/.cargo/registry",
+      "//Users/Mathijs.Mortimer/.nexo",
     ]
   },
   "defaultMode": "acceptEdits",

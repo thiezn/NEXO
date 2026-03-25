@@ -87,9 +87,9 @@ self.stats.record_image_generation(model_name, images, steps, total_pixels, infe
 
 ### 6. Test
 
-Ensure to create unit tests for loading the model and running basic inference.
+Before working on a new model, add a integration test in `tests/model_inference.rs` that loads the model and runs a simple inference pass. 
 
-Prompt the user to download the model before running the tests.
+Mark it with `#[ignore]`, `#[timeout]`, and `#[serial]` to prevent it from running in CI or alongside other tests. Use the integration test to validate you have correctly implemented the full pipeline.
 
 ## Shared Modules
 

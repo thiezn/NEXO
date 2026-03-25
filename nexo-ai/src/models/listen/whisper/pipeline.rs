@@ -181,9 +181,24 @@ fn transcribe_chunk(
 ) -> Result<(String, Vec<crate::shared::types::TranscriptionSegment>)> {
     let config = &state.model.config;
 
-    // Compute mel spectrogram
+    // Compute mel spectrogram and truncate to N_FRAMES (3000).
+    // Candle's pcm_to_mel pads beyond 3000 frames; after the encoder's conv2
+    // (stride=2) the extra frames would exceed max_source_positions (1500).
     let mel = whisper::audio::pcm_to_mel(config, chunk, &state.mel_filters);
-    let n_frames = mel.len() / config.num_mel_bins;
+    let full_n_frames = mel.len() / config.num_mel_bins;
+    let n_frames = full_n_frames.min(whisper::N_FRAMES);
+
+    let mel = if full_n_frames > n_frames {
+        let mut truncated = Vec::with_capacity(config.num_mel_bins * n_frames);
+        for m in 0..config.num_mel_bins {
+            let start = m * full_n_frames;
+            truncated.extend_from_slice(&mel[start..start + n_frames]);
+        }
+        truncated
+    } else {
+        mel
+    };
+
     let mel_tensor = Tensor::from_vec(mel, (1, config.num_mel_bins, n_frames), &state.device)?;
 
     // Encode audio
@@ -199,7 +214,7 @@ fn transcribe_chunk(
 
     for step in 0..max_decode_len {
         let token_tensor =
-            Tensor::new(token_ids.as_slice(), &state.device)?.unsqueeze(0)?;
+            Tensor::from_vec(token_ids.clone(), (1, token_ids.len()), &state.device)?;
 
         let flush = step == 0;
         let decoder_output = state
@@ -225,6 +240,16 @@ fn transcribe_chunk(
         // For next step, only feed the new token (KV cache handles history)
         token_ids = vec![next_token];
     }
+
+    let n_timestamps = decoded_tokens.iter()
+        .filter(|&&t| state.whisper_tokens.is_timestamp(t))
+        .count();
+    tracing::info!(
+        "decoded {} tokens ({} text, {} timestamps)",
+        decoded_tokens.len(),
+        decoded_tokens.len() - n_timestamps,
+        n_timestamps,
+    );
 
     // Reset KV cache for the next chunk
     state.model.reset_kv_cache();

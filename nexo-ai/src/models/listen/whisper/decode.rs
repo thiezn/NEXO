@@ -46,7 +46,7 @@ impl WhisperTokens {
 
     /// Build the initial decoder token sequence.
     ///
-    /// Format: `[sot, language_id, transcribe]`
+    /// Format: `[sot, language_id, transcribe, no_timestamps]`
     /// If no language is specified, defaults to English.
     pub fn initial_tokens(&self, tokenizer: &tokenizers::Tokenizer, language: Option<&str>) -> Vec<u32> {
         let lang_token = language
@@ -58,7 +58,7 @@ impl WhisperTokens {
                 tokenizer.token_to_id("<|en|>").unwrap_or(self.sot + 1)
             });
 
-        vec![self.sot, lang_token, self.transcribe]
+        vec![self.sot, lang_token, self.transcribe, self.no_timestamps]
     }
 
     /// Check whether a token ID is a timestamp token.

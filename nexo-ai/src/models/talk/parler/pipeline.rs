@@ -31,16 +31,19 @@ struct TensorFixups {
     /// encoder. Candle-transformers expects `weight_g` / `weight_v` (weight
     /// normalization) pairs.
     needs_weight_norm_decompose: bool,
+    /// Parler-TTS mini v1.1 uses a different DAC key naming convention:
+    /// `audio_encoder.encoder.block.N.res_unitM.conv1.weight` instead of
+    /// `audio_encoder.model.encoder.block.N.block.M.block.K.weight_g`.
+    needs_dac_key_remap: bool,
 }
 
 fn detect_fixups(files: &[std::path::PathBuf]) -> TensorFixups {
     let combined_key = "decoder.lm_heads.weight";
     let per_codebook_key = "decoder.lm_heads.0.weight";
-    let dac_fused_key = "audio_encoder.model.encoder.block.0.weight";
-    let dac_wn_key = "audio_encoder.model.encoder.block.0.weight_g";
 
     let mut needs_lm_heads_split = false;
     let mut needs_weight_norm_decompose = false;
+    let mut needs_dac_key_remap = false;
 
     for f in files {
         let Some(header) = read_safetensors_header(f) else {
@@ -49,14 +52,45 @@ fn detect_fixups(files: &[std::path::PathBuf]) -> TensorFixups {
         if header.get(combined_key).is_some() && header.get(per_codebook_key).is_none() {
             needs_lm_heads_split = true;
         }
-        if header.get(dac_fused_key).is_some() && header.get(dac_wn_key).is_none() {
-            needs_weight_norm_decompose = true;
+
+        if let Some(obj) = header.as_object() {
+            // Check for mini-format DAC keys (no "model." prefix under audio_encoder).
+            if !needs_dac_key_remap {
+                needs_dac_key_remap = obj.keys().any(|k| {
+                    k.starts_with("audio_encoder.")
+                        && !k.starts_with("audio_encoder.model.")
+                        && (k.starts_with("audio_encoder.encoder.")
+                            || k.starts_with("audio_encoder.decoder.")
+                            || k.starts_with("audio_encoder.quantizer."))
+                });
+            }
+
+            // Check if any audio_encoder weight tensor lacks a weight_g companion
+            // (indicates fused weights that need decomposition for candle-transformers).
+            if !needs_weight_norm_decompose {
+                let has_fused = obj.keys().any(|k| {
+                    k.starts_with("audio_encoder.model.")
+                        && k.ends_with(".weight")
+                        && !k.ends_with(".weight_g")
+                        && !k.ends_with(".weight_v")
+                        && !obj.contains_key(&format!("{}_g", k))
+                });
+                if has_fused {
+                    needs_weight_norm_decompose = true;
+                }
+            }
         }
+    }
+
+    // Mini format always uses fused weights that need decomposition after remapping.
+    if needs_dac_key_remap {
+        needs_weight_norm_decompose = true;
     }
 
     TensorFixups {
         needs_lm_heads_split,
         needs_weight_norm_decompose,
+        needs_dac_key_remap,
     }
 }
 
@@ -84,7 +118,10 @@ fn load_var_builder(
 ) -> Result<VarBuilder<'static>> {
     let fixups = detect_fixups(files);
 
-    if !fixups.needs_lm_heads_split && !fixups.needs_weight_norm_decompose {
+    if !fixups.needs_lm_heads_split
+        && !fixups.needs_weight_norm_decompose
+        && !fixups.needs_dac_key_remap
+    {
         return unsafe { VarBuilder::from_mmaped_safetensors(files, dtype, device) }
             .map_err(Into::into);
     }
@@ -93,6 +130,12 @@ fn load_var_builder(
     let mut tensors: HashMap<String, Tensor> = HashMap::new();
     for file in files {
         tensors.extend(candle_core::safetensors::load(file, device)?);
+    }
+
+    // Key remapping must happen first so subsequent fixups see the expected key format.
+    if fixups.needs_dac_key_remap {
+        tracing::info!("remapping parler-mini DAC keys to candle-transformers format");
+        remap_mini_dac_keys(&mut tensors);
     }
 
     if fixups.needs_lm_heads_split {
@@ -154,15 +197,207 @@ pub(crate) fn decompose_weight_norm(weight: &Tensor) -> Result<(Tensor, Tensor)>
     Ok((weight_g, weight_v))
 }
 
+// ── Parler-mini DAC key remapping ────────────────────────────────────────────
+//
+// Parler-mini v1.1 stores DAC audio encoder weights with a different naming
+// convention than what candle-transformers expects (which matches parler-large).
+//
+// Mini format:  audio_encoder.encoder.block.{N}.res_unit{M}.conv1.weight
+// Candle needs: audio_encoder.model.encoder.block.{N+1}.block.{M-1}.block.1.weight_g
+//
+// This module remaps ALL `audio_encoder.*` keys (that lack a `model.` prefix)
+// to the candle-expected format. Weight decomposition (fused → weight_g/weight_v)
+// is handled separately by `decompose_fused_weights`.
+
+/// Remap parler-mini DAC tensor keys to candle-transformers format in-place.
+fn remap_mini_dac_keys(tensors: &mut HashMap<String, Tensor>) {
+    let keys: Vec<String> = tensors
+        .keys()
+        .filter(|k| k.starts_with("audio_encoder.") && !k.starts_with("audio_encoder.model."))
+        .cloned()
+        .collect();
+
+    if keys.is_empty() {
+        return;
+    }
+
+    // Find the max encoder/decoder block indices to compute snake/final-conv positions.
+    let max_enc_block = keys
+        .iter()
+        .filter_map(|k| k.strip_prefix("audio_encoder.encoder.block."))
+        .filter_map(|rest| rest.split('.').next().and_then(|s| s.parse::<usize>().ok()))
+        .max()
+        .unwrap_or(0);
+
+    let max_dec_block = keys
+        .iter()
+        .filter_map(|k| k.strip_prefix("audio_encoder.decoder.block."))
+        .filter_map(|rest| rest.split('.').next().and_then(|s| s.parse::<usize>().ok()))
+        .max()
+        .unwrap_or(0);
+
+    tracing::info!(
+        "remapping {} DAC keys (enc blocks 0..={max_enc_block}, dec blocks 0..={max_dec_block})",
+        keys.len()
+    );
+
+    for old_key in keys {
+        let tensor = tensors.remove(&old_key).unwrap();
+        let new_key = remap_single_dac_key(&old_key, max_enc_block, max_dec_block);
+        tracing::debug!("remap: {old_key} → {new_key}");
+        tensors.insert(new_key, tensor);
+    }
+}
+
+fn remap_single_dac_key(key: &str, max_enc_block: usize, max_dec_block: usize) -> String {
+    let rest = key
+        .strip_prefix("audio_encoder.")
+        .expect("key must start with audio_encoder.");
+
+    if let Some(enc) = rest.strip_prefix("encoder.") {
+        return remap_encoder(enc, max_enc_block);
+    }
+    if let Some(dec) = rest.strip_prefix("decoder.") {
+        return remap_decoder(dec, max_dec_block);
+    }
+    if let Some(q) = rest.strip_prefix("quantizer.") {
+        // Quantizer: just add model. prefix (structural layout matches).
+        return format!("audio_encoder.model.quantizer.{q}");
+    }
+    // Fallback
+    format!("audio_encoder.model.{rest}")
+}
+
+/// Remap a key under `audio_encoder.encoder.` to the candle index-based format.
+///
+/// Candle encoder layout (sequential Vec):
+///   [0] initial Conv1d
+///   [1..=N] EncoderBlocks (one per stride)
+///   [N+1] final Snake1d
+///   [N+2] final Conv1d
+///
+/// Each EncoderBlock layout:
+///   [0..R-1] ResidualUnits
+///   [R]      Snake1d
+///   [R+1]    downsample Conv1d
+///
+/// Each ResidualUnit layout:
+///   [0] Snake1d, [1] Conv1d, [2] Snake1d, [3] Conv1d
+fn remap_encoder(rest: &str, max_block: usize) -> String {
+    let pfx = "audio_encoder.model.encoder.block";
+
+    if let Some(leaf) = rest.strip_prefix("conv1.") {
+        return format!("{pfx}.0.{leaf}");
+    }
+    if let Some(leaf) = rest.strip_prefix("snake1.") {
+        return format!("{pfx}.{}.{leaf}", max_block + 2);
+    }
+    if let Some(leaf) = rest.strip_prefix("conv2.") {
+        return format!("{pfx}.{}.{leaf}", max_block + 3);
+    }
+    if let Some(block_rest) = rest.strip_prefix("block.") {
+        if let Some((n_str, after_n)) = block_rest.split_once('.') {
+            if let Ok(n) = n_str.parse::<usize>() {
+                return remap_encoder_block(pfx, n + 1, after_n);
+            }
+        }
+    }
+    format!("audio_encoder.model.encoder.{rest}")
+}
+
+fn remap_encoder_block(pfx: &str, ci: usize, rest: &str) -> String {
+    if let Some(ru) = rest.strip_prefix("res_unit") {
+        if let Some((m_str, after_m)) = ru.split_once('.') {
+            if let Ok(m) = m_str.parse::<usize>() {
+                // res_units are 1-indexed in mini format
+                return remap_residual_unit(&format!("{pfx}.{ci}.block.{}.block", m - 1), after_m);
+            }
+        }
+    }
+    if let Some(leaf) = rest.strip_prefix("snake1.") {
+        return format!("{pfx}.{ci}.block.3.{leaf}");
+    }
+    if let Some(leaf) = rest.strip_prefix("conv1.") {
+        return format!("{pfx}.{ci}.block.4.{leaf}");
+    }
+    format!("{pfx}.{ci}.{rest}")
+}
+
+/// Remap a key under `audio_encoder.decoder.` to the candle index-based format.
+///
+/// Candle decoder layout (sequential `model.N`):
+///   [0] initial Conv1d, [1..=N] DecoderBlocks, [N+1] Snake1d, [N+2] final Conv1d
+///
+/// Each DecoderBlock: [0] Snake1d, [1] ConvTranspose1d, [2..2+R-1] ResidualUnits
+fn remap_decoder(rest: &str, max_block: usize) -> String {
+    let pfx = "audio_encoder.model.decoder.model";
+
+    if let Some(leaf) = rest.strip_prefix("conv1.") {
+        return format!("{pfx}.0.{leaf}");
+    }
+    if let Some(leaf) = rest.strip_prefix("snake1.") {
+        return format!("{pfx}.{}.{leaf}", max_block + 2);
+    }
+    if let Some(leaf) = rest.strip_prefix("conv2.") {
+        return format!("{pfx}.{}.{leaf}", max_block + 3);
+    }
+    if let Some(block_rest) = rest.strip_prefix("block.") {
+        if let Some((n_str, after_n)) = block_rest.split_once('.') {
+            if let Ok(n) = n_str.parse::<usize>() {
+                return remap_decoder_block(pfx, n + 1, after_n);
+            }
+        }
+    }
+    format!("audio_encoder.model.decoder.{rest}")
+}
+
+fn remap_decoder_block(pfx: &str, ci: usize, rest: &str) -> String {
+    if let Some(leaf) = rest.strip_prefix("snake1.") {
+        return format!("{pfx}.{ci}.block.0.{leaf}");
+    }
+    if let Some(leaf) = rest.strip_prefix("conv_t1.") {
+        return format!("{pfx}.{ci}.block.1.{leaf}");
+    }
+    if let Some(ru) = rest.strip_prefix("res_unit") {
+        if let Some((m_str, after_m)) = ru.split_once('.') {
+            if let Ok(m) = m_str.parse::<usize>() {
+                // decoder res_units start at block index 2
+                return remap_residual_unit(&format!("{pfx}.{ci}.block.{}.block", m + 1), after_m);
+            }
+        }
+    }
+    format!("{pfx}.{ci}.{rest}")
+}
+
+/// Remap a residual unit component to candle's indexed format.
+///
+/// Layout: [0] Snake1d, [1] Conv1d, [2] Snake1d, [3] Conv1d
+fn remap_residual_unit(block_pfx: &str, rest: &str) -> String {
+    if let Some(leaf) = rest.strip_prefix("snake1.") {
+        return format!("{block_pfx}.0.{leaf}");
+    }
+    if let Some(leaf) = rest.strip_prefix("conv1.") {
+        return format!("{block_pfx}.1.{leaf}");
+    }
+    if let Some(leaf) = rest.strip_prefix("snake2.") {
+        return format!("{block_pfx}.2.{leaf}");
+    }
+    if let Some(leaf) = rest.strip_prefix("conv2.") {
+        return format!("{block_pfx}.3.{leaf}");
+    }
+    format!("{block_pfx}.{rest}")
+}
+
 /// Load a Parler-TTS model from the given directory.
 ///
 /// Expects `config.json`, `tokenizer.json`, and one or more `.safetensors` files.
 pub fn load(model_dir: &Path) -> Result<LoadedState> {
     let start = Instant::now();
 
-    let device = crate::device::create_device(|msg| {
-        tracing::info!("{msg}");
-    })?;
+    // Force CPU — candle-transformers' parler_tts::Model::generate() creates
+    // internal u32 tensors that trigger Metal device mismatch in index_select.
+    let device = Device::Cpu;
+    tracing::info!("using CPU for Parler (Metal has u32 index_select issues)");
     let dtype = crate::device::gpu_dtype(&device);
     tracing::info!("device ready in {:.1}s", start.elapsed().as_secs_f64());
 
@@ -217,6 +452,8 @@ pub fn synthesize(state: &mut LoadedState, request: &TalkRequest) -> Result<Talk
             .model
             .generate(&prompt_tokens, &description_tokens, lp, request.max_tokens)?;
 
+    // generate() returns [num_codebooks, seq_len]; decode_codes expects [batch, num_codebooks, seq_len]
+    let audio_tokens = audio_tokens.unsqueeze(0)?;
     let pcm_tensor = state.model.audio_encoder.decode_codes(&audio_tokens)?;
     let pcm_samples = dac::decode_to_pcm(&pcm_tensor)?;
 
@@ -319,5 +556,162 @@ mod tests {
         assert!(tensors.contains_key(
             "audio_encoder.model.quantizer.quantizers.0.codebook.weight"
         ));
+    }
+
+    #[test]
+    fn remap_mini_encoder_keys() {
+        let max_enc = 3;
+        let max_dec = 3;
+
+        // Initial conv
+        assert_eq!(
+            remap_single_dac_key("audio_encoder.encoder.conv1.weight", max_enc, max_dec),
+            "audio_encoder.model.encoder.block.0.weight"
+        );
+        assert_eq!(
+            remap_single_dac_key("audio_encoder.encoder.conv1.bias", max_enc, max_dec),
+            "audio_encoder.model.encoder.block.0.bias"
+        );
+
+        // Encoder block res_unit
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.encoder.block.0.res_unit1.snake1.alpha",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.encoder.block.1.block.0.block.0.alpha"
+        );
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.encoder.block.0.res_unit1.conv1.weight",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.encoder.block.1.block.0.block.1.weight"
+        );
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.encoder.block.2.res_unit3.conv2.bias",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.encoder.block.3.block.2.block.3.bias"
+        );
+
+        // Block snake + downsample conv
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.encoder.block.0.snake1.alpha",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.encoder.block.1.block.3.alpha"
+        );
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.encoder.block.0.conv1.weight",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.encoder.block.1.block.4.weight"
+        );
+
+        // Final snake + conv
+        assert_eq!(
+            remap_single_dac_key("audio_encoder.encoder.snake1.alpha", max_enc, max_dec),
+            "audio_encoder.model.encoder.block.5.alpha"
+        );
+        assert_eq!(
+            remap_single_dac_key("audio_encoder.encoder.conv2.weight", max_enc, max_dec),
+            "audio_encoder.model.encoder.block.6.weight"
+        );
+    }
+
+    #[test]
+    fn remap_mini_decoder_keys() {
+        let max_enc = 3;
+        let max_dec = 3;
+
+        // Initial conv
+        assert_eq!(
+            remap_single_dac_key("audio_encoder.decoder.conv1.weight", max_enc, max_dec),
+            "audio_encoder.model.decoder.model.0.weight"
+        );
+
+        // Decoder block
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.decoder.block.0.snake1.alpha",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.decoder.model.1.block.0.alpha"
+        );
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.decoder.block.0.conv_t1.weight",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.decoder.model.1.block.1.weight"
+        );
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.decoder.block.0.res_unit1.snake1.alpha",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.decoder.model.1.block.2.block.0.alpha"
+        );
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.decoder.block.0.res_unit1.conv1.weight",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.decoder.model.1.block.2.block.1.weight"
+        );
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.decoder.block.3.res_unit3.conv2.bias",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.decoder.model.4.block.4.block.3.bias"
+        );
+
+        // Final snake + conv
+        assert_eq!(
+            remap_single_dac_key("audio_encoder.decoder.snake1.alpha", max_enc, max_dec),
+            "audio_encoder.model.decoder.model.5.alpha"
+        );
+        assert_eq!(
+            remap_single_dac_key("audio_encoder.decoder.conv2.weight", max_enc, max_dec),
+            "audio_encoder.model.decoder.model.6.weight"
+        );
+    }
+
+    #[test]
+    fn remap_mini_quantizer_keys() {
+        let max_enc = 3;
+        let max_dec = 3;
+
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.quantizer.quantizers.0.in_proj.weight",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.quantizer.quantizers.0.in_proj.weight"
+        );
+        assert_eq!(
+            remap_single_dac_key(
+                "audio_encoder.quantizer.quantizers.0.codebook.weight",
+                max_enc,
+                max_dec
+            ),
+            "audio_encoder.model.quantizer.quantizers.0.codebook.weight"
+        );
     }
 }

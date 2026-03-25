@@ -2,6 +2,52 @@
 
 Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, vervolgens zit ik openclaw na te bouwen, image generation pipelines te bouwen, scummvm assets extraction, vision OS game aan het maken in rust en swift en epub image generator te fixen...).
 
+- Implement KV Cache management. Probably easiest is to 'guess' the cache by incoming tokens, and clear them when it hits a certain threshold. I can also on a cron job clear stale sessions, or summarize sessions, store the summary in a session history and then clear it. Then as a client we can perhaps pull in old summaries to provide an initial context for the model. Check the KV_CACHE_MANAGEMENT.md for more details. It seems the prefill bit is where i can load things? It mentions this flow:  summary → clear/recreate → compact prefill. The best strategy is probably this approach, managing this outside the models in my rust code by counting incoming tokens:
+
+    TTL = Time To Live
+    Compaction = summarize/compress older context, then rebuild a fresh shorter context from that summary
+    LRU = Least Recently Used
+
+
+
+- Parler-mini when loading and using cli it doesn't seem to work:
+
+        nexo> /start models parler-mini
+        INFO Memory: 11.2 GB free, 24.0 GB available
+        INFO using CPU for Parler (Metal has u32 index_select issues)
+        INFO device ready in 0.0s
+        INFO config loaded
+        INFO remapping parler-mini DAC keys to candle-transformers format
+        INFO remapping 223 DAC keys (enc blocks 0..=3, dec blocks 0..=3)
+        INFO splitting combined lm_heads tensor for candle-transformers compatibility
+        INFO decomposing fused DAC weights into weight_g/weight_v pairs
+        INFO model loaded in 5.6s (1 safetensor file(s))
+        INFO Parler-TTS fully loaded in 6.1s
+        INFO loaded model 'parler-mini' in 6129ms
+        loaded parler-mini
+        nexo> /talk hello
+        [talk via parler-large] synthesizing...
+        error: model 'parler-large' does not support talk
+        nexo> /stop all
+        INFO unloaded all models
+        stopped 1 model(s)
+        nexo> /start models parler-large
+        INFO Memory: 7.0 GB free, 23.6 GB available
+        INFO using CPU for Parler (Metal has u32 index_select issues)
+        INFO device ready in 0.0s
+        INFO config loaded
+        INFO decomposing fused DAC weights into weight_g/weight_v pairs
+        INFO model loaded in 5.2s (2 safetensor file(s))
+        INFO Parler-TTS fully loaded in 5.3s
+        INFO loaded model 'parler-large' in 5288ms
+        loaded parler-large
+        nexo> /talk hello
+        [talk via parler-large] synthesizing...
+
+
+
+- Have to check if the memory_estimate_bytes are correct. I think this is just a guess of claude? We should run it, push through a few prompt to get the kv cahche to build up and see how much mem it consumes.
+- Ask Grok or OpenAI to list all the things we can tweak in a model inference. Things like
 - paginated reading view is taking some compute. Make this hydrated so we can store already computed pages in SwiftData. It will need to recompute lokely when we change the font size.
 - Fix switching between pagination and continuous reading that it resets. need to anchor it in some way to the ground truth of the book, perhaps the specific paragraph or even sentence (since pagination splits it into multiple paragraphs?)
 - Build interface with bluetooth naar Rowan's piano zodat hij kan zien wat voor midi hij speelt, soort guitar hero iets?

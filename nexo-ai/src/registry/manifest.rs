@@ -561,6 +561,252 @@ fn flux_2_dev_manifest() -> AiModelManifest {
     }
 }
 
+fn gemma_3_4b_it_manifest() -> AiModelManifest {
+    let repo = "google/gemma-3-4b-it".to_string();
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "gemma-3-4b-it".to_string(),
+            family: "gemma3".to_string(),
+            description: "Gemma 3 4B IT — fast multimodal chat, tool & vision (~8 GB)".to_string(),
+            size_gb: 8.0,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00001-of-00002.safetensors".to_string(),
+                    size_bytes: 4_961_251_752,
+                    gated: true,
+                    sha256: Some("eb5fd5e97ddd07b56778733e9653c07312529cb00980a318fc3e1c4e3b5a8f1f"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00002-of-00002.safetensors".to_string(),
+                    size_bytes: 3_639_026_128,
+                    gated: true,
+                    sha256: Some("fdde0e5aa5ced0fa203b3d50f4ab78168b7e3a3e08c6349f5cc9326666e1bb13"),
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 33_384_568,
+                    gated: true,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo,
+                    hf_filename: "config.json".to_string(),
+                    size_bytes: 855,
+                    gated: true,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Chat, ModelCategory::Tool, ModelCategory::Image],
+    }
+}
+
+fn gemma_3_12b_it_manifest() -> AiModelManifest {
+    let repo = "google/gemma-3-12b-it".to_string();
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "gemma-3-12b-it".to_string(),
+            family: "gemma3".to_string(),
+            description: "Gemma 3 12B IT — multimodal chat, tool & vision (~22.7 GB)".to_string(),
+            size_gb: 22.7,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00001-of-00005.safetensors".to_string(),
+                    size_bytes: 4_979_902_192,
+                    gated: true,
+                    sha256: Some("4847447e92599833e8dbaa3067cd201c3bb5c052efa91f11ba891e43234f7832"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00002-of-00005.safetensors".to_string(),
+                    size_bytes: 4_931_296_592,
+                    gated: true,
+                    sha256: Some("891bd54eed03cba9ee1e705533a02a8217fcc29f356e4a1f53e5fd0d178883ad"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00003-of-00005.safetensors".to_string(),
+                    size_bytes: 4_931_296_656,
+                    gated: true,
+                    sha256: Some("7cee411d9d57324e50ce064a192cc5a858276d508611b12fc599e0c9767112e0"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00004-of-00005.safetensors".to_string(),
+                    size_bytes: 4_931_296_656,
+                    gated: true,
+                    sha256: Some("8bc75a29a730c9e743cad013feda3b0991a913fafe787c58a1c6e20afad97723"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00005-of-00005.safetensors".to_string(),
+                    size_bytes: 4_601_000_928,
+                    gated: true,
+                    sha256: Some("ed14bd4908c98fed9f61e8cd410167e0846de9abd78e0452ab092072e5d9252d"),
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 33_384_568,
+                    gated: true,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo,
+                    hf_filename: "config.json".to_string(),
+                    size_bytes: 916,
+                    gated: true,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Chat, ModelCategory::Tool, ModelCategory::Image],
+    }
+}
+
+fn gemma_3_27b_it_manifest() -> AiModelManifest {
+    let repo = "google/gemma-3-27b-it".to_string();
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "gemma-3-27b-it".to_string(),
+            family: "gemma3".to_string(),
+            description: "Gemma 3 27B IT — high quality multimodal chat, tool & vision (~51.1 GB)"
+                .to_string(),
+            size_gb: 51.1,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00001-of-00012.safetensors".to_string(),
+                    size_bytes: 4_854_573_696,
+                    gated: true,
+                    sha256: Some("4da0290139f018bdea488b556c136d0f0ca4506fe5f5555cd97c0f6f2e886add"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00002-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_792_944,
+                    gated: true,
+                    sha256: Some("bf17dbadf9c7cd696e4768639601c3300ea659e49f018000956078cefd475cdf"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00003-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_792_976,
+                    gated: true,
+                    sha256: Some("c12b9d629d07b4583e19a467713f92b5c1ae8c9d7ef11faf1bdb91c4c7b59efc"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00004-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_793_016,
+                    gated: true,
+                    sha256: Some("7171ed512e46c90cb579a58f66851bad09b028220422ceb1ae85080ab4ffb958"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00005-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_793_016,
+                    gated: true,
+                    sha256: Some("9fb9667695749e55d808f407d78f18f80bd8ff999175c2c480cad7075ff5b2cf"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00006-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_793_016,
+                    gated: true,
+                    sha256: Some("91ae339063266e0c12da89af8aa0cfdb3f9dc9bb1b4b2678863793a28026dbe7"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00007-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_793_016,
+                    gated: true,
+                    sha256: Some("0497dda2b32df5d583caaffae35a96f3524a1e4305b850f4b1ce2e60fc354fe4"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00008-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_793_016,
+                    gated: true,
+                    sha256: Some("9061b71b9cc82e187bd72c8f4594c5c1d900b0bc98c416d72902209514cf8ac4"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00009-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_793_016,
+                    gated: true,
+                    sha256: Some("ebf2e19c3385d4b342e1517639293fe093ad793f41895862713e38603635c769"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00010-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_793_016,
+                    gated: true,
+                    sha256: Some("d651ceb24678d80796a36f9a026f7178631b44e9d86f6f87e52093d915f702ad"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00011-of-00012.safetensors".to_string(),
+                    size_bytes: 4_954_793_016,
+                    gated: true,
+                    sha256: Some("4a2de7fa772158381c7569a5699cadb9da3b06d92b802f54ac1c09f4a2c2e594"),
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00012-of-00012.safetensors".to_string(),
+                    size_bytes: 462_476_696,
+                    gated: true,
+                    sha256: Some("61f4d0c537a889d474396c6fb21ebb90946a64d70345403d47627ecb559e8e91"),
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 33_384_568,
+                    gated: true,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo,
+                    hf_filename: "config.json".to_string(),
+                    size_bytes: 972,
+                    gated: true,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Chat, ModelCategory::Tool, ModelCategory::Image],
+    }
+}
+
 fn build_all_manifests() -> Vec<AiModelManifest> {
     vec![
         parler_mini_manifest(),
@@ -571,6 +817,9 @@ fn build_all_manifests() -> Vec<AiModelManifest> {
         flux_2_klein_4b_manifest(),
         flux_2_klein_9b_manifest(),
         flux_2_dev_manifest(),
+        gemma_3_4b_it_manifest(),
+        gemma_3_12b_it_manifest(),
+        gemma_3_27b_it_manifest(),
     ]
 }
 
@@ -627,7 +876,7 @@ mod tests {
     #[test]
     fn known_manifests_contains_parler() {
         let manifests = known_manifests();
-        assert!(manifests.len() >= 8);
+        assert!(manifests.len() >= 11);
         assert!(manifests.iter().any(|m| m.manifest.name == "parler-mini"));
         assert!(manifests.iter().any(|m| m.manifest.name == "parler-large"));
     }
@@ -690,8 +939,45 @@ mod tests {
     }
 
     #[test]
-    fn manifests_for_chat_is_empty() {
-        assert!(manifests_for_category(ModelCategory::Chat).is_empty());
+    fn manifests_for_chat_contains_gemma3() {
+        let chat = manifests_for_category(ModelCategory::Chat);
+        assert!(chat.len() >= 3);
+        assert!(chat.iter().any(|m| m.manifest.name == "gemma-3-4b-it"));
+        assert!(chat.iter().any(|m| m.manifest.name == "gemma-3-12b-it"));
+        assert!(chat.iter().any(|m| m.manifest.name == "gemma-3-27b-it"));
+    }
+
+    #[test]
+    fn known_manifests_contains_gemma3() {
+        let manifests = known_manifests();
+        assert!(manifests
+            .iter()
+            .any(|m| m.manifest.name == "gemma-3-4b-it"));
+        assert!(manifests
+            .iter()
+            .any(|m| m.manifest.name == "gemma-3-12b-it"));
+        assert!(manifests
+            .iter()
+            .any(|m| m.manifest.name == "gemma-3-27b-it"));
+    }
+
+    #[test]
+    fn gemma3_manifests_are_multipurpose() {
+        for name in ["gemma-3-4b-it", "gemma-3-12b-it", "gemma-3-27b-it"] {
+            let m = find_manifest(name).unwrap();
+            assert_eq!(m.manifest.family, "gemma3");
+            assert!(m.categories.contains(&ModelCategory::Chat));
+            assert!(m.categories.contains(&ModelCategory::Tool));
+            assert!(m.categories.contains(&ModelCategory::Image));
+        }
+    }
+
+    #[test]
+    fn gemma3_manifests_are_gated() {
+        for name in ["gemma-3-4b-it", "gemma-3-12b-it", "gemma-3-27b-it"] {
+            let m = find_manifest(name).unwrap();
+            assert!(m.manifest.files.iter().all(|f| f.gated));
+        }
     }
 
     #[test]
