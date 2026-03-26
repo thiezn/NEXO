@@ -10,9 +10,16 @@ path = "src/main.rs"
 [dependencies]
 nexo-ws-schema = { path = "../shared/nexo-ws-schema" }
 nexo-ws-client = { path = "../shared/nexo-ws-client" }
-utl-helpers = { path = "../shared/utl-helpers" }
+nexo-tool-spec = { path = "../shared/nexo-tool-spec" }
+utl-helpers = { path = "../shared/utl-helpers", features = ["config"] }
 tokio = { version = "1", features = ["full"] }
-
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+anyhow = "1"
+async-trait = "0"
 
 [lints]
 workspace = true

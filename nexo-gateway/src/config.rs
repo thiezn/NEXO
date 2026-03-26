@@ -55,7 +55,7 @@ mod tests {
     #[test]
     fn default_config_values() {
         let config = GatewayConfig::default();
-        assert_eq!(config.host, "127.0.0.1");
+        assert_eq!(config.host, "0.0.0.0");
         assert_eq!(config.port, 6969);
         assert_eq!(config.tick_interval_ms, 15000);
         assert_eq!(config.auth_token, nexo_ws_schema::AUTH_TOKEN);
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn bind_addr_formatting() {
         let config = GatewayConfig::default();
-        assert_eq!(config.bind_addr(), "127.0.0.1:6969");
+        assert_eq!(config.bind_addr(), "0.0.0.0:6969");
     }
 
     #[test]

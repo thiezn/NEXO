@@ -39,6 +39,19 @@ pub enum Platform {
     Windows,
 }
 
+impl Platform {
+    /// Detect the current platform from `std::env::consts::OS`.
+    pub fn current() -> Self {
+        match std::env::consts::OS {
+            "macos" => Self::Macos,
+            "ios" => Self::Ios,
+            "linux" => Self::Linux,
+            "windows" => Self::Windows,
+            _ => Self::Macos,
+        }
+    }
+}
+
 /// Client identity included in the connect handshake.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ClientInfo {

@@ -65,6 +65,35 @@ pub async fn perform_handshake(
     }
 }
 
+/// Build default `ConnectParams` for a node-role capability host.
+pub fn default_node_connect_params(
+    client_id: &str,
+    version: &str,
+    platform: nexo_ws_schema::Platform,
+    device_id: &str,
+    capabilities: Vec<String>,
+    commands: Vec<String>,
+) -> ConnectParams {
+    ConnectParams {
+        min_protocol: PROTOCOL_VERSION,
+        max_protocol: PROTOCOL_VERSION,
+        client: nexo_ws_schema::ClientInfo {
+            id: client_id.to_string(),
+            version: version.to_string(),
+            platform,
+        },
+        role: nexo_ws_schema::Role::Node,
+        scopes: vec![],
+        capabilities,
+        commands,
+        locale: Some("en-US".to_string()),
+        user_agent: Some(format!("NEXO-{client_id}/{version}")),
+        device: Some(nexo_ws_schema::DeviceInfo {
+            id: device_id.to_string(),
+        }),
+    }
+}
+
 /// Build default `ConnectParams` for a user-role CLI client.
 pub fn default_user_connect_params(
     client_id: &str,

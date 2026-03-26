@@ -16,8 +16,9 @@ pub use events::{
 pub use frame::Frame;
 pub use methods::{
     AgentParams, AgentResponse, HealthParams, HealthResponse, Method, SendParams, SendResponse,
-    StatusParams, StatusResponse, SystemPresenceParams, ToolEntry, ToolsCatalogParams,
-    ToolsCatalogResponse,
+    StatusParams, StatusResponse, SystemPresenceParams, ToolEntry, ToolSpecEntry,
+    ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams, ToolsExecuteResponse,
+    ToolsRegisterParams, ToolsRegisterResponse,
 };
 pub use schema::{SchemaSection, generate_schema, schema_json};
 pub use types::{ClientInfo, DeviceInfo, Platform, Role, Scope};

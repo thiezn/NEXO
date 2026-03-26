@@ -13,6 +13,10 @@ pub enum Method {
     SystemPresence,
     #[serde(rename = "tools.catalog")]
     ToolsCatalog,
+    #[serde(rename = "tools.register")]
+    ToolsRegister,
+    #[serde(rename = "tools.execute")]
+    ToolsExecute,
 }
 
 // -- Request param types --
@@ -99,12 +103,56 @@ pub struct ToolEntry {
     pub description: String,
     pub source: String,
     pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Value>,
 }
 
 /// Response payload for `tools.catalog`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ToolsCatalogResponse {
     pub tools: Vec<ToolEntry>,
+}
+
+// -- tools.register --
+
+/// A tool specification entry for registration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ToolSpecEntry {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+/// Parameters for the `tools.register` method (sent by nodes).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ToolsRegisterParams {
+    pub tools: Vec<ToolSpecEntry>,
+}
+
+/// Response payload for `tools.register`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ToolsRegisterResponse {
+    pub registered: u32,
+}
+
+// -- tools.execute --
+
+/// Parameters for the `tools.execute` method.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolsExecuteParams {
+    pub tool: String,
+    pub args: serde_json::Value,
+    pub idempotency_key: String,
+}
+
+/// Response payload for `tools.execute`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct ToolsExecuteResponse {
+    pub success: bool,
+    pub output: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[cfg(test)]
@@ -176,11 +224,87 @@ mod tests {
                 description: "Extract data".into(),
                 source: "core".into(),
                 available: true,
+                parameters: None,
             }],
         };
         let json = serde_json::to_string(&resp).unwrap();
         let decoded: ToolsCatalogResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp.tools.len(), decoded.tools.len());
         assert_eq!(resp.tools[0].name, decoded.tools[0].name);
+    }
+
+    #[test]
+    fn tool_entry_with_parameters() {
+        let entry = ToolEntry {
+            name: "echo".into(),
+            description: "Echo input".into(),
+            source: "node".into(),
+            available: true,
+            parameters: Some(serde_json::json!({"type": "object"})),
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn tool_entry_without_parameters_omits_field() {
+        let entry = ToolEntry {
+            name: "echo".into(),
+            description: "Echo input".into(),
+            source: "node".into(),
+            available: true,
+            parameters: None,
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("parameters"));
+    }
+
+    #[test]
+    fn tools_register_method_serialization() {
+        assert_eq!(
+            serde_json::to_string(&Method::ToolsRegister).unwrap(),
+            "\"tools.register\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Method::ToolsExecute).unwrap(),
+            "\"tools.execute\""
+        );
+    }
+
+    #[test]
+    fn tools_register_params_roundtrip() {
+        let params = ToolsRegisterParams {
+            tools: vec![ToolSpecEntry {
+                name: "echo".into(),
+                description: "Echo tool".into(),
+                parameters: serde_json::json!({"type": "object", "properties": {"input": {"type": "string"}}}),
+            }],
+        };
+        let json = serde_json::to_string(&params).unwrap();
+        let decoded: ToolsRegisterParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, decoded);
+    }
+
+    #[test]
+    fn tools_execute_params_camel_case() {
+        let params = ToolsExecuteParams {
+            tool: "echo".into(),
+            args: serde_json::json!({"input": "hello"}),
+            idempotency_key: "key-1".into(),
+        };
+        let json = serde_json::to_value(&params).unwrap();
+        assert_eq!(json["idempotencyKey"], "key-1");
+    }
+
+    #[test]
+    fn tools_execute_response_roundtrip() {
+        let resp = ToolsExecuteResponse {
+            success: true,
+            output: "hello".into(),
+            error: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let decoded: ToolsExecuteResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, decoded);
     }
 }

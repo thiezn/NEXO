@@ -29,7 +29,10 @@
 
 - Connect to the **same WS server** with `role: node`.
 - Provide a device identity in `connect`; pairing is **device‑based** (role `node`)
-- Expose commands like `epub_extractor.*`, `text-to-speech.*`.
+- After handshake, register full tool specs via `tools.register`.
+- Listen for `tools.execute` requests forwarded by the gateway.
+- Expose commands like `epub_extractor.*`, `echo.*`, `ping`.
+- Automatically reconnect and re-register on disconnect.
 
 ## Connection lifecycle (single client)
 
@@ -50,6 +53,31 @@ sequenceDiagram
     Gateway-->>Client: response:agent<br>ack {runId, status:"accepted"}
     Gateway-->>Client: event:agent<br>(streaming)
     Gateway-->>Client: response:agent<br>final {runId, status, summary}
+```
+
+## Node registration + tool execution
+
+```mermaid
+sequenceDiagram
+    participant Node
+    participant Gateway
+    participant User
+
+    Node->>Gateway: request:connect (role=node, capabilities)
+    Gateway-->>Node: response:hello-ok
+    Node->>Gateway: request:tools.register (full specs)
+    Gateway-->>Node: response {registered: N}
+    Note right of Gateway: Tools stored in memory registry
+
+    User->>Gateway: request:tools.catalog
+    Gateway-->>User: response {tools: [...]}
+
+    User->>Gateway: request:tools.execute {tool, args}
+    Gateway->>Node: forwarded:tools.execute {tool, args}
+    Node-->>Gateway: response {success, output}
+    Gateway-->>User: relayed response {success, output}
+
+    Note over Node,Gateway: On disconnect: gateway deregisters<br>all tools from this node
 ```
 
 ## Wire protocol (summary)
