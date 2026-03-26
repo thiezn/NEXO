@@ -17,7 +17,13 @@ pub struct InferenceRecord {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InferenceDetail {
     /// Chat, Tool, or Image-analysis: token-generating models.
-    TextGeneration { tokens_generated: usize },
+    TextGeneration {
+        tokens_generated: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt_tokens: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefix_reuse_tokens: Option<usize>,
+    },
     /// Speech-to-text transcription.
     Transcription { audio_duration_ms: u64 },
     /// Text-to-speech synthesis.
@@ -47,7 +53,7 @@ impl InferenceDetail {
         }
 
         match self {
-            Self::TextGeneration { tokens_generated } => *tokens_generated as f64 / secs,
+            Self::TextGeneration { tokens_generated, .. } => *tokens_generated as f64 / secs,
             Self::Transcription { audio_duration_ms } => {
                 if *audio_duration_ms == 0 {
                     return 0.0;
@@ -134,6 +140,8 @@ mod tests {
     fn text_generation_metric() {
         let detail = InferenceDetail::TextGeneration {
             tokens_generated: 100,
+            prompt_tokens: None,
+            prefix_reuse_tokens: None,
         };
         let metric = detail.primary_metric(500);
         assert!((metric - 200.0).abs() < 0.01); // 100 tokens / 0.5s = 200 tok/s
@@ -183,6 +191,8 @@ mod tests {
     fn zero_time_returns_zero() {
         let detail = InferenceDetail::TextGeneration {
             tokens_generated: 100,
+            prompt_tokens: None,
+            prefix_reuse_tokens: None,
         };
         assert_eq!(detail.primary_metric(0), 0.0);
     }

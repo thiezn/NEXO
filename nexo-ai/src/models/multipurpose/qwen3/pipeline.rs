@@ -4,6 +4,7 @@ use anyhow::Result;
 use candle_core::{DType, Device, Tensor};
 use candle_transformers::generation::LogitsProcessor;
 
+use crate::shared::templates::kv_cache::KvCacheState;
 use crate::shared::templates::{ChatTemplate, ReasoningMode};
 use crate::shared::types::*;
 
@@ -52,6 +53,29 @@ impl Qwen3Weights {
     }
 }
 
+impl KvCacheState for Qwen3Weights {
+    fn cache_token_count(&self) -> usize {
+        match self {
+            Self::Dense(m) => m.cache_token_count(),
+            Self::Moe(m) => m.cache_token_count(),
+        }
+    }
+
+    fn clear_cache(&mut self) {
+        match self {
+            Self::Dense(m) => m.clear_cache(),
+            Self::Moe(m) => m.clear_cache(),
+        }
+    }
+
+    fn truncate_to(&mut self, len: usize) {
+        match self {
+            Self::Dense(m) => m.truncate_to(len),
+            Self::Moe(m) => m.truncate_to(len),
+        }
+    }
+}
+
 // ── Loaded state ─────────────────────────────────────────────────────────────
 
 pub struct LoadedState {
@@ -59,6 +83,7 @@ pub struct LoadedState {
     pub tokenizer: tokenizers::Tokenizer,
     pub device: Device,
     pub eos_token_ids: Vec<u32>,
+    cached_prompt_tokens: Vec<u32>,
     pub vision: Option<super::vision::VisionState>,
 }
 
@@ -113,6 +138,7 @@ pub fn load(model_dir: &Path) -> Result<LoadedState> {
         tokenizer,
         device,
         eos_token_ids,
+        cached_prompt_tokens: Vec::new(),
         vision,
     })
 }
@@ -169,21 +195,81 @@ fn generate(
     max_tokens: usize,
     temperature: f64,
     top_p: f64,
+    max_context_tokens: Option<usize>,
 ) -> Result<(Vec<u32>, u64)> {
+    if let Some(budget) = max_context_tokens {
+        let total = prompt_tokens.len() + max_tokens;
+        if total > budget {
+            anyhow::bail!(
+                "context budget exceeded: prompt ({}) + max_tokens ({}) = {} > budget ({}). \
+                 Slide the conversation window to reduce prompt size.",
+                prompt_tokens.len(),
+                max_tokens,
+                total,
+                budget,
+            );
+        }
+    }
+
     let start = std::time::Instant::now();
-    state.weights.clear_kv_cache();
     let mut sampler = create_sampler(temperature, top_p, 0);
 
-    let prompt_len = prompt_tokens.len();
-    let input = Tensor::new(prompt_tokens, &state.device)?.unsqueeze(0)?;
+    // Compute common prefix between cached and new prompt tokens.
+    let cached_len = state.weights.cache_token_count();
+    let common_prefix = state
+        .cached_prompt_tokens
+        .iter()
+        .zip(prompt_tokens.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
 
-    let logits = state.weights.forward(&input, 0)?;
+    let prefill_offset;
+    let prefill_tokens: &[u32];
+
+    if common_prefix > 0 && common_prefix == cached_len && cached_len == prompt_tokens.len() {
+        // Exact match — truncate last token so we can re-forward it for logits.
+        tracing::debug!(cached_len, "KV cache exact match");
+        state.weights.truncate_to(cached_len - 1);
+        prefill_tokens = &prompt_tokens[cached_len - 1..];
+        prefill_offset = cached_len - 1;
+    } else if common_prefix > 0 && common_prefix == cached_len {
+        // Cache is a valid prefix of the new prompt — process only new tokens.
+        tracing::debug!(
+            common_prefix,
+            new_tokens = prompt_tokens.len() - common_prefix,
+            "KV cache prefix reuse"
+        );
+        prefill_tokens = &prompt_tokens[common_prefix..];
+        prefill_offset = common_prefix;
+    } else if common_prefix > 0 {
+        // Partial match — truncate cache to common prefix, process remainder.
+        tracing::debug!(
+            common_prefix,
+            cached_len,
+            "KV cache partial match, truncating"
+        );
+        state.weights.truncate_to(common_prefix);
+        prefill_tokens = &prompt_tokens[common_prefix..];
+        prefill_offset = common_prefix;
+    } else {
+        // No match — full reset and full prefill.
+        state.weights.clear_kv_cache();
+        prefill_tokens = prompt_tokens;
+        prefill_offset = 0;
+    }
+
+    let prompt_len = prompt_tokens.len();
+    let input = Tensor::new(prefill_tokens, &state.device)?.unsqueeze(0)?;
+    let logits = state.weights.forward(&input, prefill_offset)?;
     let logits = logits.squeeze(0)?;
     let mut next_token = sampler.sample(&logits)?;
 
     let mut generated = vec![next_token];
 
     if state.eos_token_ids.contains(&next_token) {
+        if state.cached_prompt_tokens != prompt_tokens {
+            state.cached_prompt_tokens = prompt_tokens.to_vec();
+        }
         let elapsed = start.elapsed().as_millis() as u64;
         return Ok((generated, elapsed));
     }
@@ -201,13 +287,20 @@ fn generate(
         generated.push(next_token);
     }
 
+    if state.cached_prompt_tokens != prompt_tokens {
+        state.cached_prompt_tokens = prompt_tokens.to_vec();
+    }
     let elapsed = start.elapsed().as_millis() as u64;
     Ok((generated, elapsed))
 }
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
 
-pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatResponse> {
+pub fn chat(
+    state: &mut LoadedState,
+    request: &ChatRequest,
+    max_context_tokens: Option<usize>,
+) -> Result<ChatResponse> {
     let prompt = Qwen3Template.format_prompt(&request.messages, &ReasoningMode::Auto);
     let encoding = state
         .tokenizer
@@ -221,6 +314,7 @@ pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatRespon
         request.max_tokens,
         request.temperature,
         request.top_p,
+        max_context_tokens,
     )?;
 
     let raw_text = state
@@ -245,7 +339,11 @@ pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatRespon
 
 // ── Tool calling ─────────────────────────────────────────────────────────────
 
-pub fn call_tools(state: &mut LoadedState, request: &ToolCallRequest) -> Result<ToolCallResponse> {
+pub fn call_tools(
+    state: &mut LoadedState,
+    request: &ToolCallRequest,
+    max_context_tokens: Option<usize>,
+) -> Result<ToolCallResponse> {
     let prompt = Qwen3Template.format_with_tools(&request.messages, &request.tools, &ReasoningMode::Auto);
     let encoding = state
         .tokenizer
@@ -265,6 +363,7 @@ pub fn call_tools(state: &mut LoadedState, request: &ToolCallRequest) -> Result<
         request.max_tokens,
         temperature,
         0.95,
+        max_context_tokens,
     )?;
 
     let raw_text = state

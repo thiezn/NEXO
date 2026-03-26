@@ -1244,6 +1244,8 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str, conversation: &mut Con
                 ModelCategory::Chat,
                 response.tokens_generated,
                 response.inference_time_ms,
+                None,
+                None,
             );
         }
         Err(e) => println!("  error: {e}"),
@@ -1304,6 +1306,8 @@ fn handle_tool(coordinator: &mut Coordinator, text: &str) {
                 ModelCategory::Tool,
                 response.tokens_generated,
                 response.inference_time_ms,
+                None,
+                None,
             );
         }
         Err(e) => println!("  error: {e}"),
@@ -1581,6 +1585,8 @@ fn handle_image(coordinator: &mut Coordinator, path: &str, prompt: &str) {
                 ModelCategory::Image,
                 response.tokens_generated,
                 response.inference_time_ms,
+                None,
+                None,
             );
         }
         Err(e) => println!("  error: {e}"),

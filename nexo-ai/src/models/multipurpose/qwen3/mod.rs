@@ -16,6 +16,7 @@ pub struct Qwen3Model {
     memory_bytes: u64,
     model_dir: PathBuf,
     loaded: Option<pipeline::LoadedState>,
+    max_context_tokens: Option<usize>,
 }
 
 impl Qwen3Model {
@@ -25,7 +26,13 @@ impl Qwen3Model {
             memory_bytes,
             model_dir,
             loaded: None,
+            max_context_tokens: None,
         }
+    }
+
+    pub fn with_max_context_tokens(mut self, max_context_tokens: Option<usize>) -> Self {
+        self.max_context_tokens = max_context_tokens;
+        self
     }
 }
 
@@ -93,7 +100,7 @@ impl ChatModel for Qwen3Model {
             .loaded
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("model not loaded"))?;
-        pipeline::chat(state, request)
+        pipeline::chat(state, request, self.max_context_tokens)
     }
 }
 
@@ -103,7 +110,7 @@ impl ToolModel for Qwen3Model {
             .loaded
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("model not loaded"))?;
-        pipeline::call_tools(state, request)
+        pipeline::call_tools(state, request, self.max_context_tokens)
     }
 }
 

@@ -35,13 +35,19 @@ impl StatsCollector {
         category: ModelCategory,
         tokens_generated: usize,
         inference_time_ms: u64,
+        prompt_tokens: Option<usize>,
+        prefix_reuse_tokens: Option<usize>,
     ) {
         self.backend.record_inference(InferenceRecord {
             timestamp: SystemTime::now(),
             model_name: model_name.to_string(),
             category,
             inference_time_ms,
-            detail: InferenceDetail::TextGeneration { tokens_generated },
+            detail: InferenceDetail::TextGeneration {
+                tokens_generated,
+                prompt_tokens,
+                prefix_reuse_tokens,
+            },
         });
     }
 
@@ -100,6 +106,18 @@ impl StatsCollector {
         });
     }
 
+    /// Log current system memory alongside an inference event.
+    pub fn log_memory_pressure(&self, model_name: &str) {
+        let free = crate::device::free_system_memory_bytes();
+        let available = crate::device::available_system_memory_bytes();
+        tracing::info!(
+            model = model_name,
+            free_mb = free.map(|b| b / (1024 * 1024)),
+            available_mb = available.map(|b| b / (1024 * 1024)),
+            "memory pressure"
+        );
+    }
+
     pub fn record_model_loaded(&mut self, model_name: &str, load_time_ms: u64, memory_bytes: u64) {
         self.backend.record_lifecycle(LifecycleRecord {
             timestamp: SystemTime::now(),
@@ -156,8 +174,8 @@ mod tests {
     #[test]
     fn record_and_query_text_generation() {
         let mut stats = StatsCollector::new();
-        stats.record_text_generation("test-model", ModelCategory::Chat, 100, 500);
-        stats.record_text_generation("test-model", ModelCategory::Chat, 200, 1000);
+        stats.record_text_generation("test-model", ModelCategory::Chat, 100, 500, None, None);
+        stats.record_text_generation("test-model", ModelCategory::Chat, 200, 1000, None, None);
 
         let all = stats.all_stats();
         assert_eq!(all.len(), 1);
@@ -210,7 +228,7 @@ mod tests {
     #[test]
     fn clear_resets_everything() {
         let mut stats = StatsCollector::new();
-        stats.record_text_generation("m", ModelCategory::Chat, 10, 100);
+        stats.record_text_generation("m", ModelCategory::Chat, 10, 100, None, None);
         stats.record_model_loaded("m", 500, 1000);
         assert!(!stats.all_stats().is_empty());
 

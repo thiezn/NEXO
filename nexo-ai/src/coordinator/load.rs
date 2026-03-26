@@ -87,20 +87,28 @@ impl super::Coordinator {
                     memory_bytes,
                     model_dir,
                 )),
-                "gemma3" => Box::new(
-                    crate::models::multipurpose::gemma3::Gemma3Model::new(
-                        model_name.to_string(),
-                        memory_bytes,
-                        model_dir,
-                    ),
-                ),
-                "qwen3" => Box::new(
-                    crate::models::multipurpose::qwen3::Qwen3Model::new(
-                        model_name.to_string(),
-                        memory_bytes,
-                        model_dir,
-                    ),
-                ),
+                "gemma3" => {
+                    let settings = self.config.model_settings(model_name);
+                    Box::new(
+                        crate::models::multipurpose::gemma3::Gemma3Model::new(
+                            model_name.to_string(),
+                            memory_bytes,
+                            model_dir,
+                        )
+                        .with_max_context_tokens(settings.max_context_tokens),
+                    )
+                }
+                "qwen3" => {
+                    let settings = self.config.model_settings(model_name);
+                    Box::new(
+                        crate::models::multipurpose::qwen3::Qwen3Model::new(
+                            model_name.to_string(),
+                            memory_bytes,
+                            model_dir,
+                        )
+                        .with_max_context_tokens(settings.max_context_tokens),
+                    )
+                }
                 "z_image" => Box::new(
                     crate::models::imagine::z_image::ZImageModel::new(
                         model_name.to_string(),

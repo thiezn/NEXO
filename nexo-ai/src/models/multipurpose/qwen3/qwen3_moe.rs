@@ -202,6 +202,24 @@ impl Attention {
     fn clear_kv_cache(&mut self) {
         self.kv_cache.reset();
     }
+
+    fn kv_cache_seq_len(&self) -> usize {
+        self.kv_cache.current_seq_len()
+    }
+
+    fn truncate_kv_cache(&mut self, len: usize) {
+        let dim = self.kv_cache.dim();
+        if let Some(k) = self.kv_cache.k_mut() {
+            if let Ok(narrowed) = k.narrow(dim, 0, len) {
+                *k = narrowed;
+            }
+        }
+        if let Some(v) = self.kv_cache.v_mut() {
+            if let Ok(narrowed) = v.narrow(dim, 0, len) {
+                *v = narrowed;
+            }
+        }
+    }
 }
 
 struct LayerWeights {
@@ -218,6 +236,7 @@ pub struct ModelWeights {
     output: QMatMul,
     dtype: DType,
     device: Device,
+    cached_mask: Option<(usize, usize, usize, Tensor)>,
 }
 
 impl ModelWeights {
@@ -360,10 +379,16 @@ impl ModelWeights {
             output,
             dtype,
             device: device.clone(),
+            cached_mask: None,
         })
     }
 
-    fn causal_mask(&self, b: usize, tgt: usize, offset: usize) -> Result<Tensor> {
+    fn causal_mask(&mut self, b: usize, tgt: usize, offset: usize) -> Result<Tensor> {
+        if let Some((cb, ct, co, ref tensor)) = self.cached_mask {
+            if cb == b && ct == tgt && co == offset {
+                return Ok(tensor.clone());
+            }
+        }
         let minf = f32::NEG_INFINITY;
         let mask: Vec<_> = (0..tgt)
             .flat_map(|i| {
@@ -372,8 +397,10 @@ impl ModelWeights {
                 })
             })
             .collect();
-        Tensor::from_slice(&mask, (b, 1, tgt, tgt + offset), &self.device)?
-            .to_dtype(self.dtype)
+        let tensor = Tensor::from_slice(&mask, (b, 1, tgt, tgt + offset), &self.device)?
+            .to_dtype(self.dtype)?;
+        self.cached_mask = Some((b, tgt, offset, tensor));
+        Ok(self.cached_mask.as_ref().unwrap().3.clone())
     }
 
     pub fn forward(&mut self, x: &Tensor, offset: usize) -> Result<Tensor> {
@@ -433,6 +460,25 @@ impl ModelWeights {
     pub fn clear_kv_cache(&mut self) {
         for layer in &mut self.layers {
             layer.self_attn.clear_kv_cache();
+        }
+    }
+}
+
+impl crate::shared::templates::kv_cache::KvCacheState for ModelWeights {
+    fn cache_token_count(&self) -> usize {
+        self.layers
+            .first()
+            .map(|l| l.self_attn.kv_cache_seq_len())
+            .unwrap_or(0)
+    }
+
+    fn clear_cache(&mut self) {
+        self.clear_kv_cache();
+    }
+
+    fn truncate_to(&mut self, len: usize) {
+        for layer in &mut self.layers {
+            layer.self_attn.truncate_kv_cache(len);
         }
     }
 }

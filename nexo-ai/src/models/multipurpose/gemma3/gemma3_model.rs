@@ -285,6 +285,13 @@ impl Attention {
             KvCache::Rotating(c) => c.reset(),
         }
     }
+
+    fn kv_cache_seq_len(&self) -> usize {
+        match &self.kv_cache {
+            KvCache::Normal(c) => c.current_seq_len(),
+            KvCache::Rotating(c) => c.current_seq_len(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -396,6 +403,15 @@ fn prepare_decoder_attention_mask(
 }
 
 #[derive(Debug, Clone)]
+struct CachedMasks {
+    batch_size: usize,
+    seq_len: usize,
+    seqlen_offset: usize,
+    global: Option<Tensor>,
+    sliding: Option<Tensor>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Model {
     embed_tokens: candle_nn::Embedding,
     layers: Vec<DecoderLayer>,
@@ -406,6 +422,7 @@ pub struct Model {
     dtype: DType,
     pub hidden_size: usize,
     sliding_window: usize,
+    cached_masks: Option<CachedMasks>,
 }
 
 impl Model {
@@ -436,17 +453,27 @@ impl Model {
             dtype: vb.dtype(),
             hidden_size: cfg.hidden_size,
             sliding_window: cfg.sliding_window,
+            cached_masks: None,
         })
     }
 
     fn create_attention_masks(
-        &self,
+        &mut self,
         batch_size: usize,
         seq_len: usize,
         seqlen_offset: usize,
     ) -> Result<(Option<Tensor>, Option<Tensor>)> {
         if seq_len <= 1 {
             return Ok((None, None));
+        }
+
+        if let Some(ref cached) = self.cached_masks {
+            if cached.batch_size == batch_size
+                && cached.seq_len == seq_len
+                && cached.seqlen_offset == seqlen_offset
+            {
+                return Ok((cached.global.clone(), cached.sliding.clone()));
+            }
         }
 
         let mask = prepare_decoder_attention_mask(
@@ -467,7 +494,15 @@ impl Model {
             &self.device,
         )?;
 
-        Ok((Some(mask), Some(sliding_mask)))
+        self.cached_masks = Some(CachedMasks {
+            batch_size,
+            seq_len,
+            seqlen_offset,
+            global: Some(mask),
+            sliding: Some(sliding_mask),
+        });
+        let cached = self.cached_masks.as_ref().unwrap();
+        Ok((cached.global.clone(), cached.sliding.clone()))
     }
 
     pub fn forward(&mut self, input_ids: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
@@ -523,5 +558,27 @@ impl Model {
         for layer in self.layers.iter_mut() {
             layer.clear_kv_cache()
         }
+    }
+}
+
+impl crate::shared::templates::kv_cache::KvCacheState for Model {
+    fn cache_token_count(&self) -> usize {
+        self.layers
+            .first()
+            .map(|l| l.self_attn.kv_cache_seq_len())
+            .unwrap_or(0)
+    }
+
+    fn clear_cache(&mut self) {
+        self.clear_kv_cache();
+    }
+
+    fn truncate_to(&mut self, len: usize) {
+        // candle_nn::kv_cache::Cache does not expose a public setter for
+        // current_seq_len, so true partial truncation is not possible.
+        // Fall back to full reset — the prefix-match path in the pipeline
+        // (which skips clearing entirely) still provides the main benefit.
+        let _ = len;
+        self.clear_kv_cache();
     }
 }

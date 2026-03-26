@@ -127,6 +127,8 @@ mod tests {
             inference_time_ms: time_ms,
             detail: InferenceDetail::TextGeneration {
                 tokens_generated: tokens,
+                prompt_tokens: None,
+                prefix_reuse_tokens: None,
             },
         }
     }

@@ -6,6 +6,7 @@ use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use serde::Deserialize;
 
+use crate::shared::templates::kv_cache::KvCacheState;
 use crate::shared::templates::ChatTemplate;
 use crate::shared::types::*;
 
@@ -79,6 +80,7 @@ pub struct LoadedState {
     pub device: Device,
     pub eos_token_ids: Vec<u32>,
     pub vision: Option<super::vision::VisionState>,
+    cached_prompt_tokens: Vec<u32>,
 }
 
 // ── Load ────────────────────────────────────────────────────────────────────
@@ -142,6 +144,7 @@ pub fn load(model_dir: &Path) -> Result<LoadedState> {
         device,
         eos_token_ids,
         vision,
+        cached_prompt_tokens: Vec::new(),
     })
 }
 
@@ -164,21 +167,68 @@ fn generate(
     max_tokens: usize,
     temperature: f64,
     top_p: f64,
+    max_context_tokens: Option<usize>,
 ) -> Result<(Vec<u32>, u64)> {
+    if let Some(budget) = max_context_tokens {
+        let total = prompt_tokens.len() + max_tokens;
+        if total > budget {
+            anyhow::bail!(
+                "context budget exceeded: prompt ({}) + max_tokens ({}) = {} > budget ({}). \
+                 Slide the conversation window to reduce prompt size.",
+                prompt_tokens.len(),
+                max_tokens,
+                total,
+                budget,
+            );
+        }
+    }
+
     let start = std::time::Instant::now();
-    state.model.clear_kv_cache();
     let mut sampler = create_sampler(temperature, top_p, 0);
 
-    let prompt_len = prompt_tokens.len();
-    let input = Tensor::new(prompt_tokens, &state.device)?.unsqueeze(0)?;
+    // Compute common prefix between cached and new prompt tokens.
+    // Gemma3 cannot truncate its KV cache (candle_nn::Cache has no public
+    // seq_len setter), so only an exact prefix match is useful here.
+    let cached_len = state.model.cache_token_count();
+    let common_prefix = state
+        .cached_prompt_tokens
+        .iter()
+        .zip(prompt_tokens.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
 
-    let logits = state.model.forward(&input, 0)?;
+    let prefill_offset;
+    let prefill_tokens: &[u32];
+
+    if common_prefix > 0 && common_prefix == cached_len && common_prefix < prompt_tokens.len() {
+        // Cache is a valid prefix of the new prompt — process only new tokens.
+        tracing::debug!(
+            common_prefix,
+            new_tokens = prompt_tokens.len() - common_prefix,
+            "KV cache prefix reuse"
+        );
+        prefill_tokens = &prompt_tokens[common_prefix..];
+        prefill_offset = common_prefix;
+    } else {
+        // No usable prefix (or exact match with no new tokens) — full reset.
+        if cached_len > 0 {
+            state.model.clear_kv_cache();
+        }
+        prefill_tokens = prompt_tokens;
+        prefill_offset = 0;
+    }
+
+    // Prefill: process prompt tokens through the model.
+    let prompt_len = prompt_tokens.len();
+    let input = Tensor::new(prefill_tokens, &state.device)?.unsqueeze(0)?;
+    let logits = state.model.forward(&input, prefill_offset)?;
     let logits = logits.i((0, 0, ..))?;
     let mut next_token = sampler.sample(&logits)?;
 
     let mut generated = vec![next_token];
 
     if state.eos_token_ids.contains(&next_token) {
+        state.cached_prompt_tokens = prompt_tokens.to_vec();
         let elapsed = start.elapsed().as_millis() as u64;
         return Ok((generated, elapsed));
     }
@@ -196,13 +246,20 @@ fn generate(
         generated.push(next_token);
     }
 
+    if state.cached_prompt_tokens != prompt_tokens {
+        state.cached_prompt_tokens = prompt_tokens.to_vec();
+    }
     let elapsed = start.elapsed().as_millis() as u64;
     Ok((generated, elapsed))
 }
 
 // ── Chat ────────────────────────────────────────────────────────────────────
 
-pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatResponse> {
+pub fn chat(
+    state: &mut LoadedState,
+    request: &ChatRequest,
+    max_context_tokens: Option<usize>,
+) -> Result<ChatResponse> {
     let tmpl = template::Gemma3Template;
     let prompt = tmpl.format_prompt(&request.messages, &crate::shared::templates::ReasoningMode::Disabled);
     let encoding = state
@@ -217,6 +274,7 @@ pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatRespon
         request.max_tokens,
         request.temperature,
         request.top_p,
+        max_context_tokens,
     )?;
 
     let text = state
@@ -233,7 +291,11 @@ pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatRespon
 
 // ── Tool calling ────────────────────────────────────────────────────────────
 
-pub fn call_tools(state: &mut LoadedState, request: &ToolCallRequest) -> Result<ToolCallResponse> {
+pub fn call_tools(
+    state: &mut LoadedState,
+    request: &ToolCallRequest,
+    max_context_tokens: Option<usize>,
+) -> Result<ToolCallResponse> {
     let tmpl = template::Gemma3Template;
     let prompt = tmpl.format_with_tools(&request.messages, &request.tools, &crate::shared::templates::ReasoningMode::Disabled);
     let encoding = state
@@ -255,6 +317,7 @@ pub fn call_tools(state: &mut LoadedState, request: &ToolCallRequest) -> Result<
         request.max_tokens,
         temperature,
         0.95,
+        max_context_tokens,
     )?;
 
     let text = state

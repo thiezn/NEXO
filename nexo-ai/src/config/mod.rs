@@ -91,6 +91,10 @@ pub struct ModelSettings {
     pub default_width: Option<u32>,
     pub default_height: Option<u32>,
     pub voice_description: Option<String>,
+    /// Maximum number of tokens (prompt + generation) allowed in the KV cache.
+    /// When set, generation will fail if the prompt exceeds this budget,
+    /// signalling the caller to slide the conversation window.
+    pub max_context_tokens: Option<usize>,
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -206,6 +210,7 @@ mod tests {
                 default_width: None,
                 default_height: None,
                 voice_description: None,
+                max_context_tokens: None,
             },
         );
         cfg.models.insert(
@@ -255,6 +260,7 @@ mod tests {
             default_width: Some(512),
             default_height: Some(512),
             voice_description: Some("warm male voice".to_string()),
+            max_context_tokens: Some(8192),
         };
         let toml_str = toml::to_string(&settings).unwrap();
         let parsed: ModelSettings = toml::from_str(&toml_str).unwrap();
