@@ -15,7 +15,9 @@ Usage:
 Repo IDs are things like 'openai/whisper-large-v3'
 """
 
-from __future__ import annotations
+import os
+
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import fnmatch
 import json
@@ -56,6 +58,7 @@ def load_token() -> str | None:
     # 4. huggingface-cli cached token
     try:
         from huggingface_hub import HfFolder
+
         return HfFolder.get_token()
     except Exception:
         return None
@@ -92,16 +95,20 @@ def get_repo_info(api: HfApi, repo_id: str) -> Any:
     try:
         return api.model_info(repo_id, files_metadata=True)
     except GatedRepoError:
-        output_json({
-            "error": f"Gated repo '{repo_id}' — set HF_TOKEN or request access at https://huggingface.co/{repo_id}",
-            "hint": "export HF_TOKEN=hf_... or place token in hugging_token.txt at project root",
-        })
+        output_json(
+            {
+                "error": f"Gated repo '{repo_id}' — set HF_TOKEN or request access at https://huggingface.co/{repo_id}",
+                "hint": "export HF_TOKEN=hf_... or place token in hugging_token.txt at project root",
+            }
+        )
         sys.exit(1)
     except RepositoryNotFoundError:
-        output_json({
-            "error": f"Repository '{repo_id}' not found",
-            "hint": f"Check the repo ID at https://huggingface.co/{repo_id}",
-        })
+        output_json(
+            {
+                "error": f"Repository '{repo_id}' not found",
+                "hint": f"Check the repo ID at https://huggingface.co/{repo_id}",
+            }
+        )
         sys.exit(1)
 
 
@@ -109,7 +116,7 @@ def get_repo_info(api: HfApi, repo_id: str) -> Any:
 
 
 def cmd_inspect(args: Any) -> None:
-    api = HfApi(token=load_token())
+    api = HfApi(token=load_token(), endpoint="https://hf-mirror.com")
     info = get_repo_info(api, args.repo_id)
 
     gated = bool(info.gated)
@@ -159,7 +166,7 @@ def cmd_inspect(args: Any) -> None:
 
 def cmd_tree(args: Any) -> None:
     """Show repo directory structure with file counts and sizes per directory."""
-    api = HfApi(token=load_token())
+    api = HfApi(token=load_token(), endpoint="https://hf-mirror.com")
     info = get_repo_info(api, args.repo_id)
 
     if not info.siblings:
@@ -181,13 +188,15 @@ def cmd_tree(args: Any) -> None:
     tree = []
     for dir_path in sorted(dirs.keys()):
         d = dirs[dir_path]
-        tree.append({
-            "directory": dir_path,
-            "file_count": len(d["files"]),
-            "total_size": format_human_size(d["total_bytes"]),
-            "total_bytes": d["total_bytes"],
-            "files": sorted(d["files"], key=lambda f: f["name"]),
-        })
+        tree.append(
+            {
+                "directory": dir_path,
+                "file_count": len(d["files"]),
+                "total_size": format_human_size(d["total_bytes"]),
+                "total_bytes": d["total_bytes"],
+                "files": sorted(d["files"], key=lambda f: f["name"]),
+            }
+        )
 
     output_json(
         {
@@ -250,30 +259,50 @@ def cmd_config(args: Any) -> None:
 # Patterns to auto-classify files into components
 COMPONENT_PATTERNS: list[tuple[str, str, list[str]]] = [
     # (component_name, description, glob_patterns)
-    ("transformer", "Model weights (transformer/diffusion)", [
-        "*.safetensors",
-        "model*.safetensors",
-        "diffusion_pytorch_model*.safetensors",
-    ]),
-    ("text_encoder", "Text encoder weights", [
-        "text_encoder/*.safetensors",
-        "text_encoder/**/*.safetensors",
-    ]),
-    ("vae", "VAE weights", [
-        "vae/*.safetensors",
-        "vae/**/*.safetensors",
-    ]),
-    ("tokenizer", "Tokenizer files", [
-        "tokenizer.json",
-        "tokenizer/*.json",
-        "text_encoder/tokenizer.json",
-        "**/tokenizer.json",
-    ]),
-    ("config", "Configuration files", [
-        "config.json",
-        "generation_config.json",
-        "preprocessor_config.json",
-    ]),
+    (
+        "transformer",
+        "Model weights (transformer/diffusion)",
+        [
+            "*.safetensors",
+            "model*.safetensors",
+            "diffusion_pytorch_model*.safetensors",
+        ],
+    ),
+    (
+        "text_encoder",
+        "Text encoder weights",
+        [
+            "text_encoder/*.safetensors",
+            "text_encoder/**/*.safetensors",
+        ],
+    ),
+    (
+        "vae",
+        "VAE weights",
+        [
+            "vae/*.safetensors",
+            "vae/**/*.safetensors",
+        ],
+    ),
+    (
+        "tokenizer",
+        "Tokenizer files",
+        [
+            "tokenizer.json",
+            "tokenizer/*.json",
+            "text_encoder/tokenizer.json",
+            "**/tokenizer.json",
+        ],
+    ),
+    (
+        "config",
+        "Configuration files",
+        [
+            "config.json",
+            "generation_config.json",
+            "preprocessor_config.json",
+        ],
+    ),
 ]
 
 
@@ -310,7 +339,7 @@ def classify_file(fname: str) -> str | None:
 
 def cmd_autodetect(args: Any) -> None:
     """Auto-detect model components from repo file structure."""
-    api = HfApi(token=load_token())
+    api = HfApi(token=load_token(), endpoint="https://hf-mirror.com")
     info = get_repo_info(api, args.repo_id)
 
     if not info.siblings:
@@ -347,10 +376,7 @@ def cmd_autodetect(args: Any) -> None:
 
     # Compute totals
     total_model_bytes = sum(
-        f["size_bytes"]
-        for files in components.values()
-        for f in files
-        if f["filename"].endswith(".safetensors")
+        f["size_bytes"] for files in components.values() for f in files if f["filename"].endswith(".safetensors")
     )
 
     # Generate suggested Rust component mapping
@@ -366,13 +392,15 @@ def cmd_autodetect(args: Any) -> None:
         elif comp_name in ("text_encoder", "vae") and not is_sharded:
             rust_comp = comp_name.title().replace("_", "")
         for f in comp_files:
-            rust_suggestions.append({
-                "filename": f["filename"],
-                "component": rust_comp,
-                "size_bytes": f["size_bytes"],
-                "sha256": f["sha256"],
-                "gated": gated,
-            })
+            rust_suggestions.append(
+                {
+                    "filename": f["filename"],
+                    "component": rust_comp,
+                    "size_bytes": f["size_bytes"],
+                    "sha256": f["sha256"],
+                    "gated": gated,
+                }
+            )
 
     output_json(
         {
@@ -393,7 +421,7 @@ def cmd_autodetect(args: Any) -> None:
 
 def cmd_manifest(args: Any) -> None:
     token = load_token()
-    api = HfApi(token=token)
+    api = HfApi(token=token, endpoint="https://hf-mirror.com")
     info = get_repo_info(api, args.repo_id)
 
     if not info.siblings:
@@ -407,9 +435,7 @@ def cmd_manifest(args: Any) -> None:
     expanded_files = []
     for pattern in args.files:
         if any(c in pattern for c in "*?["):
-            matches = sorted(
-                s.rfilename for s in info.siblings if fnmatch.fnmatch(s.rfilename, pattern)
-            )
+            matches = sorted(s.rfilename for s in info.siblings if fnmatch.fnmatch(s.rfilename, pattern))
             if not matches:
                 print(f"Warning: glob '{pattern}' matched no files", file=sys.stderr)
             expanded_files.extend(matches)
@@ -463,7 +489,7 @@ def cmd_manifest(args: Any) -> None:
 
         rust_lines.append("ModelFile {")
         rust_lines.append(f"    component: {enum_name}::{component_name},")
-        rust_lines.append(f'    hf_repo: repo.clone(),')
+        rust_lines.append("    hf_repo: repo.clone(),")
         rust_lines.append(f'    hf_filename: "{fname}".to_string(),')
         rust_lines.append(f"    size_bytes: {format_rust_size(size)},")
         rust_lines.append(f"    gated: {'true' if gated else 'false'},")
@@ -487,7 +513,7 @@ def cmd_manifest(args: Any) -> None:
 
 def cmd_verify(args: Any) -> None:
     token = load_token()
-    api = HfApi(token=token)
+    api = HfApi(token=token, endpoint="https://hf-mirror.com")
 
     with open(args.manifest_json) as f:
         entries = json.load(f)

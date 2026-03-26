@@ -2,7 +2,11 @@
 
 Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, vervolgens zit ik openclaw na te bouwen, image generation pipelines te bouwen, scummvm assets extraction, vision OS game aan het maken in rust en swift en epub image generator te fixen...).
 
-
+- ok weer een nieuw model, is t beter dan parler? https://mistral.ai/news/voxtral-tts Nog geen gguf dus ff wachten
+- investigate if we can re-implement and train https://github.com/pushkarjajoria/Text-Conditioned-Drumbeat-Generation?tab=readme-ov-file ourselves? They havent released the weights, not sure how compute intensive it would be to train that? Might be modest, and i can definitely scrape midi drums to train.
+- Ik vermoed dat Qwen3-TTS het makkelijkst is. Er is al iemand die het aan de praat heeft in candle: https://github.com/TrevorS/qwen3-tts-rs en hier eentje die gguf gebruikt met een andere framework. ik wil candle EN GGUF. Hier iemand die mlx-rs gebruikt in plaats van candle. https://github.com/second-state/qwen3_tts_rs 't blijft aantrekkelijk om mlx maar de bindings zijn dus nog experimenteel. 
+- Z-Image wellicht moet ik switchen naar GGUFF met quant want we zitten nu op F32 wat dubbel zoveel memory zal vragen? z-image-turbo-q5_k_m.gguf
+-  rundown van verschillende modellen: https://medium.com/diffusion-doodles/model-rundown-z-image-turbo-qwen-image-2512-edit-2511-flux-2-dev-fc787f5e87ad
 - Investigate Z-Image-turbo and especially its editing version: https://medium.com/@302.AI/z-image-turbo-vs-flux-2-dev-heres-what-we-found-e7a31327be40. Theres a whole site with z-image stuff https://z-image.me/en/resources/pixel-art-lora
 - Can i print out text tokens as they come in, seems to print it now at the end.
 - Implement KV Cache management. Probably easiest is to 'guess' the cache by incoming tokens, and clear them when it hits a certain threshold. I can also on a cron job clear stale sessions, or summarize sessions, store the summary in a session history and then clear it. Then as a client we can perhaps pull in old summaries to provide an initial context for the model. Check the KV_CACHE_MANAGEMENT.md for more details. It seems the prefill bit is where i can load things? It mentions this flow:  summary → clear/recreate → compact prefill. The best strategy is probably this approach, managing this outside the models in my rust code by counting incoming tokens:
@@ -50,34 +54,16 @@ I've done work on it, this is built in phase 1:
 - gguf with lama apparently performs a lot better than candle on ML. Consider rebuilding using that. For now, lets first get my models doing some actual work and integrated into NEXO
 - for the local inference cli's, can we have a nice tokens/sec counter?
 
-## Ok, a bit of focus, I want to get something done.
 
-Got a whole bunch of code but nothing tangible. What would i consider tangible?
+##  Run auto research using my local chat model.
 
-- Generating images I want. (This will be for my epub idea and my game engine)
-- Question and Answer flow working well from app to backend. (This will allow me to have anki cards and have image training feedback loop.)
+- Read in literature like hackers manifesto
+- can we push it in and get it cached, doing something with prefill?
+- run 100 image generations with different prompts.
+- send all images for human review
+- randomize the image runs between auto research so iOS app doesn’t know which run it was
+- in the morning review them and feed back into the loop
+- the loop scores certain datasets and image tags and incorporates scoring.
+- generate new auto research runs using the highest scores (but do it a bit fuzzy so we try to avoid local maximum)
 
-
-Key components to build first:
-
-- WebSocket interface between Swift and Rust.
-- Tool call through websocket, generate image using this prompt
-- After completion, send image back to Swift thread
-- Prompt user to give thumbs up or down
-- Store thumbs up in SwiftData, and send thumbs up/down data back to Rust for storage
-
-Follow up focus:
-- Keep image model loaded in memory so we can generate images faster. Need interface from websocket gateway into AI generation.
-
-
-## Swift UI Bugs
-
-- answer kaart achtergrond moet andere kleur zijn. 
-- Scrollen door messages als er kaarten zijn moet poppen, voor normale messages moet hij gewoon smooth scrollen.
-- text typen in anwer is minder fijn want je ziet de text dan niet. Hoe op te lossen?
-- Als je een single answer geeft op een kaart, moet hij doorscrollen naar de volgende kaart.
-- Gekke bug over de toolbar, zit denk ik een overlay op
-- glasseffect is denk ik op toolbar item geplaats van m'n settings
-- pagination reading view word text door elkaar gehaald
-- Bij continuous reading zijn de chapter titels dubbel
-- We moeten een boek vinden met wat mooiere opmaak. Er is CSS in de epub, misschien moeten we gewoon een webview gebruiken? Of is er een andere standaard in epub om css te parsen in een beter formaat? Probeer het javascript hacking boek eens te bekijken, die heeft van allerlei andere opmaak dingen volgens mij.
+Repeat for days and see if you get better images.

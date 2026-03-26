@@ -24,7 +24,8 @@ Use the existing macros as templates. Each takes a test name, model name, and (f
 |-------|----------|-------|
 | `listen_test!` | Listen | `listen_test!(test_name, "model-name")` |
 | `talk_test!` | Talk | `talk_test!(test_name, "model-name", timeout_ms)` |
-| `imagine_test!` | Imagine | `imagine_test!(test_name, "model-name")` |
+| `imagine_test!` | Imagine | `imagine_test!(test_name, "model-name", model::Type)` |
+| `imagine_file_test!` | Imagine (file output) | `imagine_file_test!(test_name, "model-name", model::Type, "prompt", "output.png", steps)` |
 | `chat_test!` | Chat | `chat_test!(test_name, "model-name", model::Type)` or with optional `max_tokens` |
 | `tool_test!` | Tool | `tool_test!(test_name, "model-name", model::Type)` or with optional `max_tokens` |
 | `perf_test!` | Performance | `perf_test!(test_name, "model-name", min_tok_per_sec, model::Type)` |

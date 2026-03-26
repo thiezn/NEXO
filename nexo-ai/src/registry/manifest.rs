@@ -1106,6 +1106,42 @@ fn qwen3_embed_8b_q5km_manifest() -> AiModelManifest {
     }
 }
 
+fn z_image_turbo_manifest() -> AiModelManifest {
+    let orig_repo = "Tongyi-MAI/Z-Image-Turbo".to_string();
+    let gguf_repo = "jayn7/Z-Image-Turbo-GGUF".to_string();
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "z-image-turbo".to_string(),
+            family: "z_image".to_string(),
+            description:
+                "Z-Image Turbo — 6B text-to-image, Q4_K_M quantized for Apple Silicon (~4 GB)"
+                    .to_string(),
+            size_gb: 3.86,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: gguf_repo,
+                    hf_filename: "z_image_turbo-Q4_K_M.gguf".to_string(),
+                    size_bytes: 3_692_871_680,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: orig_repo,
+                    hf_filename: "tokenizer/tokenizer.json".to_string(),
+                    size_bytes: 11_422_654,
+                    gated: false,
+                    sha256: Some(
+                        "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+                    ),
+                },
+            ],
+        },
+        categories: vec![ModelCategory::Imagine],
+    }
+}
+
 fn build_all_manifests() -> Vec<AiModelManifest> {
     vec![
         parler_mini_manifest(),
@@ -1116,6 +1152,7 @@ fn build_all_manifests() -> Vec<AiModelManifest> {
         flux_2_klein_4b_manifest(),
         flux_2_klein_9b_manifest(),
         flux_2_dev_manifest(),
+        z_image_turbo_manifest(),
         gemma_3_4b_it_manifest(),
         gemma_3_12b_it_manifest(),
         gemma_3_27b_it_manifest(),
@@ -1183,7 +1220,7 @@ mod tests {
     #[test]
     fn known_manifests_contains_parler() {
         let manifests = known_manifests();
-        assert!(manifests.len() >= 16);
+        assert!(manifests.len() >= 17);
         assert!(manifests.iter().any(|m| m.manifest.name == "parler-mini"));
         assert!(manifests.iter().any(|m| m.manifest.name == "parler-large"));
     }

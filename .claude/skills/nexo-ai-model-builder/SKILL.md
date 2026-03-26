@@ -112,6 +112,7 @@ See [references/performance.md](references/performance.md) for common Metal pitf
 | `flux-2-klein-4b` | flux | Imagine | 22 GB |
 | `flux-2-klein-9b` | flux | Imagine | 49 GB |
 | `flux-2-dev` | flux | Imagine | 165 GB |
+| `z-image-turbo` | z_image | Imagine | 31 GB |
 | `gemma-3-4b-it` | gemma3 | Chat, Tool, Image | ~8 GB |
 | `gemma-3-12b-it` | gemma3 | Chat, Tool, Image | ~24 GB |
 | `gemma-3-27b-it` | gemma3 | Chat, Tool, Image | ~54 GB |

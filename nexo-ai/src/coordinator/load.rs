@@ -101,6 +101,13 @@ impl super::Coordinator {
                         model_dir,
                     ),
                 ),
+                "z_image" => Box::new(
+                    crate::models::imagine::z_image::ZImageModel::new(
+                        model_name.to_string(),
+                        memory_bytes,
+                        model_dir,
+                    ),
+                ),
                 "qwen3_embed" => Box::new(
                     crate::models::embed::qwen3_embed::Qwen3EmbedModel::new(
                         model_name.to_string(),

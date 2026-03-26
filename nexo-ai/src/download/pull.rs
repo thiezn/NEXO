@@ -197,10 +197,7 @@ async fn download_file<P: Progress + Clone + Send + Sync + 'static>(
         Err(e) => {
             let status = extract_http_status(&e);
             let err_str = e.to_string();
-            if status == Some(401)
-                || err_str.contains("401")
-                || err_str.contains("Unauthorized")
-            {
+            if status == Some(401) || err_str.contains("401") || err_str.contains("Unauthorized") {
                 Err(DownloadError::Unauthorized {
                     repo: hf_repo.to_string(),
                 })
@@ -240,9 +237,7 @@ pub async fn pull_model<C: Component>(
 
     for file in &manifest.files {
         let clean_path = mdir.join(storage_path(manifest, file));
-        if !force
-            && std::fs::metadata(&clean_path).is_ok_and(|m| m.len() == file.size_bytes)
-        {
+        if !force && std::fs::metadata(&clean_path).is_ok_and(|m| m.len() == file.size_bytes) {
             eprintln!(
                 "  skipping {} (already downloaded, {:.1} MB)",
                 file.hf_filename,
@@ -258,6 +253,14 @@ pub async fn pull_model<C: Component>(
         return Ok(downloads);
     }
 
+    eprintln!(
+        "{} files to download for {}",
+        files_to_download.len(),
+        manifest.name
+    );
+    unsafe {
+        std::env::set_var("HF_ENDPOINT", "https://hf-mirror.com");
+    }
     let mut builder = ApiBuilder::from_env().with_cache_dir(hf_cache_dir());
     if let Some(token) = resolve_hf_token() {
         builder = builder.with_token(Some(token));

@@ -270,29 +270,17 @@ macro_rules! talk_perf_test {
 talk_perf_test!(test_parler_mini_perf, "parler-mini", 60);
 talk_perf_test!(test_parler_large_perf, "parler-large", 120);
 
-// ── Flux (Imagine) ───────────────────────────────────────────────────────────
-
-fn flux_request() -> ImagineRequest {
-    ImagineRequest {
-        prompt: "a red circle on white background".into(),
-        width: 256,
-        height: 256,
-        steps: 1,
-        guidance: 3.5,
-        seed: 42,
-        batch_size: 1,
-    }
-}
+// ── Imagine ─────────────────────────────────────────────────────────────────
 
 macro_rules! imagine_test {
-    ($name:ident, $model_name:expr) => {
+    ($name:ident, $model_name:expr, $model_type:path) => {
         #[test]
         #[ignore]
         #[serial]
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = nexo_ai::models::imagine::flux::FluxModel::new(
+            let mut model = <$model_type>::new(
                 $model_name.into(),
                 memory_bytes,
                 model_dir,
@@ -302,8 +290,17 @@ macro_rules! imagine_test {
             assert!(model.is_loaded());
 
             let imagine = model.as_imagine().expect("should be an imagine model");
+            let request = ImagineRequest {
+                prompt: "a red circle on white background".into(),
+                width: 256,
+                height: 256,
+                steps: 1,
+                guidance: 3.5,
+                seed: 42,
+                batch_size: 1,
+            };
             let response = imagine
-                .imagine(&flux_request())
+                .imagine(&request)
                 .expect("image generation failed");
 
             eprintln!("generated {} image(s)", response.images.len());
@@ -318,9 +315,112 @@ macro_rules! imagine_test {
     };
 }
 
-imagine_test!(test_flux_2_klein_4b, "flux-2-klein-4b");
-imagine_test!(test_flux_2_klein_9b, "flux-2-klein-9b");
-imagine_test!(test_flux_2_dev, "flux-2-dev");
+imagine_test!(test_flux_2_klein_4b, "flux-2-klein-4b", nexo_ai::models::imagine::flux::FluxModel);
+imagine_test!(test_flux_2_klein_9b, "flux-2-klein-9b", nexo_ai::models::imagine::flux::FluxModel);
+imagine_test!(test_flux_2_dev, "flux-2-dev", nexo_ai::models::imagine::flux::FluxModel);
+imagine_test!(test_z_image_turbo, "z-image-turbo", nexo_ai::models::imagine::z_image::ZImageModel);
+
+// ── Imagine (File Output) ───────────────────────────────────────────────────
+
+/// Generate an image, save to a file, and verify the PNG is valid and non-trivial.
+macro_rules! imagine_file_test {
+    ($name:ident, $model_name:expr, $model_type:path, $prompt:expr, $filename:expr, $steps:expr) => {
+        #[test]
+        #[ignore]
+        #[serial]
+        #[timeout(900_000)]
+        fn $name() {
+            let (model_dir, memory_bytes) = resolve_model($model_name);
+            let mut model = <$model_type>::new(
+                $model_name.into(),
+                memory_bytes,
+                model_dir,
+            );
+
+            model.load().expect("failed to load model");
+            assert!(model.is_loaded());
+
+            // Use a closure so model.unload() runs even on assertion failure.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let imagine = model.as_imagine().expect("should be an imagine model");
+                let request = ImagineRequest {
+                    prompt: $prompt.into(),
+                    width: 256,
+                    height: 256,
+                    steps: $steps,
+                    guidance: 3.5,
+                    seed: 42,
+                    batch_size: 1,
+                };
+                let response = imagine
+                    .imagine(&request)
+                    .expect("image generation failed");
+
+                assert!(!response.images.is_empty(), "no images generated");
+                let img = &response.images[0];
+                assert!(img.data.len() > 1000, "image data suspiciously small ({} bytes)", img.data.len());
+                assert_eq!(img.width, 256);
+                assert_eq!(img.height, 256);
+
+                // Verify valid PNG by decoding
+                let decoded = image::load_from_memory_with_format(&img.data, image::ImageFormat::Png)
+                    .expect("generated data is not valid PNG");
+                assert_eq!(decoded.width(), 256);
+                assert_eq!(decoded.height(), 256);
+
+                // Save to file first (before assertions that might fail)
+                let out_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .unwrap()
+                    .join("datasets/images/generated");
+                std::fs::create_dir_all(&out_dir).expect("failed to create output directory");
+                let out_path = out_dir.join($filename);
+                std::fs::write(&out_path, &img.data).expect("failed to write image");
+                eprintln!(
+                    "saved {} ({} bytes, {}x{}, {}ms)",
+                    out_path.display(),
+                    img.data.len(),
+                    img.width,
+                    img.height,
+                    response.inference_time_ms,
+                );
+
+                // Check image isn't a solid color (garbled/blank)
+                let rgb = decoded.to_rgb8();
+                let first_pixel = rgb.get_pixel(0, 0);
+                let center_pixel = rgb.get_pixel(128, 128);
+                let has_variation = first_pixel != center_pixel
+                    || rgb.pixels().any(|p| p != first_pixel);
+                assert!(has_variation, "image appears to be a single solid color (likely garbled)");
+            }));
+
+            model.unload();
+            assert!(!model.is_loaded());
+
+            if let Err(panic) = result {
+                std::panic::resume_unwind(panic);
+            }
+        }
+    };
+}
+
+imagine_file_test!(
+    test_z_image_turbo_avocado,
+    "z-image-turbo",
+    nexo_ai::models::imagine::z_image::ZImageModel,
+    "avocado",
+    "z-image-test-avocado.png",
+    4
+);
+
+imagine_file_test!(
+    test_flux_2_klein_4b_avocado,
+    "flux-2-klein-4b",
+    nexo_ai::models::imagine::flux::FluxModel,
+    "avocado",
+    "flux-test-avocado.png",
+    4
+);
 
 // ── Gemma 3 (Chat) ─────────────────────────────────────────────────────────
 
