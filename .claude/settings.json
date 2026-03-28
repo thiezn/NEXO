@@ -1,9 +1,18 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "effortLevel": "high",
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "0"
+  },
   "permissions": {
     "allow": [
       "Bash(cargo *)",
+      "Bash(cargo:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo test *)",
+      "Bash(cargo run:*)",
+      "Bash(cargo run *)",
+      "Bash(cargo build:*)",
+      "Bash(cargo build *)",
       "Bash(xargs cat *)",
       "Bash(find *)",
       "Bash(head *)",
@@ -19,17 +28,16 @@
       "Write",
       "mcp__xcode",
       "Bash(python3 .claude/skills/nexo-ai-model-builder/scripts/hf_downloader.py:*)",
+      "Read(//tmp/**)"
     ],
     "deny": [
       "WebFetch"
     ],
     "additionalDirectories": [
       "//Users/Mathijs.Mortimer/.cargo/registry",
-      "//Users/Mathijs.Mortimer/.nexo",
+      "//Users/Mathijs.Mortimer/.nexo"
     ]
   },
-  "defaultMode": "acceptEdits",
-  "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "0"
-  }
+  "effortLevel": "high",
+  "defaultMode": "acceptEdits"
 }

@@ -15,7 +15,11 @@ pub use events::{
 };
 pub use frame::Frame;
 pub use methods::{
-    AgentParams, AgentResponse, HealthParams, HealthResponse, Method, SendParams, SendResponse,
+    AgentParams, AgentResponse, AgentStatus, ConversationMessage, CronCreateParams,
+    CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry, CronListParams,
+    CronListResponse, HealthParams, HealthResponse, Method, SendParams, SendResponse,
+    SessionClearParams, SessionClearResponse, SessionCreateParams, SessionCreateResponse,
+    SessionEntry, SessionGetParams, SessionGetResponse, SessionListParams, SessionListResponse,
     StatusParams, StatusResponse, SystemPresenceParams, ToolEntry, ToolSpecEntry,
     ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams, ToolsExecuteResponse,
     ToolsRegisterParams, ToolsRegisterResponse,

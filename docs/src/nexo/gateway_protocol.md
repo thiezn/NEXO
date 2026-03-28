@@ -205,6 +205,161 @@ Error cases:
 - `tool_unavailable`: the node hosting the tool is disconnected
 - `timeout`: the node did not respond within 30 seconds
 
+## Agent (`agent`)
+
+Start an agent run. The gateway creates (or resumes) a session, acknowledges
+immediately with `status: "accepted"`, then streams `agent` events as the brain
+processes the request.
+
+Client → Gateway:
+
+```json
+{
+  "type": "request",
+  "id": "…",
+  "method": "agent",
+  "params": {
+    "prompt": "Summarize today's news",
+    "idempotencyKey": "key-456",
+    "sessionId": "optional-session-id",
+    "context": { "files": ["notes.md"] }
+  }
+}
+```
+
+Gateway → Client (immediate ack):
+
+```json
+{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": {
+    "runId": "run-uuid-v7",
+    "sessionId": "session-uuid-v7",
+    "status": "accepted"
+  }
+}
+```
+
+Gateway → Client (streaming events):
+
+```json
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run" } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary..." } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
+```
+
+### Agent status values
+
+`accepted` → `thinking` → `streaming` → `completed`
+`accepted` → `thinking` → `tool_call` → `thinking` → ... → `completed`
+Any state → `failed` (on error) or `cancelled` (client-initiated).
+
+## Sessions
+
+### `session.create`
+
+Create a new conversation session.
+
+```json
+{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat" } }
+```
+```json
+{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…" } }
+```
+
+### `session.list`
+
+List all sessions for the current user.
+
+```json
+{ "type": "request", "id": "…", "method": "session.list", "params": {} }
+```
+```json
+{
+  "type": "response", "id": "…", "ok": true,
+  "payload": {
+    "sessions": [
+      { "sessionId": "…", "name": "My chat", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
+    ]
+  }
+}
+```
+
+### `session.get`
+
+Retrieve a session with its full message history.
+
+```json
+{ "type": "request", "id": "…", "method": "session.get", "params": { "sessionId": "…" } }
+```
+```json
+{
+  "type": "response", "id": "…", "ok": true,
+  "payload": {
+    "sessionId": "…", "name": "My chat", "createdAt": "…",
+    "messages": [
+      { "id": "…", "role": "user", "content": "hello", "createdAt": "…" },
+      { "id": "…", "role": "assistant", "content": "hi back", "createdAt": "…" }
+    ]
+  }
+}
+```
+
+### `session.clear`
+
+Delete a session and all associated data (messages, runs).
+
+```json
+{ "type": "request", "id": "…", "method": "session.clear", "params": { "sessionId": "…" } }
+```
+```json
+{ "type": "response", "id": "…", "ok": true, "payload": { "cleared": true } }
+```
+
+## Cron jobs
+
+### `cron.create`
+
+Create a scheduled agent task.
+
+```json
+{
+  "type": "request", "id": "…", "method": "cron.create",
+  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "prompt": "Summarize yesterday" }
+}
+```
+```json
+{ "type": "response", "id": "…", "ok": true, "payload": { "jobId": "…" } }
+```
+
+### `cron.list`
+
+List all cron jobs.
+
+```json
+{ "type": "request", "id": "…", "method": "cron.list", "params": {} }
+```
+```json
+{
+  "type": "response", "id": "…", "ok": true,
+  "payload": { "jobs": [{ "jobId": "…", "name": "Daily summary", "schedule": "0 9 * * *", "enabled": true }] }
+}
+```
+
+### `cron.delete`
+
+Delete a cron job.
+
+```json
+{ "type": "request", "id": "…", "method": "cron.delete", "params": { "jobId": "…" } }
+```
+```json
+{ "type": "response", "id": "…", "ok": true, "payload": { "deleted": true } }
+```
+
 ## Versioning
 
 - Clients send `minProtocol` + `maxProtocol`; the server rejects mismatches.

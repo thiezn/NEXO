@@ -3,6 +3,7 @@ pub mod handler;
 pub mod state;
 pub mod ticker;
 
+use crate::agent::AgentHandle;
 use crate::config::GatewayConfig;
 use state::{GatewayState, SharedState};
 use std::sync::Arc;
@@ -17,6 +18,17 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
     let gateway_state = GatewayState::new();
     let event_tx = gateway_state.event_tx.clone();
     let state: SharedState = Arc::new(RwLock::new(gateway_state));
+
+    // Spawn the agent brain
+    let agent_handle = AgentHandle::spawn(db.clone(), state.clone(), event_tx.clone());
+
+    // Spawn the cron scheduler
+    let cron_handle = agent_handle.clone();
+    let cron_db = db.clone();
+    let cron_event_tx = event_tx.clone();
+    tokio::spawn(async move {
+        crate::agent::cron::run_scheduler(cron_db, cron_handle, cron_event_tx).await;
+    });
 
     // Spawn the tick event broadcaster
     let tick_tx = event_tx.clone();
@@ -45,6 +57,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
         let state = state.clone();
         let db = db.clone();
         let auth_token = auth_token.clone();
+        let agent_handle = agent_handle.clone();
 
         tokio::spawn(async move {
             // Perform WebSocket upgrade with auth check
@@ -74,7 +87,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
 
             // Subscribe to events only after successful WS upgrade
             let event_rx = state.read().await.event_tx.subscribe();
-            handler::handle_connection(ws_stream, state, db, event_rx).await;
+            handler::handle_connection(ws_stream, state, db, event_rx, agent_handle).await;
         });
     }
 }

@@ -156,6 +156,11 @@ impl GatewayState {
     pub fn uptime_secs(&self) -> u64 {
         (chrono::Utc::now() - self.started_at).num_seconds().max(0) as u64
     }
+
+    /// Get the client_id (used as user_id) for a peer.
+    pub fn user_id_for_peer(&self, peer_id: &str) -> Option<String> {
+        self.peers.get(peer_id).map(|p| p.client_id.clone())
+    }
 }
 
 pub type SharedState = Arc<RwLock<GatewayState>>;

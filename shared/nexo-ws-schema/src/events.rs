@@ -1,3 +1,4 @@
+use crate::methods::AgentStatus;
 use crate::types::Role;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -26,9 +27,16 @@ pub struct TickPayload {
 #[serde(rename_all = "camelCase")]
 pub struct AgentEventPayload {
     pub run_id: String,
-    pub status: String,
+    pub session_id: String,
+    pub status: AgentStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Payload for `presence` events.
@@ -115,10 +123,51 @@ mod tests {
     fn agent_event_payload_optional_content() {
         let payload = AgentEventPayload {
             run_id: "run-1".into(),
-            status: "streaming".into(),
+            session_id: "sess-1".into(),
+            status: AgentStatus::Streaming,
             content: None,
+            tool_name: None,
+            tool_call_id: None,
+            error: None,
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert!(json.get("content").is_none());
+        assert!(json.get("toolName").is_none());
+        assert!(json.get("error").is_none());
+        assert_eq!(json["status"], "streaming");
+        assert_eq!(json["sessionId"], "sess-1");
+    }
+
+    #[test]
+    fn agent_event_payload_with_tool_fields() {
+        let payload = AgentEventPayload {
+            run_id: "run-1".into(),
+            session_id: "sess-1".into(),
+            status: AgentStatus::ToolCall,
+            content: None,
+            tool_name: Some("echo.run".into()),
+            tool_call_id: Some("tc-1".into()),
+            error: None,
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["status"], "tool_call");
+        assert_eq!(json["toolName"], "echo.run");
+        assert_eq!(json["toolCallId"], "tc-1");
+    }
+
+    #[test]
+    fn agent_event_payload_roundtrip() {
+        let payload = AgentEventPayload {
+            run_id: "run-1".into(),
+            session_id: "sess-1".into(),
+            status: AgentStatus::Completed,
+            content: Some("done".into()),
+            tool_name: None,
+            tool_call_id: None,
+            error: None,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let decoded: AgentEventPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload, decoded);
     }
 }

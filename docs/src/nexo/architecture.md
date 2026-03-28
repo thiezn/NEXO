@@ -80,6 +80,47 @@ sequenceDiagram
     Note over Node,Gateway: On disconnect: gateway deregisters<br>all tools from this node
 ```
 
+## Brain (agent loop)
+
+The gateway spawns an **AgentHandle** at startup — a background task that processes
+agent commands sequentially. When a client sends an `agent` request:
+
+1. The handler creates (or resumes) a session and an agent run in SQLite
+2. It submits an `AgentCommand::RunAgent` to the brain via an mpsc channel
+3. The brain runs the loop: context assembly → inference → tool calls → repeat
+4. Lifecycle events (`thinking`, `tool_call`, `streaming`, `completed`) are broadcast
+   to all connected clients via the event channel
+
+```mermaid
+flowchart LR
+    Client -->|request:agent| Handler
+    Handler -->|AgentCommand| Brain
+    Brain -->|inference request| Node
+    Node -->|response| Brain
+    Brain -->|event:agent| Client
+    Brain -->|tools.execute| Node
+```
+
+### Capability locking
+
+When the brain invokes a node capability (inference or tool execution), it acquires
+an advisory lock in the `capability_locks` SQLite table. This prevents concurrent
+agent runs from using the same capability. Locks expire after 5 minutes for crash
+recovery.
+
+### Cron scheduler
+
+A background scheduler task runs alongside the brain, checking every 60 seconds for
+due cron jobs. When a job fires, it emits a `cron` event and submits an agent command
+to the brain.
+
+## Sessions
+
+A client can have multiple sessions and maintains a `sessionId` locally. Sessions are
+created explicitly via `session.create` or implicitly when an `agent` request is sent
+without a `sessionId`. After a client restart, it can query `session.list` to resume
+previous conversations.
+
 ## Wire protocol (summary)
 
 - Transport: WebSocket, text frames with JSON payloads.

@@ -1,9 +1,11 @@
+use crate::agent::{AgentCommand, AgentHandle};
 use crate::server::state::{PeerInfo, SharedState};
 use futures_util::{SinkExt, StreamExt};
 use nexo_ws_schema::{
-    ConnectParams, ErrorPayload, EventKind, Frame, HealthResponse, HelloOk, Method,
-    PROTOCOL_VERSION, PresencePayload, Role, StatusResponse, ToolsCatalogResponse,
-    ToolsExecuteParams, ToolsRegisterParams, ToolsRegisterResponse, WsError,
+    AgentParams, AgentStatus, ConnectParams, CronCreateParams, CronDeleteParams, ErrorPayload,
+    EventKind, Frame, HealthResponse, HelloOk, Method, PROTOCOL_VERSION, PresencePayload, Role,
+    SessionClearParams, SessionCreateParams, SessionGetParams, StatusResponse,
+    ToolsCatalogResponse, ToolsExecuteParams, ToolsRegisterParams, ToolsRegisterResponse, WsError,
 };
 use serde::Serialize;
 use sqlx::SqlitePool;
@@ -29,6 +31,7 @@ pub async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
     state: SharedState,
     db: SqlitePool,
     mut event_rx: broadcast::Receiver<Frame>,
+    agent_handle: AgentHandle,
 ) {
     // Step 1: Wait for the connect frame (first frame must be connect)
     let (peer_id, _connect_request_id, mut directed_rx) =
@@ -55,7 +58,7 @@ pub async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
             msg = ws.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Some(response) = handle_incoming_message(&text, &peer_id, &state, &db).await {
+                        if let Some(response) = handle_incoming_message(&text, &peer_id, &state, &db, &agent_handle).await {
                             let json = match serde_json::to_string(&response) {
                                 Ok(j) => j,
                                 Err(e) => {
@@ -233,7 +236,8 @@ async fn handle_incoming_message(
     text: &str,
     peer_id: &str,
     state: &SharedState,
-    _db: &SqlitePool,
+    db: &SqlitePool,
+    agent_handle: &AgentHandle,
 ) -> Option<Frame> {
     let frame: Frame = match serde_json::from_str(text) {
         Ok(f) => f,
@@ -250,7 +254,7 @@ async fn handle_incoming_message(
 
     match frame {
         Frame::Request { id, method, params } => {
-            Some(dispatch_method(&id, &method, params, peer_id, state).await)
+            Some(dispatch_method(&id, &method, params, peer_id, state, db, agent_handle).await)
         }
         Frame::Response { ref id, .. } => {
             // Check if this is a response to a pending forwarded request
@@ -296,12 +300,51 @@ fn ok_or_internal_error(request_id: &str, payload: impl Serialize) -> Frame {
     })
 }
 
+/// Try to deserialize params, returning an error frame on failure.
+fn parse_params<T: serde::de::DeserializeOwned>(
+    request_id: &str,
+    params: serde_json::Value,
+    method_name: &str,
+) -> Result<T, Frame> {
+    serde_json::from_value(params).map_err(|e| {
+        Frame::error_response(
+            request_id,
+            ErrorPayload {
+                code: "invalid_params".into(),
+                message: format!("Invalid {method_name} params: {e}"),
+            },
+        )
+    })
+}
+
+/// Resolve the user_id for a peer, falling back to peer_id.
+async fn resolve_user_id(state: &SharedState, peer_id: &str) -> String {
+    let user_id = {
+        let state_read = state.read().await;
+        state_read.user_id_for_peer(peer_id)
+    };
+    user_id.unwrap_or_else(|| peer_id.to_string())
+}
+
+/// Build an internal_error response frame.
+fn internal_error(request_id: &str, message: impl Into<String>) -> Frame {
+    Frame::error_response(
+        request_id,
+        ErrorPayload {
+            code: "internal_error".into(),
+            message: message.into(),
+        },
+    )
+}
+
 async fn dispatch_method(
     request_id: &str,
     method: &Method,
     params: serde_json::Value,
     peer_id: &str,
     state: &SharedState,
+    db: &SqlitePool,
+    agent_handle: &AgentHandle,
 ) -> Frame {
     match method {
         Method::Health => {
@@ -361,17 +404,9 @@ async fn dispatch_method(
                 }
             }
 
-            let register_params: ToolsRegisterParams = match serde_json::from_value(params) {
+            let register_params: ToolsRegisterParams = match parse_params(request_id, params, "tools.register") {
                 Ok(p) => p,
-                Err(e) => {
-                    return Frame::error_response(
-                        request_id,
-                        ErrorPayload {
-                            code: "invalid_params".into(),
-                            message: format!("Invalid tools.register params: {e}"),
-                        },
-                    );
-                }
+                Err(f) => return f,
             };
 
             let tool_count = register_params.tools.len();
@@ -387,17 +422,9 @@ async fn dispatch_method(
             ok_or_internal_error(request_id, ToolsRegisterResponse { registered })
         }
         Method::ToolsExecute => {
-            let exec_params: ToolsExecuteParams = match serde_json::from_value(params) {
+            let exec_params: ToolsExecuteParams = match parse_params(request_id, params, "tools.execute") {
                 Ok(p) => p,
-                Err(e) => {
-                    return Frame::error_response(
-                        request_id,
-                        ErrorPayload {
-                            code: "invalid_params".into(),
-                            message: format!("Invalid tools.execute params: {e}"),
-                        },
-                    );
-                }
+                Err(f) => return f,
             };
 
             tracing::info!(
@@ -547,15 +574,152 @@ async fn dispatch_method(
             }
         }
         Method::Agent => {
+            let agent_params: AgentParams = match parse_params(request_id, params, "agent") {
+                Ok(p) => p,
+                Err(f) => return f,
+            };
+
+            let user_id = resolve_user_id(state, peer_id).await;
+
+            // Resolve or create session
+            let session_id = match agent_params.session_id {
+                Some(sid) => sid,
+                None => {
+                    match crate::agent::session::create_session(db, &user_id, None).await {
+                        Ok(sid) => sid,
+                        Err(e) => return internal_error(request_id, format!("Failed to create session: {e}")),
+                    }
+                }
+            };
+
             let run_id = Frame::new_id();
+            if let Err(e) = crate::agent::session::create_run(
+                db,
+                &run_id,
+                &session_id,
+                &agent_params.idempotency_key,
+            )
+            .await
+            {
+                return internal_error(request_id, format!("Failed to create run: {e}"));
+            }
+
+            // Submit to agent background task
+            let cmd = AgentCommand::RunAgent {
+                run_id: run_id.clone(),
+                session_id: session_id.clone(),
+                prompt: agent_params.prompt,
+                context: agent_params.context,
+                peer_id: peer_id.to_string(),
+            };
+            if let Err(e) = agent_handle.submit(cmd).await {
+                tracing::error!("Failed to submit agent command: {e}");
+            }
+
             ok_or_internal_error(
                 request_id,
                 nexo_ws_schema::AgentResponse {
                     run_id,
-                    status: "accepted".into(),
+                    session_id,
+                    status: AgentStatus::Accepted,
                     summary: None,
                 },
             )
+        }
+        Method::SessionCreate => {
+            let session_params: SessionCreateParams = match parse_params(request_id, params, "session.create") {
+                Ok(p) => p,
+                Err(f) => return f,
+            };
+            let user_id = resolve_user_id(state, peer_id).await;
+
+            match crate::agent::session::create_session(db, &user_id, session_params.name.as_deref()).await {
+                Ok(session_id) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::SessionCreateResponse { session_id },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to create session: {e}")),
+            }
+        }
+        Method::SessionList => {
+            let user_id = resolve_user_id(state, peer_id).await;
+
+            match crate::agent::session::list_sessions(db, &user_id).await {
+                Ok(sessions) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::SessionListResponse { sessions },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to list sessions: {e}")),
+            }
+        }
+        Method::SessionGet => {
+            let get_params: SessionGetParams = match parse_params(request_id, params, "session.get") {
+                Ok(p) => p,
+                Err(f) => return f,
+            };
+
+            match crate::agent::session::get_session(db, &get_params.session_id).await {
+                Ok(Some(resp)) => ok_or_internal_error(request_id, resp),
+                Ok(None) => Frame::error_response(
+                    request_id,
+                    ErrorPayload {
+                        code: "session_not_found".into(),
+                        message: format!("Session '{}' not found", get_params.session_id),
+                    },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to get session: {e}")),
+            }
+        }
+        Method::SessionClear => {
+            let clear_params: SessionClearParams = match parse_params(request_id, params, "session.clear") {
+                Ok(p) => p,
+                Err(f) => return f,
+            };
+
+            match crate::agent::session::clear_session(db, &clear_params.session_id).await {
+                Ok(cleared) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::SessionClearResponse { cleared },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to clear session: {e}")),
+            }
+        }
+        Method::CronCreate => {
+            let cron_params: CronCreateParams = match parse_params(request_id, params, "cron.create") {
+                Ok(p) => p,
+                Err(f) => return f,
+            };
+
+            match crate::agent::cron::create_job(
+                db, &cron_params.name, &cron_params.schedule, &cron_params.prompt,
+                cron_params.session_id.as_deref(),
+            ).await {
+                Ok(job_id) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::CronCreateResponse { job_id },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to create cron job: {e}")),
+            }
+        }
+        Method::CronList => match crate::agent::cron::list_jobs(db).await {
+            Ok(jobs) => {
+                ok_or_internal_error(request_id, nexo_ws_schema::CronListResponse { jobs })
+            }
+            Err(e) => internal_error(request_id, format!("Failed to list cron jobs: {e}")),
+        },
+        Method::CronDelete => {
+            let del_params: CronDeleteParams = match parse_params(request_id, params, "cron.delete") {
+                Ok(p) => p,
+                Err(f) => return f,
+            };
+
+            match crate::agent::cron::delete_job(db, &del_params.job_id).await {
+                Ok(deleted) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::CronDeleteResponse { deleted },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to delete cron job: {e}")),
+            }
         }
         Method::SystemPresence => {
             ok_or_internal_error(request_id, serde_json::json!({"acknowledged": true}))
@@ -585,17 +749,32 @@ mod tests {
         Arc::new(RwLock::new(GatewayState::new()))
     }
 
-    #[tokio::test]
-    async fn dispatch_health_returns_ok() {
+    fn make_agent_handle(state: &SharedState, db: &SqlitePool) -> AgentHandle {
+        let event_tx = {
+            let st = state.try_read().unwrap();
+            st.event_tx.clone()
+        };
+        AgentHandle::spawn(db.clone(), state.clone(), event_tx)
+    }
+
+    // Helper: dispatch with a real DB pool
+    async fn dispatch(
+        req_id: &str,
+        method: &Method,
+        params: serde_json::Value,
+        peer_id: &str,
+        state: &SharedState,
+        db: &SqlitePool,
+        agent_handle: &AgentHandle,
+    ) -> Frame {
+        dispatch_method(req_id, method, params, peer_id, state, db, agent_handle).await
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_health_returns_ok(pool: SqlitePool) {
         let state = make_state();
-        let resp = dispatch_method(
-            "req-1",
-            &Method::Health,
-            serde_json::json!({}),
-            "p1",
-            &state,
-        )
-        .await;
+        let ah = make_agent_handle(&state, &pool);
+        let resp = dispatch("req-1", &Method::Health, serde_json::json!({}), "p1", &state, &pool, &ah).await;
         if let Frame::Response { ok, payload, .. } = resp {
             assert!(ok);
             let p = payload.unwrap();
@@ -605,9 +784,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn dispatch_status_returns_counts() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_status_returns_counts(pool: SqlitePool) {
         let state = make_state();
+        let ah = make_agent_handle(&state, &pool);
         {
             let mut s = state.write().await;
             s.add_peer(
@@ -624,14 +804,7 @@ mod tests {
                 dummy_sender(),
             );
         }
-        let resp = dispatch_method(
-            "req-1",
-            &Method::Status,
-            serde_json::json!({}),
-            "p1",
-            &state,
-        )
-        .await;
+        let resp = dispatch("req-1", &Method::Status, serde_json::json!({}), "p1", &state, &pool, &ah).await;
         if let Frame::Response { ok, payload, .. } = resp {
             assert!(ok);
             let p = payload.unwrap();
@@ -642,17 +815,11 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn dispatch_connect_after_handshake_rejected() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_connect_after_handshake_rejected(pool: SqlitePool) {
         let state = make_state();
-        let resp = dispatch_method(
-            "req-1",
-            &Method::Connect,
-            serde_json::json!({}),
-            "p1",
-            &state,
-        )
-        .await;
+        let ah = make_agent_handle(&state, &pool);
+        let resp = dispatch("req-1", &Method::Connect, serde_json::json!({}), "p1", &state, &pool, &ah).await;
         if let Frame::Response { ok, error, .. } = resp {
             assert!(!ok);
             assert_eq!(error.unwrap().code, "invalid_method");
@@ -661,9 +828,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn dispatch_tools_register_from_node() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_tools_register_from_node(pool: SqlitePool) {
         let state = make_state();
+        let ah = make_agent_handle(&state, &pool);
         {
             let mut s = state.write().await;
             s.add_peer(
@@ -689,7 +857,7 @@ mod tests {
             }]
         });
 
-        let resp = dispatch_method("req-1", &Method::ToolsRegister, params, "n1", &state).await;
+        let resp = dispatch("req-1", &Method::ToolsRegister, params, "n1", &state, &pool, &ah).await;
         if let Frame::Response { ok, payload, .. } = resp {
             assert!(ok);
             assert_eq!(payload.unwrap()["registered"], 1);
@@ -698,14 +866,7 @@ mod tests {
         }
 
         // Verify tool is in catalog
-        let catalog_resp = dispatch_method(
-            "req-2",
-            &Method::ToolsCatalog,
-            serde_json::json!({}),
-            "n1",
-            &state,
-        )
-        .await;
+        let catalog_resp = dispatch("req-2", &Method::ToolsCatalog, serde_json::json!({}), "n1", &state, &pool, &ah).await;
         if let Frame::Response { ok, payload, .. } = catalog_resp {
             assert!(ok);
             let tools = &payload.unwrap()["tools"];
@@ -716,9 +877,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn dispatch_tools_register_from_user_rejected() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_tools_register_from_user_rejected(pool: SqlitePool) {
         let state = make_state();
+        let ah = make_agent_handle(&state, &pool);
         {
             let mut s = state.write().await;
             s.add_peer(
@@ -737,7 +899,7 @@ mod tests {
         }
 
         let params = serde_json::json!({"tools": []});
-        let resp = dispatch_method("req-1", &Method::ToolsRegister, params, "u1", &state).await;
+        let resp = dispatch("req-1", &Method::ToolsRegister, params, "u1", &state, &pool, &ah).await;
         if let Frame::Response { ok, error, .. } = resp {
             assert!(!ok);
             assert_eq!(error.unwrap().code, "forbidden");
@@ -746,21 +908,140 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn dispatch_tools_execute_tool_not_found() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_tools_execute_tool_not_found(pool: SqlitePool) {
         let state = make_state();
+        let ah = make_agent_handle(&state, &pool);
         let params = serde_json::json!({
             "tool": "nonexistent",
             "args": {},
             "idempotencyKey": "k1"
         });
-        let resp =
-            dispatch_method("req-1", &Method::ToolsExecute, params, "u1", &state).await;
+        let resp = dispatch("req-1", &Method::ToolsExecute, params, "u1", &state, &pool, &ah).await;
         if let Frame::Response { ok, error, .. } = resp {
             assert!(!ok);
             assert_eq!(error.unwrap().code, "tool_not_found");
         } else {
             panic!("Expected error response");
+        }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_session_create_returns_id(pool: SqlitePool) {
+        let state = make_state();
+        let ah = make_agent_handle(&state, &pool);
+
+        // Set up user FK
+        sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO users (id, device_id) VALUES ('cli', 'dev-1')")
+            .execute(&pool).await.unwrap();
+
+        // Add peer so user_id_for_peer resolves
+        {
+            let mut s = state.write().await;
+            s.add_peer(PeerInfo {
+                id: "p1".into(), client_id: "cli".into(), role: Role::User,
+                scopes: vec![], capabilities: vec![], commands: vec![],
+                device_id: None, connected_at: chrono::Utc::now(),
+            }, dummy_sender());
+        }
+
+        let params = serde_json::json!({"name": "test session"});
+        let resp = dispatch("req-1", &Method::SessionCreate, params, "p1", &state, &pool, &ah).await;
+        if let Frame::Response { ok, payload, .. } = resp {
+            assert!(ok);
+            let p = payload.unwrap();
+            assert!(p["sessionId"].as_str().is_some());
+        } else {
+            panic!("Expected response");
+        }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_session_list_empty(pool: SqlitePool) {
+        let state = make_state();
+        let ah = make_agent_handle(&state, &pool);
+        {
+            let mut s = state.write().await;
+            s.add_peer(PeerInfo {
+                id: "p1".into(), client_id: "cli".into(), role: Role::User,
+                scopes: vec![], capabilities: vec![], commands: vec![],
+                device_id: None, connected_at: chrono::Utc::now(),
+            }, dummy_sender());
+        }
+
+        let resp = dispatch("req-1", &Method::SessionList, serde_json::json!({}), "p1", &state, &pool, &ah).await;
+        if let Frame::Response { ok, payload, .. } = resp {
+            assert!(ok);
+            let sessions = payload.unwrap()["sessions"].as_array().unwrap().clone();
+            assert!(sessions.is_empty());
+        } else {
+            panic!("Expected response");
+        }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_agent_returns_accepted_with_session(pool: SqlitePool) {
+        let state = make_state();
+        let ah = make_agent_handle(&state, &pool);
+
+        sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO users (id, device_id) VALUES ('cli', 'dev-1')")
+            .execute(&pool).await.unwrap();
+
+        {
+            let mut s = state.write().await;
+            s.add_peer(PeerInfo {
+                id: "p1".into(), client_id: "cli".into(), role: Role::User,
+                scopes: vec![], capabilities: vec![], commands: vec![],
+                device_id: None, connected_at: chrono::Utc::now(),
+            }, dummy_sender());
+        }
+
+        let params = serde_json::json!({
+            "prompt": "hello",
+            "idempotencyKey": "k1"
+        });
+        let resp = dispatch("req-1", &Method::Agent, params, "p1", &state, &pool, &ah).await;
+        if let Frame::Response { ok, payload, .. } = resp {
+            assert!(ok);
+            let p = payload.unwrap();
+            assert_eq!(p["status"], "accepted");
+            assert!(p["runId"].as_str().is_some());
+            assert!(p["sessionId"].as_str().is_some());
+        } else {
+            panic!("Expected response");
+        }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dispatch_cron_create_and_list(pool: SqlitePool) {
+        let state = make_state();
+        let ah = make_agent_handle(&state, &pool);
+
+        let params = serde_json::json!({
+            "name": "test job",
+            "schedule": "0 * * * *",
+            "prompt": "hello"
+        });
+        let resp = dispatch("req-1", &Method::CronCreate, params, "p1", &state, &pool, &ah).await;
+        if let Frame::Response { ok, payload, .. } = resp {
+            assert!(ok);
+            assert!(payload.unwrap()["jobId"].as_str().is_some());
+        } else {
+            panic!("Expected response");
+        }
+
+        let list_resp = dispatch("req-2", &Method::CronList, serde_json::json!({}), "p1", &state, &pool, &ah).await;
+        if let Frame::Response { ok, payload, .. } = list_resp {
+            assert!(ok);
+            let jobs = payload.unwrap()["jobs"].as_array().unwrap().clone();
+            assert_eq!(jobs.len(), 1);
+            assert_eq!(jobs[0]["name"], "test job");
+        } else {
+            panic!("Expected response");
         }
     }
 }
