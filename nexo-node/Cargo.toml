@@ -20,8 +20,13 @@ clap = { version = "4", features = ["derive"] }
 dirs = "6"
 anyhow = "1"
 async-trait = "0"
-reqwest = { version = "0", default-features = false, features = ["rustls-tls", "json", "multipart"] }
+reqwest = { version = "0", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
 base64 = "0.22"
+indicatif = "0"
+console = "0"
+sha2 = "0"
+thiserror = "2"
+futures-util = "0"
 
 [lints]
 workspace = true

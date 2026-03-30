@@ -113,8 +113,8 @@ pub async fn run_scheduler(
             let run_session_id = match session_id {
                 Some(sid) => sid,
                 None => {
-                    match super::session::create_session(&pool, "cron", Some(&name)).await {
-                        Ok(sid) => sid,
+                    match super::session::create_session(&pool, "cron", Some(&name), None).await {
+                        Ok((sid, _)) => sid,
                         Err(e) => {
                             tracing::warn!("Failed to create cron session: {e}");
                             update_timestamps().await;
@@ -128,7 +128,7 @@ pub async fn run_scheduler(
             let idem_key = format!("cron-{job_id}-{}", chrono::Utc::now().timestamp());
 
             if let Err(e) =
-                super::session::create_run(&pool, &run_id, &run_session_id, &idem_key).await
+                super::session::create_run(&pool, &run_id, &run_session_id, &idem_key, None).await
             {
                 tracing::warn!("Failed to create cron run: {e}");
                 update_timestamps().await;
@@ -141,6 +141,8 @@ pub async fn run_scheduler(
                 prompt,
                 context: None,
                 peer_id: "cron".into(),
+                model_id: None,
+                prefill_collection_id: None,
             };
             if let Err(e) = agent_handle.submit(cmd).await {
                 tracing::warn!("Failed to submit cron agent command: {e}");

@@ -10,6 +10,7 @@ pub struct GatewayConfig {
     pub log_level: String,
     pub tick_interval_ms: u64,
     pub db_path: String,
+    pub storage_root: String,
     pub auth_token: String,
 }
 
@@ -20,7 +21,8 @@ impl Default for GatewayConfig {
             port: 6969,
             log_level: "info".to_string(),
             tick_interval_ms: 15000,
-            db_path: "~/.nexo/nexo.db".to_string(),
+            db_path: "~/.nexo/storage/relational/gateway.db".to_string(),
+            storage_root: "~/.nexo/storage".to_string(),
             auth_token: nexo_ws_schema::AUTH_TOKEN.to_string(),
         }
     }

@@ -107,6 +107,14 @@
         "minimum": 0,
         "type": "integer"
       },
+      "models": {
+        "default": [],
+        "description": "Model IDs available on disk for this node. Empty for user clients.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
       "role": {
         "$ref": "#/$defs/Role"
       },
@@ -197,16 +205,79 @@
       },
       "Method": {
         "description": "Available request methods in the gateway protocol.",
-        "enum": [
-          "connect",
-          "health",
-          "status",
-          "send",
-          "agent",
-          "system-presence",
-          "tools.catalog"
-        ],
-        "type": "string"
+        "oneOf": [
+          {
+            "enum": [
+              "connect",
+              "health",
+              "status",
+              "send",
+              "agent",
+              "system-presence",
+              "tools.catalog",
+              "tools.register",
+              "tools.execute",
+              "session.create",
+              "session.list",
+              "session.get",
+              "session.clear",
+              "cron.create",
+              "cron.list",
+              "cron.delete"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "model.load",
+            "description": "Gateway → node: load a model into VRAM.",
+            "type": "string"
+          },
+          {
+            "const": "model.unload",
+            "description": "Gateway → node: unload a model from VRAM.",
+            "type": "string"
+          },
+          {
+            "const": "model.status",
+            "description": "Node → gateway: report current loaded model and available models.",
+            "type": "string"
+          },
+          {
+            "const": "prefill.fetch",
+            "description": "Node → gateway: fetch a prefill payload by SHA.",
+            "type": "string"
+          },
+          {
+            "const": "prefill.markdown.create",
+            "description": "Client → gateway: create a markdown file.",
+            "type": "string"
+          },
+          {
+            "const": "prefill.markdown.list",
+            "description": "Client → gateway: list markdown files.",
+            "type": "string"
+          },
+          {
+            "const": "prefill.markdown.delete",
+            "description": "Client → gateway: delete a markdown file.",
+            "type": "string"
+          },
+          {
+            "const": "prefill.collection.create",
+            "description": "Client → gateway: create a prefill collection.",
+            "type": "string"
+          },
+          {
+            "const": "prefill.collection.list",
+            "description": "Client → gateway: list prefill collections.",
+            "type": "string"
+          },
+          {
+            "const": "prefill.collection.delete",
+            "description": "Client → gateway: delete a prefill collection.",
+            "type": "string"
+          }
+        ]
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -305,16 +376,79 @@
   "methods": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "description": "Available request methods in the gateway protocol.",
-    "enum": [
-      "connect",
-      "health",
-      "status",
-      "send",
-      "agent",
-      "system-presence",
-      "tools.catalog"
+    "oneOf": [
+      {
+        "enum": [
+          "connect",
+          "health",
+          "status",
+          "send",
+          "agent",
+          "system-presence",
+          "tools.catalog",
+          "tools.register",
+          "tools.execute",
+          "session.create",
+          "session.list",
+          "session.get",
+          "session.clear",
+          "cron.create",
+          "cron.list",
+          "cron.delete"
+        ],
+        "type": "string"
+      },
+      {
+        "const": "model.load",
+        "description": "Gateway → node: load a model into VRAM.",
+        "type": "string"
+      },
+      {
+        "const": "model.unload",
+        "description": "Gateway → node: unload a model from VRAM.",
+        "type": "string"
+      },
+      {
+        "const": "model.status",
+        "description": "Node → gateway: report current loaded model and available models.",
+        "type": "string"
+      },
+      {
+        "const": "prefill.fetch",
+        "description": "Node → gateway: fetch a prefill payload by SHA.",
+        "type": "string"
+      },
+      {
+        "const": "prefill.markdown.create",
+        "description": "Client → gateway: create a markdown file.",
+        "type": "string"
+      },
+      {
+        "const": "prefill.markdown.list",
+        "description": "Client → gateway: list markdown files.",
+        "type": "string"
+      },
+      {
+        "const": "prefill.markdown.delete",
+        "description": "Client → gateway: delete a markdown file.",
+        "type": "string"
+      },
+      {
+        "const": "prefill.collection.create",
+        "description": "Client → gateway: create a prefill collection.",
+        "type": "string"
+      },
+      {
+        "const": "prefill.collection.list",
+        "description": "Client → gateway: list prefill collections.",
+        "type": "string"
+      },
+      {
+        "const": "prefill.collection.delete",
+        "description": "Client → gateway: delete a prefill collection.",
+        "type": "string"
+      }
     ],
-    "title": "Method",
-    "type": "string"
+    "title": "Method"
   }
 }

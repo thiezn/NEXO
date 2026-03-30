@@ -15,9 +15,15 @@ pub use events::{
 };
 pub use frame::Frame;
 pub use methods::{
-    AgentParams, AgentResponse, AgentStatus, ConversationMessage, CronCreateParams,
+    AgentParams, AgentResponse, AgentStatus, CollectionEntry, ConversationMessage, CronCreateParams,
     CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry, CronListParams,
-    CronListResponse, HealthParams, HealthResponse, Method, SendParams, SendResponse,
+    CronListResponse, HealthParams, HealthResponse, MarkdownFileEntry, Method, ModelLoadParams,
+    ModelLoadResponse, ModelStatusParams, ModelUnloadParams, ModelUnloadResponse,
+    PrefillCollectionCreateParams, PrefillCollectionCreateResponse, PrefillCollectionDeleteParams,
+    PrefillCollectionDeleteResponse, PrefillCollectionListParams, PrefillCollectionListResponse,
+    PrefillFetchParams, PrefillFetchResponse, PrefillMarkdownCreateParams,
+    PrefillMarkdownCreateResponse, PrefillMarkdownDeleteParams, PrefillMarkdownDeleteResponse,
+    PrefillMarkdownListParams, PrefillMarkdownListResponse, SendParams, SendResponse,
     SessionClearParams, SessionClearResponse, SessionCreateParams, SessionCreateResponse,
     SessionEntry, SessionGetParams, SessionGetResponse, SessionListParams, SessionListResponse,
     StatusParams, StatusResponse, SystemPresenceParams, ToolEntry, ToolSpecEntry,

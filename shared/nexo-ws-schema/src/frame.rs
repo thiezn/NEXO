@@ -203,6 +203,7 @@ mod tests {
             scopes: vec![Scope::UserRead, Scope::UserWrite],
             capabilities: vec![],
             commands: vec![],
+            models: vec![],
             locale: Some("en-US".into()),
             user_agent: Some("NEXO-cli/1.2.3".into()),
             device: Some(DeviceInfo {

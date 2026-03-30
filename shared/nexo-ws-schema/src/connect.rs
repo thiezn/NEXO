@@ -16,6 +16,9 @@ pub struct ConnectParams {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub commands: Vec<String>,
+    /// Model IDs available on disk for this node. Empty for user clients.
+    #[serde(default)]
+    pub models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -72,6 +75,7 @@ mod tests {
             scopes: vec![Scope::UserRead, Scope::UserWrite],
             capabilities: vec![],
             commands: vec![],
+            models: vec![],
             locale: Some("en-US".into()),
             user_agent: Some("NEXO-cli/1.2.3".into()),
             device: Some(DeviceInfo {
@@ -109,6 +113,7 @@ mod tests {
                 "game_extractor.analyze".into(),
                 "epub_extractor.extract".into(),
             ],
+            models: vec!["qwen3-30b".into()],
             locale: Some("en-US".into()),
             user_agent: Some("NEXO-rust-node/1.2.3".into()),
             device: Some(DeviceInfo {
@@ -136,6 +141,7 @@ mod tests {
             scopes: vec![Scope::UserRead],
             capabilities: vec![],
             commands: vec![],
+            models: vec![],
             locale: None,
             user_agent: None,
             device: None,

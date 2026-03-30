@@ -31,6 +31,36 @@ pub enum Method {
     CronList,
     #[serde(rename = "cron.delete")]
     CronDelete,
+    /// Gateway → node: load a model into VRAM.
+    #[serde(rename = "model.load")]
+    ModelLoad,
+    /// Gateway → node: unload a model from VRAM.
+    #[serde(rename = "model.unload")]
+    ModelUnload,
+    /// Node → gateway: report current loaded model and available models.
+    #[serde(rename = "model.status")]
+    ModelStatus,
+    /// Node → gateway: fetch a prefill payload by SHA.
+    #[serde(rename = "prefill.fetch")]
+    PrefillFetch,
+    /// Client → gateway: create a markdown file.
+    #[serde(rename = "prefill.markdown.create")]
+    PrefillMarkdownCreate,
+    /// Client → gateway: list markdown files.
+    #[serde(rename = "prefill.markdown.list")]
+    PrefillMarkdownList,
+    /// Client → gateway: delete a markdown file.
+    #[serde(rename = "prefill.markdown.delete")]
+    PrefillMarkdownDelete,
+    /// Client → gateway: create a prefill collection.
+    #[serde(rename = "prefill.collection.create")]
+    PrefillCollectionCreate,
+    /// Client → gateway: list prefill collections.
+    #[serde(rename = "prefill.collection.list")]
+    PrefillCollectionList,
+    /// Client → gateway: delete a prefill collection.
+    #[serde(rename = "prefill.collection.delete")]
+    PrefillCollectionDelete,
 }
 
 /// Agent run status.
@@ -38,6 +68,8 @@ pub enum Method {
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {
     Accepted,
+    /// Run is queued, waiting for an LLM node to become available.
+    Queued,
     Thinking,
     ToolCall,
     Streaming,
@@ -75,6 +107,9 @@ pub struct AgentParams {
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<serde_json::Value>,
+    /// The model ID to use for inference. If omitted, any available LLM node is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 /// Parameters for the `system-presence` method.
@@ -189,9 +224,13 @@ pub struct ToolsExecuteResponse {
 
 /// Parameters for the `session.create` method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionCreateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// ID of a prefill collection to associate with this session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill_collection_id: Option<String>,
 }
 
 /// Response payload for `session.create`.
@@ -199,6 +238,9 @@ pub struct SessionCreateParams {
 #[serde(rename_all = "camelCase")]
 pub struct SessionCreateResponse {
     pub session_id: String,
+    /// The prefill collection ID associated with this session, if one was provided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill_collection_id: Option<String>,
 }
 
 // -- session.list --
@@ -335,6 +377,186 @@ pub struct CronDeleteResponse {
     pub deleted: bool,
 }
 
+// -- model.load --
+
+/// Parameters for `model.load` (gateway → node).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelLoadParams {
+    pub model_id: String,
+}
+
+/// Response payload for `model.load`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelLoadResponse {
+    pub model_id: String,
+    pub loaded: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+// -- model.unload --
+
+/// Parameters for `model.unload` (gateway → node).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUnloadParams {
+    pub model_id: String,
+}
+
+/// Response payload for `model.unload`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ModelUnloadResponse {
+    pub unloaded: bool,
+}
+
+// -- model.status --
+
+/// Sent by a node to report its currently loaded model and available models on disk.
+/// Used as both a push notification and a response to gateway queries.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStatusParams {
+    /// The model currently loaded in VRAM (None if no model is loaded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loaded_model_id: Option<String>,
+    /// All model IDs available on disk on this node.
+    #[serde(default)]
+    pub available_models: Vec<String>,
+}
+
+// -- prefill.fetch --
+
+/// Parameters for `prefill.fetch` (node → gateway).
+/// The node sends the SHA-256 hex of the combined collection content.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefillFetchParams {
+    pub prefill_sha: String,
+}
+
+/// Response payload for `prefill.fetch`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefillFetchResponse {
+    pub prefill_sha: String,
+    pub content: String,
+}
+
+// -- prefill.markdown.create --
+
+/// Parameters for `prefill.markdown.create`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillMarkdownCreateParams {
+    pub category: String,
+    pub description: String,
+    pub content: String,
+}
+
+/// Response payload for `prefill.markdown.create`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillMarkdownCreateResponse {
+    pub id: String,
+}
+
+// -- prefill.markdown.list --
+
+/// Parameters for `prefill.markdown.list` (empty).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillMarkdownListParams {}
+
+/// A single markdown file entry.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownFileEntry {
+    pub id: String,
+    pub category: String,
+    pub description: String,
+    pub filename: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Response payload for `prefill.markdown.list`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillMarkdownListResponse {
+    pub files: Vec<MarkdownFileEntry>,
+}
+
+// -- prefill.markdown.delete --
+
+/// Parameters for `prefill.markdown.delete`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillMarkdownDeleteParams {
+    pub id: String,
+}
+
+/// Response payload for `prefill.markdown.delete`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillMarkdownDeleteResponse {
+    pub deleted: bool,
+}
+
+// -- prefill.collection.create --
+
+/// Parameters for `prefill.collection.create`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefillCollectionCreateParams {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Ordered list of markdown file IDs that form this collection.
+    pub markdown_ids: Vec<String>,
+}
+
+/// Response payload for `prefill.collection.create`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillCollectionCreateResponse {
+    pub id: String,
+}
+
+// -- prefill.collection.list --
+
+/// Parameters for `prefill.collection.list` (empty).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillCollectionListParams {}
+
+/// A single prefill collection entry.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionEntry {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Ordered list of markdown file IDs in this collection.
+    pub markdown_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Response payload for `prefill.collection.list`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillCollectionListResponse {
+    pub collections: Vec<CollectionEntry>,
+}
+
+// -- prefill.collection.delete --
+
+/// Parameters for `prefill.collection.delete`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillCollectionDeleteParams {
+    pub id: String,
+}
+
+/// Response payload for `prefill.collection.delete`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrefillCollectionDeleteResponse {
+    pub deleted: bool,
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -381,6 +603,7 @@ mod tests {
             idempotency_key: "idem-1".into(),
             session_id: Some("sess-1".into()),
             context: Some(serde_json::json!({"files": ["a.rs"]})),
+            model_id: None,
         };
         let json = serde_json::to_string(&params).unwrap();
         let decoded: AgentParams = serde_json::from_str(&json).unwrap();
@@ -394,6 +617,7 @@ mod tests {
             idempotency_key: "k1".into(),
             session_id: None,
             context: None,
+            model_id: None,
         };
         let json = serde_json::to_value(&params).unwrap();
         assert!(!json.as_object().unwrap().contains_key("sessionId"));
@@ -505,6 +729,7 @@ mod tests {
     fn agent_status_serialization() {
         for (status, expected) in [
             (AgentStatus::Accepted, "\"accepted\""),
+            (AgentStatus::Queued, "\"queued\""),
             (AgentStatus::Thinking, "\"thinking\""),
             (AgentStatus::ToolCall, "\"tool_call\""),
             (AgentStatus::Streaming, "\"streaming\""),
@@ -574,6 +799,7 @@ mod tests {
     fn session_create_params_roundtrip() {
         let params = SessionCreateParams {
             name: Some("my session".into()),
+            prefill_collection_id: None,
         };
         let json = serde_json::to_string(&params).unwrap();
         let decoded: SessionCreateParams = serde_json::from_str(&json).unwrap();
@@ -636,5 +862,43 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: ConversationMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, decoded);
+    }
+
+    #[test]
+    fn prefill_method_serialization() {
+        assert_eq!(
+            serde_json::to_string(&Method::PrefillFetch).unwrap(),
+            "\"prefill.fetch\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Method::PrefillMarkdownCreate).unwrap(),
+            "\"prefill.markdown.create\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Method::PrefillCollectionCreate).unwrap(),
+            "\"prefill.collection.create\""
+        );
+    }
+
+    #[test]
+    fn prefill_fetch_params_uses_sha() {
+        let params = PrefillFetchParams {
+            prefill_sha: "abc123".into(),
+        };
+        let json = serde_json::to_value(&params).unwrap();
+        assert_eq!(json["prefillSha"], "abc123");
+        assert!(json.get("prefillId").is_none());
+    }
+
+    #[test]
+    fn prefill_collection_create_roundtrip() {
+        let params = PrefillCollectionCreateParams {
+            name: "my collection".into(),
+            description: Some("desc".into()),
+            markdown_ids: vec!["id1".into(), "id2".into()],
+        };
+        let json = serde_json::to_string(&params).unwrap();
+        let decoded: PrefillCollectionCreateParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, decoded);
     }
 }

@@ -201,4 +201,14 @@ impl InferenceClients {
     pub async fn imagine(&self, req: ImagineRequest) -> anyhow::Result<ImagineResponse> {
         qwen_cli::generate(&self.config.qwen_image_cli, &self.config.image_output_dir, req).await
     }
+
+    /// Request llama-server to load a model into VRAM.
+    pub async fn load_model(&self, model_id: &str) -> anyhow::Result<()> {
+        openai::load_model(&self.http, &self.config.llama_url, model_id).await
+    }
+
+    /// Request llama-server to unload a model from VRAM.
+    pub async fn unload_model(&self, model_id: &str) -> anyhow::Result<()> {
+        openai::unload_model(&self.http, &self.config.llama_url, model_id).await
+    }
 }

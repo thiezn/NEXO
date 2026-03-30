@@ -31,8 +31,11 @@
 - Provide a device identity in `connect`; pairing is **device‑based** (role `node`)
 - After handshake, register full tool specs via `tools.register`.
 - Listen for `tools.execute` requests forwarded by the gateway.
+- Handle `agent` inference requests from the gateway loop runner.
+- Respond to `model.load` / `model.unload` commands; push `model.status` updates.
 - Expose commands like `epub_extractor.*`, `echo.*`, `ping`.
 - Automatically reconnect and re-register on disconnect.
+- On macOS, nexo-node also starts and monitors local inference servers (llama-server, etc.). See [Model Management](/nexo/model_management.md) §6.
 
 ## Connection lifecycle (single client)
 

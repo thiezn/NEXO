@@ -2,6 +2,8 @@ pub mod context;
 pub mod cron;
 pub mod locks;
 pub mod loop_runner;
+pub mod prefill;
+pub mod queue;
 pub mod session;
 
 use crate::server::state::SharedState;
@@ -17,7 +19,11 @@ pub enum AgentCommand {
         prompt: String,
         context: Option<serde_json::Value>,
         peer_id: String,
+        model_id: Option<String>,
+        prefill_collection_id: Option<String>,
     },
+    /// Drain queued runs when a new LLM node connects.
+    DrainQueue,
 }
 
 /// Handle through which the handler dispatches agent work.
@@ -64,6 +70,8 @@ async fn agent_task(
                 prompt,
                 context,
                 peer_id,
+                model_id,
+                prefill_collection_id,
             } => {
                 tracing::info!("Starting agent run {run_id} (session={session_id})");
                 loop_runner::run(
@@ -75,8 +83,14 @@ async fn agent_task(
                     &db,
                     &state,
                     &event_tx,
+                    model_id.as_deref(),
+                    prefill_collection_id.as_deref(),
                 )
                 .await;
+            }
+            AgentCommand::DrainQueue => {
+                tracing::info!("Queue drain triggered");
+                queue::drain_queue(&db, &state, &event_tx).await;
             }
         }
     }

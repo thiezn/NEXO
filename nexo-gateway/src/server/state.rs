@@ -1,7 +1,8 @@
 use nexo_ws_schema::{Frame, Role, Scope, ToolEntry, ToolSpecEntry};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
+use tokio::sync::{Notify, RwLock, broadcast, mpsc, oneshot};
 
 pub type PeerId = String;
 
@@ -34,16 +35,21 @@ pub struct GatewayState {
     pub pending_requests: HashMap<String, oneshot::Sender<Frame>>,
     pub event_tx: broadcast::Sender<Frame>,
     pub started_at: chrono::DateTime<chrono::Utc>,
-}
-
-impl Default for GatewayState {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// Model currently loaded in VRAM per node (None = no model loaded).
+    pub loaded_models: HashMap<PeerId, Option<String>>,
+    /// Model IDs available on disk per node (declared at connect time).
+    pub available_models: HashMap<PeerId, Vec<String>>,
+    /// Notified whenever a node's loaded model changes (used to wake the queue drain watcher).
+    pub model_ready_notify: Arc<Notify>,
+    /// SHA-256 hex → combined prefill content. Populated by the agent loop before
+    /// forwarding to a node; used to answer PrefillFetch requests with O(1) lookup.
+    pub prefill_sha_cache: HashMap<String, String>,
+    /// Resolved path to the storage root (~/.nexo/storage).
+    pub storage_root: PathBuf,
 }
 
 impl GatewayState {
-    pub fn new() -> Self {
+    pub fn new(storage_root: PathBuf) -> Self {
         let (tx, _) = broadcast::channel(256);
         Self {
             peers: HashMap::new(),
@@ -52,7 +58,27 @@ impl GatewayState {
             pending_requests: HashMap::new(),
             event_tx: tx,
             started_at: chrono::Utc::now(),
+            loaded_models: HashMap::new(),
+            available_models: HashMap::new(),
+            model_ready_notify: Arc::new(Notify::new()),
+            prefill_sha_cache: HashMap::new(),
+            storage_root,
         }
+    }
+
+    /// Store a resolved prefill SHA → content mapping so nodes can fetch it.
+    pub fn cache_prefill(&mut self, sha: String, content: String) {
+        self.prefill_sha_cache.insert(sha, content);
+    }
+
+    /// Look up cached prefill content by SHA. O(1).
+    pub fn get_cached_prefill(&self, sha: &str) -> Option<&str> {
+        self.prefill_sha_cache.get(sha).map(String::as_str)
+    }
+
+    /// Clear all cached SHA → content entries (called when markdown files change).
+    pub fn invalidate_prefill_cache(&mut self) {
+        self.prefill_sha_cache.clear();
     }
 
     pub fn add_peer(&mut self, info: PeerInfo, sender: mpsc::Sender<Frame>) {
@@ -72,6 +98,97 @@ impl GatewayState {
         }
         self.peer_senders.remove(id);
         self.deregister_tools_for_peer(id);
+        self.loaded_models.remove(id);
+        self.available_models.remove(id);
+    }
+
+    /// Update the set of models available on disk for a peer.
+    pub fn set_available_models(&mut self, peer_id: &str, models: Vec<String>) {
+        self.available_models.insert(peer_id.to_string(), models);
+    }
+
+    /// Update the currently loaded model for a node. Notifies queue drain waiters.
+    pub fn set_loaded_model(&mut self, peer_id: &str, model_id: Option<String>) {
+        self.loaded_models.insert(peer_id.to_string(), model_id);
+        self.model_ready_notify.notify_waiters();
+    }
+
+    /// Find the first LLM node that has `model_id` loaded in VRAM.
+    /// Returns (peer_id, sender) if found.
+    pub fn find_loaded_llm_peer(&self, model_id: &str) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+        for (peer_id, peer) in &self.peers {
+            if peer.role != Role::Node {
+                continue;
+            }
+            if !peer.capabilities.iter().any(|c| c == "llm" || c == "inference") {
+                continue;
+            }
+            if self.loaded_models.get(peer_id).and_then(|m| m.as_deref()) == Some(model_id) {
+                if let Some(sender) = self.peer_senders.get(peer_id) {
+                    return Some((peer_id.clone(), sender.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    /// Find the first LLM node that has `model_id` available on disk (but not necessarily loaded).
+    /// Returns (peer_id, sender) if found.
+    pub fn find_capable_peer_for_model(&self, model_id: &str) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+        for (peer_id, peer) in &self.peers {
+            if peer.role != Role::Node {
+                continue;
+            }
+            if !peer.capabilities.iter().any(|c| c == "llm" || c == "inference") {
+                continue;
+            }
+            let has_model = self
+                .available_models
+                .get(peer_id)
+                .map(|models| models.iter().any(|m| m == model_id))
+                .unwrap_or(false);
+            if has_model {
+                if let Some(sender) = self.peer_senders.get(peer_id) {
+                    return Some((peer_id.clone(), sender.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    /// Find any connected LLM-capable node (existing behaviour, used when no model_id is specified).
+    pub fn find_any_llm_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+        for (peer_id, peer) in &self.peers {
+            if peer.role != Role::Node {
+                continue;
+            }
+            if peer.capabilities.iter().any(|c| c == "llm" || c == "inference") {
+                if let Some(sender) = self.peer_senders.get(peer_id) {
+                    return Some((peer_id.clone(), sender.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns true if any LLM-capable node is connected.
+    pub fn has_llm_peer(&self) -> bool {
+        self.peers.values().any(|p| {
+            p.role == Role::Node
+                && p.capabilities.iter().any(|c| c == "llm" || c == "inference")
+        })
+    }
+
+    /// Returns the set of peer_ids of connected LLM nodes.
+    pub fn llm_peer_ids(&self) -> HashSet<PeerId> {
+        self.peers
+            .values()
+            .filter(|p| {
+                p.role == Role::Node
+                    && p.capabilities.iter().any(|c| c == "llm" || c == "inference")
+            })
+            .map(|p| p.id.clone())
+            .collect()
     }
 
     /// Register tools provided by a node. Returns the number of tools registered.
@@ -204,7 +321,7 @@ mod tests {
 
     #[test]
     fn add_and_remove_peer() {
-        let mut state = GatewayState::new();
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         state.add_peer(make_user_peer("peer-1"), dummy_sender());
         assert_eq!(state.peers.len(), 1);
         state.remove_peer("peer-1");
@@ -213,7 +330,7 @@ mod tests {
 
     #[test]
     fn connected_users_and_nodes_count() {
-        let mut state = GatewayState::new();
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         state.add_peer(make_user_peer("u1"), dummy_sender());
         state.add_peer(make_user_peer("u2"), dummy_sender());
         state.add_peer(make_node_peer("n1", vec!["epub".into()]), dummy_sender());
@@ -223,7 +340,7 @@ mod tests {
 
     #[test]
     fn all_capabilities_aggregation() {
-        let mut state = GatewayState::new();
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         state.add_peer(make_node_peer("n1", vec!["epub".into(), "game".into()]), dummy_sender());
         state.add_peer(make_node_peer("n2", vec!["game".into(), "tts".into()]), dummy_sender());
         let caps = state.all_capabilities();
@@ -232,19 +349,19 @@ mod tests {
 
     #[test]
     fn all_capabilities_empty_with_no_nodes() {
-        let state = GatewayState::new();
+        let state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         assert!(state.all_capabilities().is_empty());
     }
 
     #[test]
     fn uptime_is_non_negative() {
-        let state = GatewayState::new();
+        let state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         assert!(state.uptime_secs() < 2);
     }
 
     #[test]
     fn register_and_deregister_tools() {
-        let mut state = GatewayState::new();
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         state.add_peer(make_node_peer("n1", vec!["echo".into()]), dummy_sender());
 
         let tools = vec![
@@ -272,7 +389,7 @@ mod tests {
 
     #[test]
     fn all_tool_entries_builds_catalog() {
-        let mut state = GatewayState::new();
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         state.add_peer(make_node_peer("n1", vec!["echo".into()]), dummy_sender());
         state.register_tools(
             "n1",
@@ -293,7 +410,7 @@ mod tests {
 
     #[test]
     fn tool_from_disconnected_peer_shows_unavailable() {
-        let mut state = GatewayState::new();
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         // Manually insert a tool without a matching peer sender
         state.tool_registry.insert(
             "orphan.tool".into(),

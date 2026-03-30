@@ -15,7 +15,8 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
     let db_path = utl_helpers::resolve_path_str(&config.db_path)?;
     let db = crate::memory::persistent::connect(&db_path).await?;
 
-    let gateway_state = GatewayState::new();
+    let storage_root = utl_helpers::resolve_path_str(&config.storage_root)?;
+    let gateway_state = GatewayState::new(storage_root);
     let event_tx = gateway_state.event_tx.clone();
     let state: SharedState = Arc::new(RwLock::new(gateway_state));
 

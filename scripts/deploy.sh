@@ -16,7 +16,7 @@ sudo cp ./target/release/nexo /usr/local/bin
 sudo cp ./target/release/nexo-client /usr/local/bin
 sudo cp ./target/release/game-extractor /usr/local/bin
 sudo cp ./target/release/epub-extractor /usr/local/bin
-sudo cp ./target/release/nexo-ai /usr/local/bin
+sudo cp ./target/release/nexo-node /usr/local/bin
 # sudo cp ./target/release/multimodal /usr/local/bin
 # sudo cp ./target/release/text-to-img /usr/local/bin
 # sudo cp ./target/release/speech-to-text /usr/local/bin
@@ -27,7 +27,7 @@ sudo chown root:admin /usr/local/bin/nexo
 sudo chown root:admin /usr/local/bin/nexo-client
 sudo chown root:admin /usr/local/bin/game-extractor
 sudo chown root:admin /usr/local/bin/epub-extractor
-sudo chown root:admin /usr/local/bin/nexo-ai
+sudo chown root:admin /usr/local/bin/nexo-node
 # sudo chown root:admin /usr/local/bin/multimodal
 # sudo chown root:admin /usr/local/bin/text-to-img
 # sudo chown root:admin /usr/local/bin/speech-to-text

@@ -1,20 +1,26 @@
 use nexo_ws_schema::{AgentStatus, ConversationMessage, Frame, SessionEntry, SessionGetResponse};
 use sqlx::SqlitePool;
 
-/// Create a new session for a user. Returns the session ID.
+/// Create a new session for a user. Returns (session_id, prefill_collection_id).
 pub async fn create_session(
     pool: &SqlitePool,
     user_id: &str,
     name: Option<&str>,
-) -> Result<String, sqlx::Error> {
+    prefill_collection_id: Option<&str>,
+) -> Result<(String, Option<String>), sqlx::Error> {
     let id = Frame::new_id();
-    sqlx::query("INSERT INTO sessions (id, user_id, name) VALUES (?, ?, ?)")
-        .bind(&id)
-        .bind(user_id)
-        .bind(name)
-        .execute(pool)
-        .await?;
-    Ok(id)
+
+    sqlx::query(
+        "INSERT INTO sessions (id, user_id, name, prefill_collection_id) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(user_id)
+    .bind(name)
+    .bind(prefill_collection_id)
+    .execute(pool)
+    .await?;
+
+    Ok((id, prefill_collection_id.map(String::from)))
 }
 
 /// List all sessions for a user, ordered by most recently active.
@@ -153,13 +159,17 @@ pub async fn create_run(
     run_id: &str,
     session_id: &str,
     idempotency_key: &str,
+    model_id: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO agent_runs (id, session_id, idempotency_key) VALUES (?, ?, ?)")
-        .bind(run_id)
-        .bind(session_id)
-        .bind(idempotency_key)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO agent_runs (id, session_id, idempotency_key, model_id) VALUES (?, ?, ?, ?)",
+    )
+    .bind(run_id)
+    .bind(session_id)
+    .bind(idempotency_key)
+    .bind(model_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -200,7 +210,7 @@ mod tests {
             .await
             .unwrap();
 
-        let sid = create_session(&pool, "user-1", Some("test session"))
+        let (sid, _) = create_session(&pool, "user-1", Some("test session"), None::<&str>)
             .await
             .unwrap();
         assert!(!sid.is_empty());
@@ -229,9 +239,9 @@ mod tests {
             .await
             .unwrap();
 
-        create_session(&pool, "u1", Some("s1")).await.unwrap();
-        create_session(&pool, "u1", Some("s2")).await.unwrap();
-        create_session(&pool, "u2", Some("s3")).await.unwrap();
+        create_session(&pool, "u1", Some("s1"), None).await.unwrap();
+        create_session(&pool, "u1", Some("s2"), None).await.unwrap();
+        create_session(&pool, "u2", Some("s3"), None).await.unwrap();
 
         let u1_sessions = list_sessions(&pool, "u1").await.unwrap();
         assert_eq!(u1_sessions.len(), 2);
@@ -251,7 +261,7 @@ mod tests {
             .await
             .unwrap();
 
-        let sid = create_session(&pool, "u1", None).await.unwrap();
+        let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
         insert_message(&pool, &sid, None, "user", "hello", None, None)
             .await
             .unwrap();
@@ -275,7 +285,7 @@ mod tests {
             .await
             .unwrap();
 
-        let sid = create_session(&pool, "u1", Some("chat")).await.unwrap();
+        let (sid, _) = create_session(&pool, "u1", Some("chat"), None).await.unwrap();
         insert_message(&pool, &sid, None, "user", "hello", None, None)
             .await
             .unwrap();
@@ -308,8 +318,8 @@ mod tests {
             .await
             .unwrap();
 
-        let sid = create_session(&pool, "u1", None).await.unwrap();
-        create_run(&pool, "run-1", &sid, "idem-1").await.unwrap();
+        let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
+        create_run(&pool, "run-1", &sid, "idem-1", None).await.unwrap();
         insert_message(&pool, &sid, Some("run-1"), "user", "hello", None, None)
             .await
             .unwrap();
@@ -360,7 +370,7 @@ mod tests {
             .await
             .unwrap();
 
-        let sid = create_session(&pool, "u1", None).await.unwrap();
+        let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
 
         let (before,): (String,) =
             sqlx::query_as("SELECT last_active_at FROM sessions WHERE id = ?")
@@ -397,8 +407,8 @@ mod tests {
             .await
             .unwrap();
 
-        let sid = create_session(&pool, "u1", None).await.unwrap();
-        create_run(&pool, "run-1", &sid, "idem-1").await.unwrap();
+        let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
+        create_run(&pool, "run-1", &sid, "idem-1", None).await.unwrap();
 
         let (status,): (String,) =
             sqlx::query_as("SELECT status FROM agent_runs WHERE id = 'run-1'")

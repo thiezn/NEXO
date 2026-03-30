@@ -354,6 +354,47 @@ fn parse_wav(data: &[u8]) -> anyhow::Result<(Vec<f32>, u32)> {
     Ok((mono, sample_rate))
 }
 
+#[derive(Serialize)]
+struct ModelManageRequest {
+    model_id: String,
+}
+
+/// Request the llama-server to load a model into VRAM.
+pub(super) async fn load_model(
+    http: &reqwest::Client,
+    base_url: &str,
+    model_id: &str,
+) -> anyhow::Result<()> {
+    http.post(format!("{base_url}/v1/models/load"))
+        .json(&ModelManageRequest {
+            model_id: model_id.to_string(),
+        })
+        .send()
+        .await
+        .context("failed to reach llama-server for model load")?
+        .error_for_status()
+        .context("llama-server model load failed")?;
+    Ok(())
+}
+
+/// Request the llama-server to unload a model from VRAM.
+pub(super) async fn unload_model(
+    http: &reqwest::Client,
+    base_url: &str,
+    model_id: &str,
+) -> anyhow::Result<()> {
+    http.post(format!("{base_url}/v1/models/unload"))
+        .json(&ModelManageRequest {
+            model_id: model_id.to_string(),
+        })
+        .send()
+        .await
+        .context("failed to reach llama-server for model unload")?
+        .error_for_status()
+        .context("llama-server model unload failed")?;
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

@@ -3,9 +3,11 @@ use crate::server::state::{PeerInfo, SharedState};
 use futures_util::{SinkExt, StreamExt};
 use nexo_ws_schema::{
     AgentParams, AgentStatus, ConnectParams, CronCreateParams, CronDeleteParams, ErrorPayload,
-    EventKind, Frame, HealthResponse, HelloOk, Method, PROTOCOL_VERSION, PresencePayload, Role,
-    SessionClearParams, SessionCreateParams, SessionGetParams, StatusResponse,
-    ToolsCatalogResponse, ToolsExecuteParams, ToolsRegisterParams, ToolsRegisterResponse, WsError,
+    EventKind, Frame, HealthResponse, HelloOk, Method, ModelStatusParams, PROTOCOL_VERSION,
+    PrefillCollectionCreateParams, PrefillCollectionDeleteParams, PrefillFetchParams,
+    PrefillMarkdownCreateParams, PrefillMarkdownDeleteParams, PresencePayload, Role,
+    SessionClearParams, SessionCreateParams, SessionGetParams, StatusResponse, ToolsCatalogResponse,
+    ToolsExecuteParams, ToolsRegisterParams, ToolsRegisterResponse, WsError,
 };
 use serde::Serialize;
 use sqlx::SqlitePool;
@@ -49,6 +51,22 @@ pub async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
         let state_read = state.read().await;
         if let Some(peer) = state_read.peers.get(&peer_id) {
             broadcast_presence(peer, "online", &state_read.event_tx);
+        }
+    }
+
+    // Step 2b: Drain the queue if an LLM-capable node just connected
+    {
+        let is_llm_node = {
+            let state_read = state.read().await;
+            state_read.peers.get(&peer_id).is_some_and(|p| {
+                p.role == Role::Node
+                    && p.capabilities.iter().any(|c| c == "llm" || c == "inference")
+            })
+        };
+        if is_llm_node {
+            if let Err(e) = agent_handle.submit(AgentCommand::DrainQueue).await {
+                tracing::warn!("Failed to submit DrainQueue after LLM node connect: {e}");
+            }
         }
     }
 
@@ -203,6 +221,7 @@ async fn wait_for_connect<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpi
     }
 
     let peer_id = Frame::new_id();
+    let models = params.models;
     let peer = PeerInfo {
         id: peer_id.clone(),
         client_id: params.client.id.clone(),
@@ -216,7 +235,11 @@ async fn wait_for_connect<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpi
 
     // Create per-peer directed channel
     let (directed_tx, directed_rx) = mpsc::channel(32);
-    state.write().await.add_peer(peer, directed_tx);
+    {
+        let mut sw = state.write().await;
+        sw.add_peer(peer, directed_tx);
+        sw.set_available_models(&peer_id, models);
+    }
 
     // Send hello-ok response
     let hello = HelloOk::default();
@@ -585,12 +608,24 @@ async fn dispatch_method(
             let session_id = match agent_params.session_id {
                 Some(sid) => sid,
                 None => {
-                    match crate::agent::session::create_session(db, &user_id, None).await {
-                        Ok(sid) => sid,
+                    match crate::agent::session::create_session(db, &user_id, None, None::<&str>).await {
+                        Ok((sid, _)) => sid,
                         Err(e) => return internal_error(request_id, format!("Failed to create session: {e}")),
                     }
                 }
             };
+
+            // Look up the session's prefill_collection_id
+            let prefill_collection_id: Option<String> =
+                sqlx::query_as::<_, (Option<String>,)>(
+                    "SELECT prefill_collection_id FROM sessions WHERE id = ?",
+                )
+                .bind(&session_id)
+                .fetch_optional(db)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|(c,)| c);
 
             let run_id = Frame::new_id();
             if let Err(e) = crate::agent::session::create_run(
@@ -598,6 +633,7 @@ async fn dispatch_method(
                 &run_id,
                 &session_id,
                 &agent_params.idempotency_key,
+                agent_params.model_id.as_deref(),
             )
             .await
             {
@@ -611,6 +647,8 @@ async fn dispatch_method(
                 prompt: agent_params.prompt,
                 context: agent_params.context,
                 peer_id: peer_id.to_string(),
+                model_id: agent_params.model_id,
+                prefill_collection_id,
             };
             if let Err(e) = agent_handle.submit(cmd).await {
                 tracing::error!("Failed to submit agent command: {e}");
@@ -633,10 +671,17 @@ async fn dispatch_method(
             };
             let user_id = resolve_user_id(state, peer_id).await;
 
-            match crate::agent::session::create_session(db, &user_id, session_params.name.as_deref()).await {
-                Ok(session_id) => ok_or_internal_error(
+            match crate::agent::session::create_session(
+                db,
+                &user_id,
+                session_params.name.as_deref(),
+                session_params.prefill_collection_id.as_deref(),
+            )
+            .await
+            {
+                Ok((session_id, prefill_collection_id)) => ok_or_internal_error(
                     request_id,
-                    nexo_ws_schema::SessionCreateResponse { session_id },
+                    nexo_ws_schema::SessionCreateResponse { session_id, prefill_collection_id },
                 ),
                 Err(e) => internal_error(request_id, format!("Failed to create session: {e}")),
             }
@@ -727,6 +772,162 @@ async fn dispatch_method(
         Method::Send => {
             ok_or_internal_error(request_id, nexo_ws_schema::SendResponse { delivered: true })
         }
+        Method::ModelStatus => {
+            let status_params: ModelStatusParams = match parse_params(request_id, params, "model.status") {
+                Ok(p) => p,
+                Err(f) => return f,
+            };
+            let model_became_available = status_params.loaded_model_id.is_some();
+            {
+                let mut sw = state.write().await;
+                sw.set_loaded_model(peer_id, status_params.loaded_model_id);
+                sw.set_available_models(peer_id, status_params.available_models);
+            }
+            // Drain any queued runs now that a model is available
+            if model_became_available {
+                if let Err(e) = agent_handle.submit(AgentCommand::DrainQueue).await {
+                    tracing::warn!("Failed to submit DrainQueue after ModelStatus: {e}");
+                }
+            }
+            ok_or_internal_error(request_id, serde_json::json!({"acknowledged": true}))
+        }
+        Method::PrefillFetch => {
+            let fetch_params: PrefillFetchParams = match parse_params(request_id, params, "prefill.fetch") {
+                Ok(p) => p,
+                Err(f) => return f,
+            };
+            let content = {
+                let state_read = state.read().await;
+                state_read.get_cached_prefill(&fetch_params.prefill_sha).map(String::from)
+            };
+            match content {
+                Some(content) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::PrefillFetchResponse {
+                        prefill_sha: fetch_params.prefill_sha,
+                        content,
+                    },
+                ),
+                None => Frame::error_response(
+                    request_id,
+                    ErrorPayload {
+                        code: "prefill_not_found".into(),
+                        message: format!(
+                            "Prefill SHA '{}' not found in cache",
+                            fetch_params.prefill_sha
+                        ),
+                    },
+                ),
+            }
+        }
+        Method::PrefillMarkdownCreate => {
+            let p: PrefillMarkdownCreateParams =
+                match parse_params(request_id, params, "prefill.markdown.create") {
+                    Ok(v) => v,
+                    Err(f) => return f,
+                };
+            let storage_root = state.read().await.storage_root.clone();
+            match crate::agent::prefill::create_markdown(
+                db, &storage_root, &p.category, &p.description, &p.content,
+            )
+            .await
+            {
+                Ok(id) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::PrefillMarkdownCreateResponse { id },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to create markdown: {e}")),
+            }
+        }
+        Method::PrefillMarkdownList => {
+            match crate::agent::prefill::list_markdown(db).await {
+                Ok(files) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::PrefillMarkdownListResponse {
+                        files: files.into_iter().map(Into::into).collect(),
+                    },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to list markdown files: {e}")),
+            }
+        }
+        Method::PrefillMarkdownDelete => {
+            let p: PrefillMarkdownDeleteParams =
+                match parse_params(request_id, params, "prefill.markdown.delete") {
+                    Ok(v) => v,
+                    Err(f) => return f,
+                };
+            let storage_root = state.read().await.storage_root.clone();
+            match crate::agent::prefill::delete_markdown(db, &storage_root, &p.id).await {
+                Ok(deleted) => {
+                    if deleted {
+                        state.write().await.invalidate_prefill_cache();
+                    }
+                    ok_or_internal_error(
+                        request_id,
+                        nexo_ws_schema::PrefillMarkdownDeleteResponse { deleted },
+                    )
+                }
+                Err(e) => internal_error(request_id, format!("Failed to delete markdown: {e}")),
+            }
+        }
+        Method::PrefillCollectionCreate => {
+            let p: PrefillCollectionCreateParams =
+                match parse_params(request_id, params, "prefill.collection.create") {
+                    Ok(v) => v,
+                    Err(f) => return f,
+                };
+            match crate::agent::prefill::create_collection(
+                db,
+                &p.name,
+                p.description.as_deref(),
+                &p.markdown_ids,
+            )
+            .await
+            {
+                Ok(id) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::PrefillCollectionCreateResponse { id },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to create collection: {e}")),
+            }
+        }
+        Method::PrefillCollectionList => {
+            match crate::agent::prefill::list_collections(db).await {
+                Ok(cols) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::PrefillCollectionListResponse {
+                        collections: cols.into_iter().map(Into::into).collect(),
+                    },
+                ),
+                Err(e) => internal_error(request_id, format!("Failed to list collections: {e}")),
+            }
+        }
+        Method::PrefillCollectionDelete => {
+            let p: PrefillCollectionDeleteParams =
+                match parse_params(request_id, params, "prefill.collection.delete") {
+                    Ok(v) => v,
+                    Err(f) => return f,
+                };
+            match crate::agent::prefill::delete_collection(db, &p.id).await {
+                Ok(deleted) => {
+                    if deleted {
+                        state.write().await.invalidate_prefill_cache();
+                    }
+                    ok_or_internal_error(
+                        request_id,
+                        nexo_ws_schema::PrefillCollectionDeleteResponse { deleted },
+                    )
+                }
+                Err(e) => internal_error(request_id, format!("Failed to delete collection: {e}")),
+            }
+        }
+        Method::ModelLoad | Method::ModelUnload => Frame::error_response(
+            request_id,
+            ErrorPayload {
+                code: "invalid_method".into(),
+                message: "This method is only sent by the gateway to nodes".into(),
+            },
+        ),
         Method::Connect => Frame::error_response(
             request_id,
             ErrorPayload {
@@ -746,7 +947,7 @@ mod tests {
     use tokio::sync::RwLock;
 
     fn make_state() -> SharedState {
-        Arc::new(RwLock::new(GatewayState::new()))
+        Arc::new(RwLock::new(GatewayState::new(std::path::PathBuf::from("/tmp"))))
     }
 
     fn make_agent_handle(state: &SharedState, db: &SqlitePool) -> AgentHandle {

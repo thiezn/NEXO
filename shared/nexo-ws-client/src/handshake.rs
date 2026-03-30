@@ -73,6 +73,7 @@ pub fn default_node_connect_params(
     device_id: &str,
     capabilities: Vec<String>,
     commands: Vec<String>,
+    models: Vec<String>,
 ) -> ConnectParams {
     ConnectParams {
         min_protocol: PROTOCOL_VERSION,
@@ -86,6 +87,7 @@ pub fn default_node_connect_params(
         scopes: vec![],
         capabilities,
         commands,
+        models,
         locale: Some("en-US".to_string()),
         user_agent: Some(format!("NEXO-{client_id}/{version}")),
         device: Some(nexo_ws_schema::DeviceInfo {
@@ -116,6 +118,7 @@ pub fn default_user_connect_params(
         ],
         capabilities: vec![],
         commands: vec![],
+        models: vec![],
         locale: Some("en-US".to_string()),
         user_agent: Some(format!("NEXO-{client_id}/{version}")),
         device: Some(nexo_ws_schema::DeviceInfo {

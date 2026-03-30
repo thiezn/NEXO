@@ -33,9 +33,20 @@ pub async fn run_init() -> utl_helpers::Result {
     let db_path = utl_helpers::resolve_path_str(&config.db_path)?;
     crate::memory::persistent::initialize(&db_path).await?;
 
+    // Pre-create markdown storage directory
+    let storage_root = utl_helpers::resolve_path_str(&config.storage_root)?;
+    let markdown_dir = storage_root.join("markdown");
+    std::fs::create_dir_all(&markdown_dir).map_err(|e| {
+        utl_helpers::Error::Io(format!(
+            "Failed to create markdown dir '{}': {e}",
+            markdown_dir.display()
+        ))
+    })?;
+
     println!("NEXO Gateway initialized successfully.");
     println!("  Config: {}", GatewayConfig::config_path().display());
     println!("  Database: {}", db_path.display());
+    println!("  Markdown storage: {}", markdown_dir.display());
     println!("\nRun `nexo start` to start the gateway.");
 
     Ok(())
