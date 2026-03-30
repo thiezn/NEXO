@@ -37,7 +37,8 @@
     ],
     "additionalDirectories": [
       "//Users/Mathijs.Mortimer/.cargo/registry",
-      "//Users/Mathijs.Mortimer/.nexo"
+      "//Users/Mathijs.Mortimer/.nexo",
+      "/tmp"
     ]
   },
   "effortLevel": "high",

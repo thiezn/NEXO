@@ -1,3 +1,4 @@
+mod chat;
 mod cli;
 mod config;
 mod connect;
@@ -20,6 +21,20 @@ async fn main() {
 async fn run(command: Command) -> utl_helpers::Result {
     match command {
         Command::Connect { url } => connect::run_connect(url).await,
+        Command::Chat {
+            url,
+            session,
+            name,
+            model,
+        } => {
+            chat::run_chat(chat::ChatOptions {
+                url_override: url,
+                session_id: session,
+                session_name: name,
+                model_id: model,
+            })
+            .await
+        }
         Command::Schema { section, output } => schema_cmd::run_schema(section, output.as_deref()),
     }
 }

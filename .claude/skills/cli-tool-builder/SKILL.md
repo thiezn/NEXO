@@ -256,6 +256,17 @@ async fn run(command: Command) -> anyhow::Result<()> {
 
 `cmd_list` iterates `known_manifests()`, shows install status from `AppConfig`, and prints download sizes.
 
+## Help
+
+Ensure each command has a clear help definition added using Clap.
+
+In addition each help for commands or sub-commands should include a few examples using the clap after_help function. This provides context to the user of the CLI on how to perform common actions.
+
+```rust
+Command::new("myprog")
+    .after_help("- Do x/y/z:\n`myprog --x --y z`")
+```
+
 ## Key conventions
 
 - Binary name matches crate name
