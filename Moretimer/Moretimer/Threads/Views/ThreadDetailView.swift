@@ -1,14 +1,19 @@
 import SwiftUI
 import SwiftData
+import OSLog
 
 struct ThreadDetailView: View {
     @Bindable var thread: ThreadEntity
     @Environment(\.modelContext) private var modelContext
     @Environment(LearningService.self) private var learningService
+    @Environment(NexoService.self) private var nexoService
     @State private var messageText = ""
     @State private var showSettings = false
     @State private var showDeckPicker = false
+    @State private var activeRun: ActiveRun?
     @FocusState private var isInputFocused: Bool
+
+    private var isConnected: Bool { nexoService.connectionState.isConnected }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,11 +31,16 @@ struct ThreadDetailView: View {
             .defaultScrollAnchor(.bottom)
             .simultaneousGesture(TapGesture().onEnded { isInputFocused = false })
 
+            if !isConnected {
+                connectionBanner
+            }
+
             Divider()
 
             MessageInputBar(text: $messageText, isFocused: $isInputFocused) { content in
                 sendMessage(content)
             }
+            .disabled(activeRun != nil || !isConnected)
         }
         .navigationTitle(thread.title)
         .toolbarTitleDisplayMode(.inline)
@@ -58,8 +68,24 @@ struct ThreadDetailView: View {
             if thread.isLearningThread && thread.messages.isEmpty {
                 showDeckPicker = true
             }
+            await consumeAgentEvents()
         }
     }
+
+    // MARK: - Connection Banner
+
+    private var connectionBanner: some View {
+        HStack(spacing: 6) {
+            Image(systemName: nexoService.connectionState.statusIcon)
+                .font(.caption)
+            Text(nexoService.connectionState.statusText)
+                .font(.caption)
+        }
+        .foregroundStyle(nexoService.connectionState.statusColor)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Message Sending
 
     @discardableResult
     private func insertMessage(content: String, role: MessageRole) -> MessageEntity {
@@ -72,7 +98,93 @@ struct ThreadDetailView: View {
     }
 
     private func sendMessage(_ content: String) {
-        insertMessage(content: content, role: .user)
+        let userMessage = insertMessage(content: content, role: .user)
+        let placeholder = insertMessage(content: "", role: .assistant)
+        placeholder.isThinking = true
+        try? modelContext.save()
+
+        Task {
+            await sendAgentRequest(prompt: content, placeholder: placeholder)
+        }
+    }
+
+    private func sendAgentRequest(prompt: String, placeholder: MessageEntity) async {
+        do {
+            if thread.nexoSessionId == nil {
+                let session = try await nexoService.sessionCreate(name: thread.title)
+                thread.nexoSessionId = session.sessionId
+                try? modelContext.save()
+            }
+
+            let response = try await nexoService.agent(
+                prompt: prompt,
+                idempotencyKey: UUID().uuidString,
+                sessionId: thread.nexoSessionId
+            )
+            activeRun = ActiveRun(runId: response.runId, message: placeholder)
+        } catch {
+            Logger.nexo.error("Agent request failed: \(error.localizedDescription)")
+            finishRun(content: "Failed to send message: \(error.localizedDescription)", failed: true)
+        }
+    }
+
+    // MARK: - Event Subscription
+
+    private func consumeAgentEvents() async {
+        let stream = nexoService.subscribe()
+        for await frameEvent in stream {
+            guard !Task.isCancelled else { break }
+            guard activeRun != nil else { continue }
+            guard frameEvent.event == .agent else { continue }
+            guard let payload = try? frameEvent.payload(as: AgentEventPayload.self) else { continue }
+            guard payload.runId == activeRun?.runId else { continue }
+
+            handleAgentEvent(payload)
+        }
+    }
+
+    private func handleAgentEvent(_ payload: AgentEventPayload) {
+        guard let run = activeRun else { return }
+        let message = run.message
+
+        switch payload.status {
+        case .thinking:
+            message.isThinking = true
+        case .streaming:
+            if let content = payload.content {
+                message.content = content
+                message.isThinking = false
+            }
+        case .completed:
+            if let content = payload.content, !content.isEmpty {
+                message.content = content
+            }
+            finishRun(content: nil, failed: false)
+        case .failed:
+            let errorMsg = payload.error ?? payload.content ?? "Agent run failed"
+            finishRun(content: errorMsg, failed: true)
+        case .toolCall:
+            message.isThinking = true
+            if let toolName = payload.toolName {
+                message.content = "Using tool: \(toolName)..."
+            }
+        case .queued:
+            message.content = "Waiting for inference node..."
+            message.isThinking = true
+        case .accepted, .cancelled:
+            break
+        }
+    }
+
+    private func finishRun(content: String?, failed: Bool) {
+        if let content, !content.isEmpty {
+            activeRun?.message.content = content
+        }
+        activeRun?.message.isThinking = false
+        if failed, let msg = activeRun?.message, msg.content.isEmpty {
+            modelContext.delete(msg)
+        }
+        activeRun = nil
         try? modelContext.save()
     }
 
@@ -138,4 +250,11 @@ struct ThreadDetailView: View {
 
         try? modelContext.save()
     }
+}
+
+// MARK: - Active Run
+
+private struct ActiveRun {
+    let runId: String
+    let message: MessageEntity
 }

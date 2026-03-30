@@ -256,8 +256,20 @@ final class NexoService {
         return try response.payload(as: SendResponse.self)
     }
 
-    func agent(prompt: String, idempotencyKey: String, context: JSONValue? = nil) async throws -> AgentResponse {
-        let params = AgentParams(prompt: prompt, idempotencyKey: idempotencyKey, context: context)
+    func agent(
+        prompt: String,
+        idempotencyKey: String,
+        sessionId: String? = nil,
+        context: JSONValue? = nil,
+        modelId: String? = nil
+    ) async throws -> AgentResponse {
+        let params = AgentParams(
+            prompt: prompt,
+            idempotencyKey: idempotencyKey,
+            sessionId: sessionId,
+            context: context,
+            modelId: modelId
+        )
         let response = try await guardedRequest(.agent, params: params)
         return try response.payload(as: AgentResponse.self)
     }
@@ -266,6 +278,94 @@ final class NexoService {
         let params = ToolsCatalogParams(filter: filter)
         let response = try await guardedRequest(.toolsCatalog, params: params)
         return try response.payload(as: ToolsCatalogResponse.self)
+    }
+
+    func toolsExecute(tool: String, args: JSONValue, idempotencyKey: String) async throws -> ToolsExecuteResponse {
+        let params = ToolsExecuteParams(tool: tool, args: args, idempotencyKey: idempotencyKey)
+        let response = try await guardedRequest(.toolsExecute, params: params)
+        return try response.payload(as: ToolsExecuteResponse.self)
+    }
+
+    // MARK: - Session Methods
+
+    func sessionCreate(name: String? = nil, prefillCollectionId: String? = nil) async throws -> SessionCreateResponse {
+        let params = SessionCreateParams(name: name, prefillCollectionId: prefillCollectionId)
+        let response = try await guardedRequest(.sessionCreate, params: params)
+        return try response.payload(as: SessionCreateResponse.self)
+    }
+
+    func sessionList() async throws -> SessionListResponse {
+        let response = try await guardedRequest(.sessionList, params: SessionListParams())
+        return try response.payload(as: SessionListResponse.self)
+    }
+
+    func sessionGet(sessionId: String) async throws -> SessionGetResponse {
+        let params = SessionGetParams(sessionId: sessionId)
+        let response = try await guardedRequest(.sessionGet, params: params)
+        return try response.payload(as: SessionGetResponse.self)
+    }
+
+    func sessionClear(sessionId: String) async throws -> SessionClearResponse {
+        let params = SessionClearParams(sessionId: sessionId)
+        let response = try await guardedRequest(.sessionClear, params: params)
+        return try response.payload(as: SessionClearResponse.self)
+    }
+
+    // MARK: - Cron Methods
+
+    func cronCreate(name: String, schedule: String, prompt: String, sessionId: String? = nil) async throws -> CronCreateResponse {
+        let params = CronCreateParams(name: name, schedule: schedule, prompt: prompt, sessionId: sessionId)
+        let response = try await guardedRequest(.cronCreate, params: params)
+        return try response.payload(as: CronCreateResponse.self)
+    }
+
+    func cronList() async throws -> CronListResponse {
+        let response = try await guardedRequest(.cronList, params: CronListParams())
+        return try response.payload(as: CronListResponse.self)
+    }
+
+    func cronDelete(jobId: String) async throws -> CronDeleteResponse {
+        let params = CronDeleteParams(jobId: jobId)
+        let response = try await guardedRequest(.cronDelete, params: params)
+        return try response.payload(as: CronDeleteResponse.self)
+    }
+
+    // MARK: - Prefill Markdown Methods
+
+    func prefillMarkdownCreate(category: String, description: String, content: String) async throws -> PrefillMarkdownCreateResponse {
+        let params = PrefillMarkdownCreateParams(category: category, description: description, content: content)
+        let response = try await guardedRequest(.prefillMarkdownCreate, params: params)
+        return try response.payload(as: PrefillMarkdownCreateResponse.self)
+    }
+
+    func prefillMarkdownList() async throws -> PrefillMarkdownListResponse {
+        let response = try await guardedRequest(.prefillMarkdownList, params: PrefillMarkdownListParams())
+        return try response.payload(as: PrefillMarkdownListResponse.self)
+    }
+
+    func prefillMarkdownDelete(id: String) async throws -> PrefillMarkdownDeleteResponse {
+        let params = PrefillMarkdownDeleteParams(id: id)
+        let response = try await guardedRequest(.prefillMarkdownDelete, params: params)
+        return try response.payload(as: PrefillMarkdownDeleteResponse.self)
+    }
+
+    // MARK: - Prefill Collection Methods
+
+    func prefillCollectionCreate(name: String, description: String? = nil, markdownIds: [String]) async throws -> PrefillCollectionCreateResponse {
+        let params = PrefillCollectionCreateParams(name: name, description: description, markdownIds: markdownIds)
+        let response = try await guardedRequest(.prefillCollectionCreate, params: params)
+        return try response.payload(as: PrefillCollectionCreateResponse.self)
+    }
+
+    func prefillCollectionList() async throws -> PrefillCollectionListResponse {
+        let response = try await guardedRequest(.prefillCollectionList, params: PrefillCollectionListParams())
+        return try response.payload(as: PrefillCollectionListResponse.self)
+    }
+
+    func prefillCollectionDelete(id: String) async throws -> PrefillCollectionDeleteResponse {
+        let params = PrefillCollectionDeleteParams(id: id)
+        let response = try await guardedRequest(.prefillCollectionDelete, params: params)
+        return try response.payload(as: PrefillCollectionDeleteResponse.self)
     }
 
     // MARK: - Private Helpers

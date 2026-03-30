@@ -122,6 +122,98 @@ Cron jobs are scheduled agent tasks stored in the database. Each job specifies:
 The cron scheduler runs as a background task, polling every 60 seconds for due jobs.
 When a job fires, it submits an `AgentCommand` to the brain and emits a `cron` event.
 
+## End-to-end chat flow
+
+The following diagram shows the full lifecycle of a chat message originating from the
+Moretimer app, flowing through the gateway and node, and streaming back to the client.
+
+```mermaid
+sequenceDiagram
+    participant App as Moretimer App
+    participant GW as Gateway
+    participant DB as SQLite
+    participant Node as LLM Node
+
+    App->>GW: session.create {name}
+    GW->>DB: INSERT session
+    GW-->>App: {sessionId}
+    App->>App: store sessionId on thread
+
+    App->>GW: agent {prompt, sessionId}
+    GW->>DB: INSERT run + user message
+    GW-->>App: response {runId, sessionId, status: accepted}
+    GW-->>App: event:agent {status: thinking}
+
+    GW->>GW: ensure_model_loaded
+    alt Model not in VRAM
+        GW->>Node: model.load {modelId}
+        Node-->>GW: {loaded: true}
+        Node->>GW: model.status (push)
+    end
+
+    GW->>GW: resolve prefill (if collection set)
+    GW->>Node: agent {messages, tools, prefillSha}
+
+    alt Prefill cache miss on node
+        Node->>GW: prefill.fetch {sha}
+        GW-->>Node: {content}
+        Node->>Node: cache sha → content
+    end
+
+    Node-->>GW: inference response
+
+    alt Plain reply
+        GW->>DB: INSERT assistant message
+        GW-->>App: event:agent {status: streaming, content}
+        GW-->>App: event:agent {status: completed}
+        App->>App: update message bubble
+    else Tool calls
+        GW-->>App: event:agent {status: tool_call, toolName}
+        GW->>Node: tools.execute {tool, args}
+        Node-->>GW: tool result
+        GW->>DB: INSERT tool message
+        GW->>Node: agent {messages + tool results}
+        Node-->>GW: final response
+        GW->>DB: INSERT assistant message
+        GW-->>App: event:agent {status: streaming, content}
+        GW-->>App: event:agent {status: completed}
+    end
+
+    Note over App: Later, on re-open
+    App->>GW: session.get {sessionId}
+    GW->>DB: SELECT messages
+    GW-->>App: {messages}
+```
+
+### Queued requests
+
+When no LLM node is available at the time of an agent request, the gateway queues the
+run instead of failing it:
+
+```mermaid
+sequenceDiagram
+    participant App as Moretimer App
+    participant GW as Gateway
+    participant DB as SQLite
+    participant Node as LLM Node
+
+    App->>GW: agent {prompt, sessionId}
+    GW->>DB: INSERT run (status: accepted)
+    GW-->>App: response {runId, status: accepted}
+    GW->>GW: no LLM node available
+    GW->>DB: UPDATE run (status: queued)
+    GW-->>App: event:agent {status: queued}
+
+    Note over Node: Node connects later
+    Node->>GW: connect {models: [...]}
+    GW->>GW: drain_queue
+    GW->>DB: claim queued runs
+    GW->>Node: model.load + agent (inference)
+    Node-->>GW: response
+    GW-->>App: event:agent {status: streaming, content}
+    GW-->>App: event:agent {status: completed}
+```
+
 ## Context assembly
 
 Before each inference call, the brain loads the full conversation history from the

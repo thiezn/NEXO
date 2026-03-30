@@ -28,7 +28,9 @@
       "Write",
       "mcp__xcode",
       "Bash(python3 .claude/skills/nexo-ai-model-builder/scripts/hf_downloader.py:*)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(2)",
+      "Bash(tailscale status:*)"
     ],
     "deny": [
       "WebFetch"

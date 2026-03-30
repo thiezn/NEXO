@@ -11,7 +11,7 @@ enum NexoConstants {
     nonisolated static let protocolVersion: UInt32 = 3
     nonisolated static let authToken = "Tm90U29TM2N1cmU="
     nonisolated static let authHeader = "X-NEXO-AUTH"
-    nonisolated static let defaultHost = "192.168.2.88"
+    nonisolated static let defaultHost = "m4.kudu-decibel.ts.net"
     nonisolated static let defaultPort: UInt16 = 6969
     nonisolated static let clientId = "moretimer"
     nonisolated static let deviceIdKey = "nexo.deviceId"

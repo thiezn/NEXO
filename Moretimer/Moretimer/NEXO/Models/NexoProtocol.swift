@@ -18,7 +18,36 @@ enum NexoMethod: String, Codable, Sendable {
     case send
     case agent
     case systemPresence = "system-presence"
+
+    // Tools
     case toolsCatalog = "tools.catalog"
+    case toolsRegister = "tools.register"
+    case toolsExecute = "tools.execute"
+
+    // Sessions
+    case sessionCreate = "session.create"
+    case sessionList = "session.list"
+    case sessionGet = "session.get"
+    case sessionClear = "session.clear"
+
+    // Cron
+    case cronCreate = "cron.create"
+    case cronList = "cron.list"
+    case cronDelete = "cron.delete"
+
+    // Model management (gateway ↔ node)
+    case modelLoad = "model.load"
+    case modelUnload = "model.unload"
+    case modelStatus = "model.status"
+
+    // Prefill
+    case prefillFetch = "prefill.fetch"
+    case prefillMarkdownCreate = "prefill.markdown.create"
+    case prefillMarkdownList = "prefill.markdown.list"
+    case prefillMarkdownDelete = "prefill.markdown.delete"
+    case prefillCollectionCreate = "prefill.collection.create"
+    case prefillCollectionList = "prefill.collection.list"
+    case prefillCollectionDelete = "prefill.collection.delete"
 }
 
 /// Server-push event kinds.
@@ -60,6 +89,19 @@ enum NexoPlatform: String, Codable, Sendable {
         .linux
         #endif
     }
+}
+
+/// Agent run lifecycle status.
+/// Wire format uses snake_case (e.g. `"tool_call"`).
+enum AgentStatus: String, Codable, Sendable {
+    case accepted
+    case queued
+    case thinking
+    case toolCall = "tool_call"
+    case streaming
+    case completed
+    case failed
+    case cancelled
 }
 
 // MARK: - Frame Envelope
@@ -180,7 +222,9 @@ struct SendParams: Codable, Sendable {
 struct AgentParams: Codable, Sendable {
     let prompt: String
     let idempotencyKey: String
+    var sessionId: String?
     var context: JSONValue?
+    var modelId: String?
 }
 
 struct SystemPresenceParams: Codable, Sendable {
@@ -210,7 +254,8 @@ struct SendResponse: Codable, Sendable {
 
 struct AgentResponse: Codable, Sendable {
     let runId: String
-    let status: String
+    let sessionId: String
+    let status: AgentStatus
     var summary: String?
 }
 
@@ -219,6 +264,7 @@ struct ToolEntry: Codable, Sendable {
     let description: String
     let source: String
     let available: Bool
+    var parameters: JSONValue?
 }
 
 struct ToolsCatalogResponse: Codable, Sendable {
@@ -234,8 +280,12 @@ struct TickPayload: Codable, Sendable {
 
 struct AgentEventPayload: Codable, Sendable {
     let runId: String
-    let status: String
+    let sessionId: String
+    let status: AgentStatus
     var content: String?
+    var toolName: String?
+    var toolCallId: String?
+    var error: String?
 }
 
 struct PresencePayload: Codable, Sendable {
@@ -253,4 +303,182 @@ struct HeartbeatPayload: Codable, Sendable {}
 struct CronPayload: Codable, Sendable {
     let jobId: String
     let name: String
+}
+
+// MARK: - Tools Execute
+
+struct ToolsExecuteParams: Codable, Sendable {
+    let tool: String
+    let args: JSONValue
+    let idempotencyKey: String
+}
+
+struct ToolsExecuteResponse: Codable, Sendable {
+    let success: Bool
+    let output: String
+    var error: String?
+}
+
+// MARK: - Session
+
+struct SessionCreateParams: Codable, Sendable {
+    var name: String?
+    var prefillCollectionId: String?
+}
+
+struct SessionCreateResponse: Codable, Sendable {
+    let sessionId: String
+    var prefillCollectionId: String?
+}
+
+struct SessionListParams: Codable, Sendable {}
+
+struct SessionEntry: Codable, Sendable, Identifiable {
+    let sessionId: String
+    var name: String?
+    let createdAt: String
+    let lastActiveAt: String
+    let messageCount: UInt32
+
+    var id: String { sessionId }
+}
+
+struct SessionListResponse: Codable, Sendable {
+    let sessions: [SessionEntry]
+}
+
+struct SessionGetParams: Codable, Sendable {
+    let sessionId: String
+}
+
+struct ConversationMessage: Codable, Sendable, Identifiable {
+    let id: String
+    let role: String
+    let content: String
+    let createdAt: String
+    var toolCallId: String?
+    var toolName: String?
+}
+
+struct SessionGetResponse: Codable, Sendable {
+    let sessionId: String
+    var name: String?
+    let messages: [ConversationMessage]
+    let createdAt: String
+}
+
+struct SessionClearParams: Codable, Sendable {
+    let sessionId: String
+}
+
+struct SessionClearResponse: Codable, Sendable {
+    let cleared: Bool
+}
+
+// MARK: - Cron
+
+struct CronCreateParams: Codable, Sendable {
+    let name: String
+    let schedule: String
+    let prompt: String
+    var sessionId: String?
+}
+
+struct CronCreateResponse: Codable, Sendable {
+    let jobId: String
+}
+
+struct CronListParams: Codable, Sendable {}
+
+struct CronEntry: Codable, Sendable, Identifiable {
+    let jobId: String
+    let name: String
+    let schedule: String
+    let enabled: Bool
+    var lastRunAt: String?
+    var nextRunAt: String?
+
+    var id: String { jobId }
+}
+
+struct CronListResponse: Codable, Sendable {
+    let jobs: [CronEntry]
+}
+
+struct CronDeleteParams: Codable, Sendable {
+    let jobId: String
+}
+
+struct CronDeleteResponse: Codable, Sendable {
+    let deleted: Bool
+}
+
+// MARK: - Prefill Markdown
+
+struct PrefillMarkdownCreateParams: Codable, Sendable {
+    let category: String
+    let description: String
+    let content: String
+}
+
+struct PrefillMarkdownCreateResponse: Codable, Sendable {
+    let id: String
+}
+
+struct PrefillMarkdownListParams: Codable, Sendable {}
+
+struct MarkdownFileEntry: Codable, Sendable, Identifiable {
+    let id: String
+    let category: String
+    let description: String
+    let filename: String
+    let createdAt: String
+    let updatedAt: String
+}
+
+struct PrefillMarkdownListResponse: Codable, Sendable {
+    let files: [MarkdownFileEntry]
+}
+
+struct PrefillMarkdownDeleteParams: Codable, Sendable {
+    let id: String
+}
+
+struct PrefillMarkdownDeleteResponse: Codable, Sendable {
+    let deleted: Bool
+}
+
+// MARK: - Prefill Collection
+
+struct PrefillCollectionCreateParams: Codable, Sendable {
+    let name: String
+    var description: String?
+    let markdownIds: [String]
+}
+
+struct PrefillCollectionCreateResponse: Codable, Sendable {
+    let id: String
+}
+
+struct PrefillCollectionListParams: Codable, Sendable {}
+
+struct CollectionEntry: Codable, Sendable, Identifiable {
+    let id: String
+    let name: String
+    var description: String?
+    let markdownIds: [String]
+    let createdAt: String
+    let updatedAt: String
+}
+
+struct PrefillCollectionListResponse: Codable, Sendable {
+    let collections: [CollectionEntry]
+}
+
+struct PrefillCollectionDeleteParams: Codable, Sendable {
+    let id: String
+}
+
+struct PrefillCollectionDeleteResponse: Codable, Sendable {
+    let deleted: Bool
 }

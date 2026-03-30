@@ -51,6 +51,8 @@ final class ThreadEntity {
     var isRead: Bool
     var createdAt: Date
     var lastMessageAt: Date
+    /// Gateway session ID, set on first agent request.
+    var nexoSessionId: String?
 
     @Relationship(deleteRule: .cascade, inverse: \MessageEntity.thread)
     var messages: [MessageEntity] = []
@@ -90,6 +92,8 @@ final class MessageEntity {
     var role: MessageRole
     var createdAt: Date
     var thread: ThreadEntity?
+    /// Transient flag for streaming UI state (not persisted).
+    @Transient var isThinking: Bool = false
 
     @Relationship(deleteRule: .cascade, inverse: \QuestionEntity.message)
     var questions: [QuestionEntity] = []
