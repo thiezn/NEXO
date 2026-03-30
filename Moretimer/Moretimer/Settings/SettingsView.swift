@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var cropSession: AvatarCropSession?
     @State private var gatewayHost: String
     @State private var gatewayPort: String
+    @State private var gatewayStatus: StatusResponse?
+    @State private var toolsCatalog: [ToolEntry]?
 
     init() {
         self._gatewayHost = State(initialValue: NexoConstants.storedHost)
@@ -21,9 +23,24 @@ struct SettingsView: View {
         Form {
             accountSection
             nexoSection
+            if nexoService.connectionState.isConnected {
+                gatewayStatusSection
+                toolsCatalogSection
+            }
             appearanceSection
             themeSection
             aboutSection
+        }
+        .task(id: nexoService.connectionState.isConnected) {
+            guard nexoService.connectionState.isConnected else {
+                gatewayStatus = nil
+                toolsCatalog = nil
+                return
+            }
+            async let s = try? nexoService.status()
+            async let t = try? nexoService.toolsCatalog()
+            gatewayStatus = await s
+            toolsCatalog = await t?.tools ?? []
         }
         .navigationTitle("Settings")
         .toolbar {
@@ -146,11 +163,72 @@ struct SettingsView: View {
                 .keyboardType(.numberPad)
                 #endif
 
-            Button("Connect") {
+            Button(nexoService.connectionState.isConnected ? "Reconnect" : "Connect") {
                 let port = UInt16(gatewayPort) ?? NexoConstants.defaultPort
                 Task {
                     await nexoService.updateGateway(host: gatewayHost, port: port)
                 }
+            }
+        }
+    }
+
+    // MARK: - Gateway Status
+
+    private var gatewayStatusSection: some View {
+        Section("Gateway Status") {
+            if let status = gatewayStatus {
+                LabeledContent("Connected Nodes") {
+                    Text("\(status.connectedNodes)")
+                }
+                LabeledContent("Connected Users") {
+                    Text("\(status.connectedUsers)")
+                }
+                if !status.capabilities.isEmpty {
+                    LabeledContent("Capabilities") {
+                        Text(status.capabilities.joined(separator: ", "))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    // MARK: - Tools Catalog
+
+    private var toolsCatalogSection: some View {
+        Section("Tools (\(toolsCatalog?.count ?? 0))") {
+            if let tools = toolsCatalog {
+                if tools.isEmpty {
+                    Text("No tools registered")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(tools, id: \.name) { tool in
+                        LabeledContent {
+                            HStack(spacing: 6) {
+                                Text(tool.source)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: tool.available ? "checkmark.circle.fill" : "xmark.circle")
+                                    .foregroundStyle(tool.available ? .green : .secondary)
+                                    .font(.caption)
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(tool.name)
+                                    .font(.body.monospaced())
+                                Text(tool.description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
             }
         }
     }

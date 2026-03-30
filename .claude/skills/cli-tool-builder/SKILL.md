@@ -264,7 +264,7 @@ In addition each help for commands or sub-commands should include a few examples
 
 ```rust
 Command::new("myprog")
-    .after_help("- Do x/y/z:\n`myprog --x --y z`")
+    .after_help("- Examples:\n   myprog --x --y z")
 ```
 
 ## Key conventions

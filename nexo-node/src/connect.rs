@@ -92,37 +92,40 @@ async fn connect_and_run(
         .await
         .map_err(|e| utl_helpers::Error::Network(format!("Failed to send register: {e}")))?;
 
-    // Wait for register response
-    let register_response = conn
-        .recv_frame()
-        .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Failed to receive register response: {e}")))?
-        .ok_or_else(|| utl_helpers::Error::Network("Connection closed during registration".into()))?;
+    // Wait for register response, skipping any events that arrive first
+    loop {
+        let frame = conn
+            .recv_frame()
+            .await
+            .map_err(|e| utl_helpers::Error::Network(format!("Failed to receive register response: {e}")))?
+            .ok_or_else(|| utl_helpers::Error::Network("Connection closed during registration".into()))?;
 
-    match &register_response {
-        Frame::Response {
-            ok: true, payload, ..
-        } => {
-            let registered = payload
-                .as_ref()
-                .and_then(|p| p.get("registered"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            tracing::info!("Gateway accepted {registered}/{tool_count} tool(s)");
-        }
-        Frame::Response {
-            ok: false, error, ..
-        } => {
-            let msg = error
-                .as_ref()
-                .map(|e| format!("{}: {}", e.code, e.message))
-                .unwrap_or_else(|| "Unknown error".into());
-            return Err(utl_helpers::Error::Network(format!(
-                "Tool registration rejected: {msg}"
-            )));
-        }
-        _ => {
-            tracing::warn!("Unexpected frame during registration: {register_response:?}");
+        match frame {
+            Frame::Response {
+                ok: true, payload, ..
+            } => {
+                let registered = payload
+                    .as_ref()
+                    .and_then(|p| p.get("registered"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                tracing::info!("Gateway accepted {registered}/{tool_count} tool(s)");
+                break;
+            }
+            Frame::Response {
+                ok: false, error, ..
+            } => {
+                let msg = error
+                    .map(|e| format!("{}: {}", e.code, e.message))
+                    .unwrap_or_else(|| "Unknown error".into());
+                return Err(utl_helpers::Error::Network(format!(
+                    "Tool registration rejected: {msg}"
+                )));
+            }
+            Frame::Event { .. } => continue,
+            other => {
+                tracing::warn!("Unexpected frame during registration: {other:?}");
+            }
         }
     }
 
