@@ -15,7 +15,7 @@ static ALL_MANIFESTS: LazyLock<Vec<GgufManifest>> = LazyLock::new(|| {
         size_gb: 20.0,
         files: vec![ModelFile {
             component: GgufComponent::Weights,
-            hf_repo: "Qwen/Qwen3.5-35B-A3B-GGUF".to_string(),
+            hf_repo: "unsloth/Qwen3.5-35B-A3B-GGUF".to_string(),
             hf_filename: "Qwen3.5-35B-A3B-Q4_K_M.gguf".to_string(),
             // Set to actual byte count after verifying on HuggingFace.
             // 0 disables size-based skip; SHA-based or force-flag checks still apply.

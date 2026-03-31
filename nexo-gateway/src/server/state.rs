@@ -1,3 +1,5 @@
+use crate::agent::gateway_tools::GatewayToolExecutor;
+use crate::memory::git::GitStorage;
 use nexo_ws_schema::{Frame, Role, Scope, ToolEntry, ToolSpecEntry};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -41,11 +43,12 @@ pub struct GatewayState {
     pub available_models: HashMap<PeerId, Vec<String>>,
     /// Notified whenever a node's loaded model changes (used to wake the queue drain watcher).
     pub model_ready_notify: Arc<Notify>,
-    /// SHA-256 hex → combined prefill content. Populated by the agent loop before
-    /// forwarding to a node; used to answer PrefillFetch requests with O(1) lookup.
-    pub prefill_sha_cache: HashMap<String, String>,
     /// Resolved path to the storage root (~/.nexo/storage).
     pub storage_root: PathBuf,
+    /// Tools that execute locally on the gateway (e.g., notes).
+    pub gateway_tools: GatewayToolExecutor,
+    /// Git-backed storage for persistent data (notes, prefill, SOUL.md).
+    pub git_storage: Option<Arc<GitStorage>>,
 }
 
 impl GatewayState {
@@ -61,24 +64,10 @@ impl GatewayState {
             loaded_models: HashMap::new(),
             available_models: HashMap::new(),
             model_ready_notify: Arc::new(Notify::new()),
-            prefill_sha_cache: HashMap::new(),
             storage_root,
+            gateway_tools: GatewayToolExecutor::new(),
+            git_storage: None,
         }
-    }
-
-    /// Store a resolved prefill SHA → content mapping so nodes can fetch it.
-    pub fn cache_prefill(&mut self, sha: String, content: String) {
-        self.prefill_sha_cache.insert(sha, content);
-    }
-
-    /// Look up cached prefill content by SHA. O(1).
-    pub fn get_cached_prefill(&self, sha: &str) -> Option<&str> {
-        self.prefill_sha_cache.get(sha).map(String::as_str)
-    }
-
-    /// Clear all cached SHA → content entries (called when markdown files change).
-    pub fn invalidate_prefill_cache(&mut self) {
-        self.prefill_sha_cache.clear();
     }
 
     pub fn add_peer(&mut self, info: PeerInfo, sender: mpsc::Sender<Frame>) {
@@ -236,9 +225,10 @@ impl GatewayState {
         self.tool_registry.get(name)
     }
 
-    /// Build tool catalog entries from the registry.
+    /// Build tool catalog entries from the registry (node tools + gateway-native tools).
     pub fn all_tool_entries(&self) -> Vec<ToolEntry> {
-        self.tool_registry
+        let mut entries: Vec<ToolEntry> = self
+            .tool_registry
             .values()
             .map(|rt| ToolEntry {
                 name: rt.spec.name.clone(),
@@ -247,7 +237,9 @@ impl GatewayState {
                 available: self.peer_senders.contains_key(&rt.peer_id),
                 parameters: Some(rt.spec.parameters.clone()),
             })
-            .collect()
+            .collect();
+        entries.extend(self.gateway_tools.tool_entries());
+        entries
     }
 
     pub fn connected_users(&self) -> u32 {

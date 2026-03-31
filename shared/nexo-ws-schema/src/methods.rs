@@ -449,15 +449,15 @@ pub struct PrefillFetchResponse {
 /// Parameters for `prefill.markdown.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PrefillMarkdownCreateParams {
-    pub category: String,
-    pub description: String,
+    /// Filename for the markdown file (e.g. "identity.md").
+    pub filename: String,
     pub content: String,
 }
 
 /// Response payload for `prefill.markdown.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PrefillMarkdownCreateResponse {
-    pub id: String,
+    pub filename: String,
 }
 
 // -- prefill.markdown.list --
@@ -468,14 +468,8 @@ pub struct PrefillMarkdownListParams {}
 
 /// A single markdown file entry.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct MarkdownFileEntry {
-    pub id: String,
-    pub category: String,
-    pub description: String,
     pub filename: String,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
 /// Response payload for `prefill.markdown.list`.
@@ -489,7 +483,7 @@ pub struct PrefillMarkdownListResponse {
 /// Parameters for `prefill.markdown.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PrefillMarkdownDeleteParams {
-    pub id: String,
+    pub filename: String,
 }
 
 /// Response payload for `prefill.markdown.delete`.
@@ -504,11 +498,13 @@ pub struct PrefillMarkdownDeleteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PrefillCollectionCreateParams {
+    /// Unique ID for the collection.
+    pub id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Ordered list of markdown file IDs that form this collection.
-    pub markdown_ids: Vec<String>,
+    /// Ordered list of markdown filenames that form this collection.
+    pub markdown_files: Vec<String>,
 }
 
 /// Response payload for `prefill.collection.create`.
@@ -531,10 +527,8 @@ pub struct CollectionEntry {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Ordered list of markdown file IDs in this collection.
-    pub markdown_ids: Vec<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    /// Ordered list of markdown filenames in this collection.
+    pub markdown_files: Vec<String>,
 }
 
 /// Response payload for `prefill.collection.list`.
@@ -881,21 +875,23 @@ mod tests {
     }
 
     #[test]
-    fn prefill_fetch_params_uses_sha() {
-        let params = PrefillFetchParams {
-            prefill_sha: "abc123".into(),
+    fn prefill_markdown_create_roundtrip() {
+        let params = PrefillMarkdownCreateParams {
+            filename: "identity.md".into(),
+            content: "# Identity\nI am helpful.".into(),
         };
-        let json = serde_json::to_value(&params).unwrap();
-        assert_eq!(json["prefillSha"], "abc123");
-        assert!(json.get("prefillId").is_none());
+        let json = serde_json::to_string(&params).unwrap();
+        let decoded: PrefillMarkdownCreateParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, decoded);
     }
 
     #[test]
     fn prefill_collection_create_roundtrip() {
         let params = PrefillCollectionCreateParams {
+            id: "default".into(),
             name: "my collection".into(),
             description: Some("desc".into()),
-            markdown_ids: vec!["id1".into(), "id2".into()],
+            markdown_files: vec!["identity.md".into(), "skills.md".into()],
         };
         let json = serde_json::to_string(&params).unwrap();
         let decoded: PrefillCollectionCreateParams = serde_json::from_str(&json).unwrap();

@@ -4,7 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use nexo_ws_schema::{
     AgentParams, AgentStatus, ConnectParams, CronCreateParams, CronDeleteParams, ErrorPayload,
     EventKind, Frame, HealthResponse, HelloOk, Method, ModelStatusParams, PROTOCOL_VERSION,
-    PrefillCollectionCreateParams, PrefillCollectionDeleteParams, PrefillFetchParams,
+    PrefillCollectionCreateParams, PrefillCollectionDeleteParams,
     PrefillMarkdownCreateParams, PrefillMarkdownDeleteParams, PresencePayload, Role,
     SessionClearParams, SessionCreateParams, SessionGetParams, StatusResponse, ToolsCatalogResponse,
     ToolsExecuteParams, ToolsRegisterParams, ToolsRegisterResponse, WsError,
@@ -347,6 +347,24 @@ async fn resolve_user_id(state: &SharedState, peer_id: &str) -> String {
         state_read.user_id_for_peer(peer_id)
     };
     user_id.unwrap_or_else(|| peer_id.to_string())
+}
+
+/// Run a blocking git operation, handling the git-not-configured and panic cases.
+async fn git_blocking<F, R>(
+    request_id: &str,
+    state: &SharedState,
+    f: F,
+) -> Result<R, Frame>
+where
+    F: FnOnce(std::sync::Arc<crate::memory::git::GitStorage>) -> anyhow::Result<R> + Send + 'static,
+    R: Send + 'static,
+{
+    let git = state.read().await.git_storage.clone();
+    let git = git.ok_or_else(|| internal_error(request_id, "Git storage not configured"))?;
+    tokio::task::spawn_blocking(move || f(git))
+        .await
+        .map_err(|e| internal_error(request_id, format!("Task panicked: {e}")))?
+        .map_err(|e| internal_error(request_id, format!("{e}")))
 }
 
 /// Build an internal_error response frame.
@@ -791,63 +809,41 @@ async fn dispatch_method(
             }
             ok_or_internal_error(request_id, serde_json::json!({"acknowledged": true}))
         }
-        Method::PrefillFetch => {
-            let fetch_params: PrefillFetchParams = match parse_params(request_id, params, "prefill.fetch") {
-                Ok(p) => p,
-                Err(f) => return f,
-            };
-            let content = {
-                let state_read = state.read().await;
-                state_read.get_cached_prefill(&fetch_params.prefill_sha).map(String::from)
-            };
-            match content {
-                Some(content) => ok_or_internal_error(
-                    request_id,
-                    nexo_ws_schema::PrefillFetchResponse {
-                        prefill_sha: fetch_params.prefill_sha,
-                        content,
-                    },
-                ),
-                None => Frame::error_response(
-                    request_id,
-                    ErrorPayload {
-                        code: "prefill_not_found".into(),
-                        message: format!(
-                            "Prefill SHA '{}' not found in cache",
-                            fetch_params.prefill_sha
-                        ),
-                    },
-                ),
-            }
-        }
+        Method::PrefillFetch => Frame::error_response(
+            request_id,
+            ErrorPayload {
+                code: "deprecated".into(),
+                message: "prefill.fetch is no longer used; prefill content is included in the system prompt".into(),
+            },
+        ),
         Method::PrefillMarkdownCreate => {
             let p: PrefillMarkdownCreateParams =
                 match parse_params(request_id, params, "prefill.markdown.create") {
                     Ok(v) => v,
                     Err(f) => return f,
                 };
-            let storage_root = state.read().await.storage_root.clone();
-            match crate::agent::prefill::create_markdown(
-                db, &storage_root, &p.category, &p.description, &p.content,
-            )
-            .await
-            {
-                Ok(id) => ok_or_internal_error(
+            let filename = p.filename.clone();
+            match git_blocking(request_id, state, move |git| {
+                crate::agent::prefill::create_markdown(&git, &p.filename, &p.content)
+            }).await {
+                Ok(()) => ok_or_internal_error(
                     request_id,
-                    nexo_ws_schema::PrefillMarkdownCreateResponse { id },
+                    nexo_ws_schema::PrefillMarkdownCreateResponse { filename },
                 ),
-                Err(e) => internal_error(request_id, format!("Failed to create markdown: {e}")),
+                Err(frame) => frame,
             }
         }
         Method::PrefillMarkdownList => {
-            match crate::agent::prefill::list_markdown(db).await {
+            match git_blocking(request_id, state, |git| {
+                crate::agent::prefill::list_markdown(&git)
+            }).await {
                 Ok(files) => ok_or_internal_error(
                     request_id,
                     nexo_ws_schema::PrefillMarkdownListResponse {
-                        files: files.into_iter().map(Into::into).collect(),
+                        files: files.into_iter().map(|f| nexo_ws_schema::MarkdownFileEntry { filename: f.filename }).collect(),
                     },
                 ),
-                Err(e) => internal_error(request_id, format!("Failed to list markdown files: {e}")),
+                Err(frame) => frame,
             }
         }
         Method::PrefillMarkdownDelete => {
@@ -856,18 +852,14 @@ async fn dispatch_method(
                     Ok(v) => v,
                     Err(f) => return f,
                 };
-            let storage_root = state.read().await.storage_root.clone();
-            match crate::agent::prefill::delete_markdown(db, &storage_root, &p.id).await {
-                Ok(deleted) => {
-                    if deleted {
-                        state.write().await.invalidate_prefill_cache();
-                    }
-                    ok_or_internal_error(
-                        request_id,
-                        nexo_ws_schema::PrefillMarkdownDeleteResponse { deleted },
-                    )
-                }
-                Err(e) => internal_error(request_id, format!("Failed to delete markdown: {e}")),
+            match git_blocking(request_id, state, move |git| {
+                crate::agent::prefill::delete_markdown(&git, &p.filename)
+            }).await {
+                Ok(deleted) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::PrefillMarkdownDeleteResponse { deleted },
+                ),
+                Err(frame) => frame,
             }
         }
         Method::PrefillCollectionCreate => {
@@ -876,30 +868,35 @@ async fn dispatch_method(
                     Ok(v) => v,
                     Err(f) => return f,
                 };
-            match crate::agent::prefill::create_collection(
-                db,
-                &p.name,
-                p.description.as_deref(),
-                &p.markdown_ids,
-            )
-            .await
-            {
-                Ok(id) => ok_or_internal_error(
+            let collection_id = p.id.clone();
+            match git_blocking(request_id, state, move |git| {
+                crate::agent::prefill::create_collection(
+                    &git, &p.id, &p.name, p.description.as_deref(), &p.markdown_files,
+                )
+            }).await {
+                Ok(()) => ok_or_internal_error(
                     request_id,
-                    nexo_ws_schema::PrefillCollectionCreateResponse { id },
+                    nexo_ws_schema::PrefillCollectionCreateResponse { id: collection_id },
                 ),
-                Err(e) => internal_error(request_id, format!("Failed to create collection: {e}")),
+                Err(frame) => frame,
             }
         }
         Method::PrefillCollectionList => {
-            match crate::agent::prefill::list_collections(db).await {
+            match git_blocking(request_id, state, |git| {
+                crate::agent::prefill::list_collections(&git)
+            }).await {
                 Ok(cols) => ok_or_internal_error(
                     request_id,
                     nexo_ws_schema::PrefillCollectionListResponse {
-                        collections: cols.into_iter().map(Into::into).collect(),
+                        collections: cols.into_iter().map(|c| nexo_ws_schema::CollectionEntry {
+                            id: c.id,
+                            name: c.name,
+                            description: c.description,
+                            markdown_files: c.markdown_files,
+                        }).collect(),
                     },
                 ),
-                Err(e) => internal_error(request_id, format!("Failed to list collections: {e}")),
+                Err(frame) => frame,
             }
         }
         Method::PrefillCollectionDelete => {
@@ -908,17 +905,14 @@ async fn dispatch_method(
                     Ok(v) => v,
                     Err(f) => return f,
                 };
-            match crate::agent::prefill::delete_collection(db, &p.id).await {
-                Ok(deleted) => {
-                    if deleted {
-                        state.write().await.invalidate_prefill_cache();
-                    }
-                    ok_or_internal_error(
-                        request_id,
-                        nexo_ws_schema::PrefillCollectionDeleteResponse { deleted },
-                    )
-                }
-                Err(e) => internal_error(request_id, format!("Failed to delete collection: {e}")),
+            match git_blocking(request_id, state, move |git| {
+                crate::agent::prefill::delete_collection(&git, &p.id)
+            }).await {
+                Ok(deleted) => ok_or_internal_error(
+                    request_id,
+                    nexo_ws_schema::PrefillCollectionDeleteResponse { deleted },
+                ),
+                Err(frame) => frame,
             }
         }
         Method::ModelLoad | Method::ModelUnload => Frame::error_response(

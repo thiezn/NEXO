@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::config::NodeConfig;
-use crate::download::{default_models_dir, find_manifest, storage_path};
+use crate::download::{default_models_dir, find_manifest, known_manifests, storage_path};
 use crate::download::registry::DEFAULT_INFERENCE_MODEL;
 use crate::registry::ToolRegistry;
 use crate::services::ServiceManager;
@@ -12,8 +12,15 @@ pub async fn run(url: Option<String>) -> utl_helpers::Result {
         config.gateway_url = u;
     }
 
+    // Auto-detect which registered models are downloaded on disk.
+    config.available_models = detect_available_models();
+    if !config.available_models.is_empty() {
+        tracing::info!("Detected available models: {:?}", config.available_models);
+    }
+
     // Try to start inference services; warn but continue if unavailable.
-    let _services = try_start_services().await;
+    let services = try_start_services().await;
+    let has_inference = services.is_some();
 
     tracing::info!(
         "Starting nexo-node '{}' v{}",
@@ -28,8 +35,18 @@ pub async fn run(url: Option<String>) -> utl_helpers::Result {
         registry.specs().iter().map(|s| &s.name).collect::<Vec<_>>()
     );
 
-    crate::connect::run_node(&config, &registry).await
-    // _services is dropped here → monitor task aborted → llama-server killed
+    crate::connect::run_node(&config, &registry, has_inference).await
+    // services is dropped here → monitor task aborted → llama-server killed
+}
+
+/// Scan the models directory to find which registered models are downloaded.
+fn detect_available_models() -> Vec<String> {
+    let mdir = default_models_dir();
+    known_manifests()
+        .iter()
+        .filter(|m| m.files.iter().all(|f| mdir.join(storage_path(m, f)).exists()))
+        .map(|m| m.name.clone())
+        .collect()
 }
 
 async fn try_start_services() -> Option<ServiceManager> {

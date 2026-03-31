@@ -5,7 +5,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use llama_server::{LlamaServer, check_health};
 
@@ -66,13 +66,12 @@ fn spawn_monitor(weak: Weak<Mutex<LlamaServer>>) -> JoinHandle<()> {
             let healthy = check_health(&client).await;
 
             if healthy {
+                debug!("llama-server is healthy");
                 consecutive_failures = 0;
                 backoff = Duration::from_secs(5);
             } else {
                 consecutive_failures += 1;
-                warn!(
-                    "llama-server health check failed ({consecutive_failures}/{FAIL_THRESHOLD})"
-                );
+                warn!("llama-server health check failed ({consecutive_failures}/{FAIL_THRESHOLD})");
 
                 if consecutive_failures >= FAIL_THRESHOLD {
                     consecutive_failures = 0;

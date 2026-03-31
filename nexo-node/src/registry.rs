@@ -52,11 +52,7 @@ impl ToolRegistry {
     }
 
     /// Find and execute a tool by name.
-    pub async fn execute(
-        &self,
-        tool_name: &str,
-        args: serde_json::Value,
-    ) -> Option<ToolResult> {
+    pub async fn execute(&self, tool_name: &str, args: serde_json::Value) -> Option<ToolResult> {
         let tool = self.tools.iter().find(|t| t.name() == tool_name)?;
         match tool.execute(args).await {
             Ok(result) => Some(result),
@@ -70,6 +66,12 @@ impl ToolRegistry {
 
     pub fn tool_count(&self) -> usize {
         self.tools.len()
+    }
+}
+
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -189,9 +191,7 @@ mod tests {
     #[tokio::test]
     async fn ping_tool_executes() {
         let registry = ToolRegistry::with_builtins();
-        let result = registry
-            .execute("ping", serde_json::json!({}))
-            .await;
+        let result = registry.execute("ping", serde_json::json!({})).await;
         let result = result.unwrap();
         assert!(result.success);
         assert_eq!(result.output, "pong");
@@ -200,9 +200,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_tool_returns_none() {
         let registry = ToolRegistry::with_builtins();
-        let result = registry
-            .execute("nonexistent", serde_json::json!({}))
-            .await;
+        let result = registry.execute("nonexistent", serde_json::json!({})).await;
         assert!(result.is_none());
     }
 }

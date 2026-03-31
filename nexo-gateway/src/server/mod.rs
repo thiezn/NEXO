@@ -4,7 +4,11 @@ pub mod state;
 pub mod ticker;
 
 use crate::agent::AgentHandle;
+use crate::agent::gateway_tools::GatewayToolExecutor;
 use crate::config::GatewayConfig;
+use crate::memory::git::GitStorage;
+
+const CRON_NOTES_SUMMARY: &str = "notes-summary";
 use state::{GatewayState, SharedState};
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -16,12 +20,69 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
     let db = crate::memory::persistent::connect(&db_path).await?;
 
     let storage_root = utl_helpers::resolve_path_str(&config.storage_root)?;
-    let gateway_state = GatewayState::new(storage_root);
+
+    // Open git-backed storage (optional — allows gateway to run without persistent storage)
+    let git_storage = match utl_helpers::resolve_path_str(&config.nexo_storage_path) {
+        Ok(path) => match GitStorage::open(&path) {
+            Ok(gs) => {
+                let gs = Arc::new(gs);
+                let gs_pull = gs.clone();
+                if let Err(e) = tokio::task::spawn_blocking(move || gs_pull.pull()).await {
+                    tracing::warn!("Git pull on startup failed: {e}");
+                }
+                Some(gs)
+            }
+            Err(e) => {
+                tracing::warn!("Could not open nexo-storage at {}: {e}", config.nexo_storage_path);
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!("Could not resolve nexo_storage_path: {e}");
+            None
+        }
+    };
+
+    // Build gateway-native tools
+    let mut gateway_tools = GatewayToolExecutor::new();
+    if let Some(ref gs) = git_storage {
+        for tool in nexo_notes::tools::all_tools(gs.clone()) {
+            gateway_tools.register(tool);
+        }
+    }
+
+    // Register io tools (unconditional — no storage dependency)
+    for tool in nexo_io::tools::all_tools() {
+        gateway_tools.register(tool);
+    }
+
+    let mut gateway_state = GatewayState::new(storage_root);
+    gateway_state.gateway_tools = gateway_tools;
+    gateway_state.git_storage = git_storage;
     let event_tx = gateway_state.event_tx.clone();
     let state: SharedState = Arc::new(RwLock::new(gateway_state));
 
     // Spawn the agent brain
     let agent_handle = AgentHandle::spawn(db.clone(), state.clone(), event_tx.clone());
+
+    // Seed default cron jobs (idempotent)
+    {
+        let seed_db = db.clone();
+        tokio::spawn(async move {
+            let jobs = crate::agent::cron::list_jobs(&seed_db).await.unwrap_or_default();
+            if !jobs.iter().any(|j| j.name == CRON_NOTES_SUMMARY) {
+                let _ = crate::agent::cron::create_job(
+                    &seed_db,
+                    CRON_NOTES_SUMMARY,
+                    "0 */6 * * *",
+                    "Read all notes using notes.list and notes.read. \
+                     Write an organized summary using notes.update_summary.",
+                    None,
+                )
+                .await;
+            }
+        });
+    }
 
     // Spawn the cron scheduler
     let cron_handle = agent_handle.clone();

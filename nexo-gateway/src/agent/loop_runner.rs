@@ -10,6 +10,7 @@ use tokio::sync::{broadcast, mpsc};
 const MAX_ITERATIONS: usize = 20;
 /// Timeout for model load operations (models can be large).
 const MODEL_LOAD_TIMEOUT_SECS: u64 = 300;
+const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
 
 /// Run one complete agent loop for a given run.
 pub async fn run(
@@ -53,25 +54,26 @@ pub async fn run(
     // 2. Reap expired locks once per run (avoids per-acquire overhead)
     let _ = super::locks::reap_expired(db).await;
 
-    // 2b. Resolve prefill collection → SHA once; cache content for node fetches
-    let prefill_sha: Option<String> = if let Some(cid) = prefill_collection_id {
-        let storage_root = state.read().await.storage_root.clone();
-        match super::prefill::resolve_collection(db, &storage_root, cid).await {
-            Ok(Some((combined, sha))) => {
-                state.write().await.cache_prefill(sha.clone(), combined);
-                Some(sha)
-            }
-            Ok(None) => {
-                tracing::warn!("Prefill collection '{cid}' not found; skipping");
-                None
-            }
-            Err(e) => {
-                tracing::warn!("Failed to resolve prefill collection '{cid}': {e}; skipping");
-                None
-            }
-        }
+    // 2b. Load SOUL.md (always prepended) and optionally resolve prefill collection.
+    // Clone the Arc and drop the lock before doing blocking git I/O.
+    let git = state.read().await.git_storage.clone();
+    let (soul_content, prefill_content) = if let Some(ref git) = git {
+        let g = git.clone();
+        let cid = prefill_collection_id.map(String::from);
+        tokio::task::spawn_blocking(move || {
+            let soul = g.read_file("SOUL.md").unwrap_or_default();
+            let prefill = cid.and_then(|cid| {
+                super::prefill::resolve_collection(&g, &cid)
+                    .ok()
+                    .flatten()
+                    .map(|(content, _sha)| content)
+            });
+            (soul, prefill)
+        })
+        .await
+        .unwrap_or_default()
     } else {
-        None
+        (String::new(), None)
     };
 
     // 3. Enter the inference loop
@@ -111,7 +113,8 @@ pub async fn run(
             &tool_desc,
             &tool_entries,
             model_id,
-            prefill_sha.as_deref(),
+            &soul_content,
+            prefill_content.as_deref(),
             state,
             event_tx,
         )
@@ -392,14 +395,34 @@ async fn run_inference(
     tool_descriptions: &str,
     tool_entries: &[ToolEntry],
     model_id: Option<&str>,
-    prefill_sha: Option<&str>,
+    soul_content: &str,
+    prefill_content: Option<&str>,
     state: &SharedState,
     _event_tx: &broadcast::Sender<Frame>,
 ) -> InferenceOutcome {
+    // Build system prompt from SOUL.md, prefill, and tool descriptions
+    let mut system_parts = Vec::new();
+    if !soul_content.is_empty() {
+        system_parts.push(soul_content.to_string());
+    }
+    if let Some(prefill) = prefill_content {
+        if !prefill.is_empty() {
+            system_parts.push(prefill.to_string());
+        }
+    }
+    if !tool_descriptions.is_empty() {
+        system_parts.push(tool_descriptions.to_string());
+    }
+    let system_prompt = if system_parts.is_empty() {
+        DEFAULT_SYSTEM_PROMPT.to_string()
+    } else {
+        system_parts.join("\n\n")
+    };
+
     // Build a chat-style payload for the node's inference endpoint
     let chat_messages: Vec<serde_json::Value> = std::iter::once(serde_json::json!({
         "role": "system",
-        "content": format!("You are a helpful assistant.\n\n{tool_descriptions}")
+        "content": system_prompt
     }))
     .chain(messages.iter().map(|m| {
         let mut msg = serde_json::json!({
@@ -440,10 +463,6 @@ async fn run_inference(
 
     if let Some(mid) = model_id {
         inference_payload["model_id"] = serde_json::Value::String(mid.to_string());
-    }
-
-    if let Some(sha) = prefill_sha {
-        inference_payload["prefill_sha"] = serde_json::Value::String(sha.to_string());
     }
 
     // Find an LLM-capable node (with model loading if model_id is specified)
@@ -553,12 +572,29 @@ fn parse_inference_response(payload: Option<serde_json::Value>) -> InferenceOutc
 
 // ── Tool execution ──────────────────────────────────────────
 
-/// Execute a tool by forwarding to the owning node via the gateway's directed channel.
+/// Execute a tool — first check gateway-native tools, then forward to a node.
 async fn execute_tool(
     tool_name: &str,
     args: &serde_json::Value,
     state: &SharedState,
 ) -> Result<ToolsExecuteResponse, String> {
+    // Check gateway-native tools first (notes, etc.)
+    let gateway_tool = {
+        let state_read = state.read().await;
+        state_read.gateway_tools.get_tool(tool_name).cloned()
+    };
+    if let Some(tool) = gateway_tool {
+        return match tool.execute(args.clone()).await {
+            Ok(tr) => Ok(ToolsExecuteResponse {
+                success: tr.success,
+                output: tr.output,
+                error: tr.error,
+            }),
+            Err(e) => Err(format!("Gateway tool error: {e}")),
+        };
+    }
+
+    // Otherwise, forward to owning node
     let (node_sender, forwarded_id) = {
         let state_read = state.read().await;
         let tool = state_read

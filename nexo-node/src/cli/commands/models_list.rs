@@ -9,8 +9,8 @@ pub fn run() -> utl_helpers::Result {
     }
 
     println!(
-        "{:<30} {:<10} {:<12} {}",
-        "NAME", "SIZE (GB)", "DOWNLOADED", "DESCRIPTION"
+        "{:<30} {:<10} {:<12} DESCRIPTION",
+        "NAME", "SIZE (GB)", "DOWNLOADED"
     );
     println!("{}", "-".repeat(80));
 

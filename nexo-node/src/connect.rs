@@ -1,4 +1,5 @@
 use crate::config::NodeConfig;
+use crate::download::registry::DEFAULT_INFERENCE_MODEL;
 use crate::inference_clients::{
     ChatMessage, ChatRequest, ChatRole, InferenceClients, InferenceConfig, ToolCallRequest,
 };
@@ -12,7 +13,11 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 /// Run the node, connecting to the gateway and reconnecting on disconnect.
-pub async fn run_node(config: &NodeConfig, registry: &ToolRegistry) -> utl_helpers::Result {
+pub async fn run_node(
+    config: &NodeConfig,
+    registry: &ToolRegistry,
+    has_inference: bool,
+) -> utl_helpers::Result {
     let inference = InferenceClients::new(InferenceConfig::default());
     let mut attempt = 0u32;
     loop {
@@ -22,7 +27,7 @@ pub async fn run_node(config: &NodeConfig, registry: &ToolRegistry) -> utl_helpe
             config.gateway_url
         );
 
-        match connect_and_run(config, registry, &inference).await {
+        match connect_and_run(config, registry, &inference, has_inference).await {
             Ok(()) => {
                 tracing::info!("Node disconnected gracefully");
                 break;
@@ -43,6 +48,7 @@ async fn connect_and_run(
     config: &NodeConfig,
     registry: &ToolRegistry,
     inference: &InferenceClients,
+    has_inference: bool,
 ) -> utl_helpers::Result {
     // Step 1: Connect to gateway
     let mut conn = NexoConnection::connect(&config.gateway_url, &config.auth_token)
@@ -52,7 +58,10 @@ async fn connect_and_run(
     tracing::info!("Connected to gateway");
 
     // Step 2: Handshake — declare capabilities and available models
-    let (capabilities, commands) = registry.capabilities_and_commands();
+    let (mut capabilities, commands) = registry.capabilities_and_commands();
+    if has_inference {
+        capabilities.push("llm".to_string());
+    }
     tracing::debug!(
         "Handshaking with capabilities={capabilities:?}, commands={commands:?}"
     );
@@ -131,7 +140,14 @@ async fn connect_and_run(
 
     tracing::info!("Node ready, listening for requests");
 
+    // Push initial model status so the gateway knows inference is available.
+    if has_inference {
+        let loaded = Some(DEFAULT_INFERENCE_MODEL.to_string());
+        push_model_status(&mut conn, loaded, &config.available_models).await;
+    }
+
     // Per-connection state
+    let available_models = config.available_models.clone();
     let mut prefill_cache: HashMap<String, String> = HashMap::new();
     let mut currently_loaded: Option<String> = None;
 
@@ -163,14 +179,14 @@ async fn connect_and_run(
                 method: Method::ModelLoad,
                 params,
             }) => {
-                handle_model_load(&mut conn, &id, params, inference, &mut currently_loaded).await?;
+                handle_model_load(&mut conn, &id, params, inference, &mut currently_loaded, &available_models).await?;
             }
             Some(Frame::Request {
                 id,
                 method: Method::ModelUnload,
                 params,
             }) => {
-                handle_model_unload(&mut conn, &id, params, inference, &mut currently_loaded)
+                handle_model_unload(&mut conn, &id, params, inference, &mut currently_loaded, &available_models)
                     .await?;
             }
             Some(Frame::Event {
@@ -236,6 +252,7 @@ async fn handle_tool_execute(
     };
 
     tracing::info!("Executing tool '{}'", exec_params.tool);
+    tracing::debug!("Tool '{}' args: {}", exec_params.tool, exec_params.args);
     let start = std::time::Instant::now();
 
     let response = match registry.execute(&exec_params.tool, exec_params.args).await {
@@ -246,6 +263,12 @@ async fn handle_tool_execute(
                 exec_params.tool,
                 elapsed.as_secs_f64() * 1000.0,
                 result.success
+            );
+            tracing::debug!(
+                "Tool '{}' output: {}, error: {:?}",
+                exec_params.tool,
+                result.output,
+                result.error
             );
             Frame::ok_response(
                 request_id,
@@ -444,6 +467,7 @@ async fn handle_model_load(
     params: serde_json::Value,
     inference: &InferenceClients,
     currently_loaded: &mut Option<String>,
+    available_models: &[String],
 ) -> utl_helpers::Result {
     let model_id = params
         .get("modelId")
@@ -487,7 +511,7 @@ async fn handle_model_load(
 
     // Push ModelStatus to gateway so it can update its state
     if loaded {
-        push_model_status(conn, Some(model_id)).await;
+        push_model_status(conn, Some(model_id), available_models).await;
     }
 
     Ok(())
@@ -499,6 +523,7 @@ async fn handle_model_unload(
     params: serde_json::Value,
     inference: &InferenceClients,
     currently_loaded: &mut Option<String>,
+    available_models: &[String],
 ) -> utl_helpers::Result {
     let model_id = params
         .get("modelId")
@@ -535,16 +560,20 @@ async fn handle_model_unload(
         .await
         .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
 
-    push_model_status(conn, None).await;
+    push_model_status(conn, None, available_models).await;
 
     Ok(())
 }
 
 /// Push the node's current loaded model state to the gateway.
-async fn push_model_status(conn: &mut NexoConnection, loaded_model_id: Option<String>) {
+async fn push_model_status(
+    conn: &mut NexoConnection,
+    loaded_model_id: Option<String>,
+    available_models: &[String],
+) {
     let status = ModelStatusParams {
         loaded_model_id,
-        available_models: vec![],
+        available_models: available_models.to_vec(),
     };
     if let Ok(frame) = Frame::request(Method::ModelStatus, &status) {
         let _ = conn.send_frame(&frame).await;

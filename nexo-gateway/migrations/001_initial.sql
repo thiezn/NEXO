@@ -22,39 +22,13 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     expires_at TEXT NOT NULL
 );
 
--- Composable prefill
-
-CREATE TABLE IF NOT EXISTS markdown_files (
-    id          TEXT PRIMARY KEY,       -- UUID v7
-    category    TEXT NOT NULL,
-    description TEXT NOT NULL,
-    filename    TEXT NOT NULL UNIQUE,   -- "{id}.md" relative to storage root markdown dir
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS prefill_collections (
-    id          TEXT PRIMARY KEY,       -- UUID v7
-    name        TEXT NOT NULL,
-    description TEXT,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS prefill_collection_items (
-    collection_id TEXT    NOT NULL REFERENCES prefill_collections(id) ON DELETE CASCADE,
-    position      INTEGER NOT NULL,
-    markdown_id   TEXT    NOT NULL REFERENCES markdown_files(id),
-    PRIMARY KEY (collection_id, position)
-);
-
 -- Sessions and agent runs
 
 CREATE TABLE IF NOT EXISTS sessions (
     id                    TEXT PRIMARY KEY,
     user_id               TEXT NOT NULL REFERENCES users(id),
     name                  TEXT,
-    prefill_collection_id TEXT REFERENCES prefill_collections(id),
+    prefill_collection_id TEXT,
     model_id              TEXT,
     created_at            TEXT NOT NULL DEFAULT (datetime('now')),
     last_active_at        TEXT NOT NULL DEFAULT (datetime('now'))

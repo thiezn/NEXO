@@ -215,13 +215,13 @@ async fn handle_user_input(
         }
         "prefill.markdown.delete" => {
             if args.is_empty() {
-                println!("Usage: prefill.markdown.delete <id>");
+                println!("Usage: prefill.markdown.delete <filename>");
                 return Ok(());
             }
             request(
                 Method::PrefillMarkdownDelete,
                 &PrefillMarkdownDeleteParams {
-                    id: args.to_string(),
+                    filename: args.to_string(),
                 },
             )?
         }

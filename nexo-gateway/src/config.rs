@@ -12,6 +12,8 @@ pub struct GatewayConfig {
     pub db_path: String,
     pub storage_root: String,
     pub auth_token: String,
+    /// Path to the git-backed nexo-storage repository.
+    pub nexo_storage_path: String,
 }
 
 impl Default for GatewayConfig {
@@ -24,6 +26,7 @@ impl Default for GatewayConfig {
             db_path: "~/.nexo/storage/relational/gateway.db".to_string(),
             storage_root: "~/.nexo/storage".to_string(),
             auth_token: nexo_ws_schema::AUTH_TOKEN.to_string(),
+            nexo_storage_path: "~/.nexo/nexo-storage".to_string(),
         }
     }
 }

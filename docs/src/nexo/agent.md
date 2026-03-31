@@ -151,14 +151,9 @@ sequenceDiagram
         Node->>GW: model.status (push)
     end
 
-    GW->>GW: resolve prefill (if collection set)
-    GW->>Node: agent {messages, tools, prefillSha}
-
-    alt Prefill cache miss on node
-        Node->>GW: prefill.fetch {sha}
-        GW-->>Node: {content}
-        Node->>Node: cache sha → content
-    end
+    GW->>GW: load SOUL.md + resolve prefill (if collection set)
+    GW->>GW: build system prompt (SOUL + prefill + tools)
+    GW->>Node: agent {messages, tools}
 
     Node-->>GW: inference response
 
@@ -169,8 +164,12 @@ sequenceDiagram
         App->>App: update message bubble
     else Tool calls
         GW-->>App: event:agent {status: tool_call, toolName}
-        GW->>Node: tools.execute {tool, args}
-        Node-->>GW: tool result
+        alt Gateway-native tool
+            GW->>GW: execute locally (e.g. notes.create)
+        else Node tool
+            GW->>Node: tools.execute {tool, args}
+            Node-->>GW: tool result
+        end
         GW->>DB: INSERT tool message
         GW->>Node: agent {messages + tool results}
         Node-->>GW: final response
@@ -214,11 +213,36 @@ sequenceDiagram
     GW-->>App: event:agent {status: completed}
 ```
 
+## System prompt composition
+
+The system prompt is assembled from three sources, in order:
+
+1. **SOUL.md** — Always loaded from `~/.nexo/nexo-storage/SOUL.md` (if it exists). Defines the agent's personality and persistent instructions.
+2. **Prefill collection** — If the session has a `prefill_collection_id`, the gateway resolves it from `PREFILL/collections.json`, reads each referenced markdown file, and concatenates them.
+3. **Tool descriptions** — A structured description of all available tools (both node-registered and gateway-native).
+
+If none of these produce content, a default "You are a helpful assistant." prompt is used.
+
+## Gateway-native tools
+
+Some tools execute directly on the gateway rather than being forwarded to a node. These are registered at startup and appear in the tool catalog alongside node tools (with `source: "gateway"`).
+
+Current gateway-native tools:
+
+| Tool | Description |
+|------|-------------|
+| `notes.create` | Create a timestamped note in git storage |
+| `notes.list` | List all note filenames |
+| `notes.read` | Read a specific note |
+| `notes.update_summary` | Write the notes summary |
+
+When the agent loop encounters a tool call, it checks gateway tools first. If a match is found, the tool executes locally without any node involvement. Otherwise, the call is forwarded to the appropriate node.
+
 ## Context assembly
 
 Before each inference call, the brain loads the full conversation history from the
-`messages` table for the current session, ordered chronologically. It also builds a
-system prompt that describes the available tools, enabling the LLM to make tool calls.
+`messages` table for the current session, ordered chronologically. The system prompt
+(see above) is prepended as a system message.
 
 The context window includes messages with roles:
 - `user` — user prompts

@@ -130,11 +130,11 @@ pub async fn check_health(client: &reqwest::Client) -> bool {
 impl Drop for LlamaServer {
     fn drop(&mut self) {
         // Best-effort SIGTERM on drop; explicit stop() is the primary shutdown path.
-        if let Some(child) = &mut self.child {
-            if let Some(id) = child.id() {
-                unsafe {
-                    libc::kill(id as libc::pid_t, libc::SIGTERM);
-                }
+        if let Some(child) = &mut self.child
+            && let Some(id) = child.id()
+        {
+            unsafe {
+                libc::kill(id as libc::pid_t, libc::SIGTERM);
             }
         }
     }

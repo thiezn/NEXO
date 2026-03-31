@@ -32,9 +32,14 @@ chrono = "0"
 dirs = "6"
 http = "1"
 sha2 = "0"
+git2 = "0"
+anyhow = "1"
+nexo-notes = { path = "../nexo-tools/core/nexo-notes" }
+nexo-io = { path = "../nexo-tools/nexo-io" }
 
 [dev-dependencies]
 tempfile = "3"
+async-trait = "0"
 
 [lints]
 workspace = true
