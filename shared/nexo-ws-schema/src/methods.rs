@@ -61,6 +61,9 @@ pub enum Method {
     /// Client → gateway: delete a prefill collection.
     #[serde(rename = "prefill.collection.delete")]
     PrefillCollectionDelete,
+    /// Client → gateway → node: analyze an image using the model's vision capabilities.
+    #[serde(rename = "image.analyze")]
+    ImageAnalyze,
 }
 
 /// Agent run status.
@@ -549,6 +552,40 @@ pub struct PrefillCollectionDeleteParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PrefillCollectionDeleteResponse {
     pub deleted: bool,
+}
+
+// -- image.analyze --
+
+/// Parameters for `image.analyze`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAnalyzeParams {
+    /// Base64-encoded image data.
+    pub image_data: String,
+    /// The prompt/question about the image.
+    pub prompt: String,
+    #[serde(default = "default_image_analyze_max_tokens")]
+    pub max_tokens: usize,
+    #[serde(default = "default_image_analyze_temperature")]
+    pub temperature: f64,
+    pub idempotency_key: String,
+}
+
+fn default_image_analyze_max_tokens() -> usize {
+    1024
+}
+
+fn default_image_analyze_temperature() -> f64 {
+    0.3
+}
+
+/// Response payload for `image.analyze`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAnalyzeResponse {
+    pub text: String,
+    pub tokens_generated: usize,
+    pub inference_time_ms: u64,
 }
 
 #[cfg(test)]

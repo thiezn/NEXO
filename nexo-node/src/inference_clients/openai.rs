@@ -241,7 +241,7 @@ pub(super) async fn analyze_image(
         tools: None,
     };
 
-    let result = post_chat_completion(http, base_url, &body, "vllm-mlx").await?;
+    let result = post_chat_completion(http, base_url, &body, "llama-server").await?;
 
     Ok(ImageAnalysisResponse {
         text: result.choice.content.unwrap_or_default(),

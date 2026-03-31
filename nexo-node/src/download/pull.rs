@@ -230,8 +230,15 @@ pub async fn pull_model<C: Component>(
                 Err(_) => (false, false), // file absent or unreadable
             },
             None => {
-                let valid = std::fs::metadata(&clean_path)
-                    .is_ok_and(|m| file.size_bytes > 0 && m.len() == file.size_bytes);
+                // No SHA to verify — fall back to size check, or just existence
+                // if the manifest has no known size (size_bytes == 0).
+                let valid = std::fs::metadata(&clean_path).is_ok_and(|m| {
+                    if file.size_bytes > 0 {
+                        m.len() == file.size_bytes
+                    } else {
+                        m.len() > 0
+                    }
+                });
                 (valid, false)
             }
         };

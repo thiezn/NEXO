@@ -145,13 +145,16 @@ impl GatewayState {
         None
     }
 
-    /// Find any connected LLM-capable node (existing behaviour, used when no model_id is specified).
-    pub fn find_any_llm_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+    /// Find the first connected node whose capabilities satisfy `pred`.
+    fn find_node_with_capability(
+        &self,
+        pred: impl Fn(&str) -> bool,
+    ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
         for (peer_id, peer) in &self.peers {
             if peer.role != Role::Node {
                 continue;
             }
-            if peer.capabilities.iter().any(|c| c == "llm" || c == "inference") {
+            if peer.capabilities.iter().any(|c| pred(c)) {
                 if let Some(sender) = self.peer_senders.get(peer_id) {
                     return Some((peer_id.clone(), sender.clone()));
                 }
@@ -160,12 +163,19 @@ impl GatewayState {
         None
     }
 
+    /// Find any connected LLM-capable node (existing behaviour, used when no model_id is specified).
+    pub fn find_any_llm_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+        self.find_node_with_capability(|c| c == "llm" || c == "inference")
+    }
+
+    /// Find any connected node with the "vision" capability (image analysis).
+    pub fn find_image_analyze_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+        self.find_node_with_capability(|c| c == "vision")
+    }
+
     /// Returns true if any LLM-capable node is connected.
     pub fn has_llm_peer(&self) -> bool {
-        self.peers.values().any(|p| {
-            p.role == Role::Node
-                && p.capabilities.iter().any(|c| c == "llm" || c == "inference")
-        })
+        self.find_any_llm_peer().is_some()
     }
 
     /// Returns the set of peer_ids of connected LLM nodes.

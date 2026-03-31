@@ -179,12 +179,12 @@ impl InferenceClients {
         openai::tool_call(&self.http, &self.config.llama_url, req).await
     }
 
-    /// Multimodal image analysis via vllm-mlx (Qwen3.5-9B).
+    /// Multimodal image analysis via llama-server (Qwen3.5-35B-A3B + mmproj).
     pub async fn analyze_image(
         &self,
         req: ImageAnalysisRequest,
     ) -> anyhow::Result<ImageAnalysisResponse> {
-        openai::analyze_image(&self.http, &self.config.vision_url, req).await
+        openai::analyze_image(&self.http, &self.config.llama_url, req).await
     }
 
     /// Text-to-speech via mlx-tts-server (Qwen3-TTS).

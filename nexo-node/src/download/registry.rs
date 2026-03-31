@@ -11,19 +11,26 @@ static ALL_MANIFESTS: LazyLock<Vec<GgufManifest>> = LazyLock::new(|| {
     vec![ModelManifest {
         name: DEFAULT_INFERENCE_MODEL.to_string(),
         family: "qwen3.5".to_string(),
-        description: "Qwen3.5 35B-AB3B Q4_K_M GGUF for llama-server (~20 GB)".to_string(),
-        size_gb: 20.0,
-        files: vec![ModelFile {
-            component: GgufComponent::Weights,
-            hf_repo: "unsloth/Qwen3.5-35B-A3B-GGUF".to_string(),
-            hf_filename: "Qwen3.5-35B-A3B-Q4_K_M.gguf".to_string(),
-            // Set to actual byte count after verifying on HuggingFace.
-            // 0 disables size-based skip; SHA-based or force-flag checks still apply.
-            size_bytes: 0,
-            gated: false,
-            // Set to upstream SHA-256 once verified.
-            sha256: None,
-        }],
+        description: "Qwen3.5 35B-A3B Q4_K_M GGUF + vision projector for llama-server (~21 GB)".to_string(),
+        size_gb: 21.0,
+        files: vec![
+            ModelFile {
+                component: GgufComponent::Weights,
+                hf_repo: "unsloth/Qwen3.5-35B-A3B-GGUF".to_string(),
+                hf_filename: "Qwen3.5-35B-A3B-Q4_K_M.gguf".to_string(),
+                size_bytes: 0,
+                gated: false,
+                sha256: None,
+            },
+            ModelFile {
+                component: GgufComponent::VisionProjector,
+                hf_repo: "unsloth/Qwen3.5-35B-A3B-GGUF".to_string(),
+                hf_filename: "mmproj-F16.gguf".to_string(),
+                size_bytes: 0,
+                gated: false,
+                sha256: None,
+            },
+        ],
     }]
 });
 

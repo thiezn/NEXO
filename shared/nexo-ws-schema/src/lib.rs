@@ -17,9 +17,10 @@ pub use frame::Frame;
 pub use methods::{
     AgentParams, AgentResponse, AgentStatus, CollectionEntry, ConversationMessage, CronCreateParams,
     CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry, CronListParams,
-    CronListResponse, HealthParams, HealthResponse, MarkdownFileEntry, Method, ModelLoadParams,
-    ModelLoadResponse, ModelStatusParams, ModelUnloadParams, ModelUnloadResponse,
-    PrefillCollectionCreateParams, PrefillCollectionCreateResponse, PrefillCollectionDeleteParams,
+    CronListResponse, HealthParams, HealthResponse, ImageAnalyzeParams, ImageAnalyzeResponse,
+    MarkdownFileEntry, Method, ModelLoadParams, ModelLoadResponse, ModelStatusParams,
+    ModelUnloadParams, ModelUnloadResponse, PrefillCollectionCreateParams,
+    PrefillCollectionCreateResponse, PrefillCollectionDeleteParams,
     PrefillCollectionDeleteResponse, PrefillCollectionListParams, PrefillCollectionListResponse,
     PrefillFetchParams, PrefillFetchResponse, PrefillMarkdownCreateParams,
     PrefillMarkdownCreateResponse, PrefillMarkdownDeleteParams, PrefillMarkdownDeleteResponse,

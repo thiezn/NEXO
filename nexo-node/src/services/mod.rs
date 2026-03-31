@@ -17,8 +17,8 @@ pub struct ServiceManager {
 impl ServiceManager {
     /// Start llama-server with the given model, wait until healthy, then
     /// spawn a background monitor that restarts it on crashes.
-    pub async fn start(model_path: PathBuf) -> anyhow::Result<Self> {
-        let mut server = LlamaServer::new(model_path)?;
+    pub async fn start(model_path: PathBuf, mmproj_path: Option<PathBuf>) -> anyhow::Result<Self> {
+        let mut server = LlamaServer::new(model_path, mmproj_path)?;
         server.start().await?;
         server.wait_until_healthy(60).await?;
 

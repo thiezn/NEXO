@@ -27,6 +27,7 @@ To install:
 pub struct LlamaServer {
     binary_path: PathBuf,
     model_path: PathBuf,
+    mmproj_path: Option<PathBuf>,
     child: Option<Child>,
     /// Shared client reused across all health checks and requests.
     pub(super) http: reqwest::Client,
@@ -35,7 +36,7 @@ pub struct LlamaServer {
 impl LlamaServer {
     /// Resolve paths and verify the binary exists.
     /// Returns Err with install instructions if the binary is absent.
-    pub fn new(model_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(model_path: PathBuf, mmproj_path: Option<PathBuf>) -> anyhow::Result<Self> {
         let binary_path = nexo_home_dir().join(LLAMA_SERVER_RELATIVE);
 
         if !binary_path.exists() {
@@ -47,6 +48,7 @@ impl LlamaServer {
         Ok(Self {
             binary_path,
             model_path,
+            mmproj_path,
             child: None,
             http: reqwest::Client::new(),
         })
@@ -55,24 +57,30 @@ impl LlamaServer {
     /// Start llama-server as a subprocess.
     pub async fn start(&mut self) -> anyhow::Result<()> {
         info!(
-            "Starting llama-server on port {LLAMA_PORT} with model {}",
-            self.model_path.display()
+            "Starting llama-server on port {LLAMA_PORT} with model {}{}",
+            self.model_path.display(),
+            if self.mmproj_path.is_some() { " (vision enabled)" } else { "" }
         );
 
-        let child = Command::new(&self.binary_path)
-            .args([
-                "--model",
-                &self.model_path.to_string_lossy(),
-                "--port",
-                &LLAMA_PORT.to_string(),
-                "--ctx-size",
-                LLAMA_CTX_SIZE,
-                "--n-gpu-layers",
-                LLAMA_GPU_LAYERS,
-                "--host",
-                LLAMA_HOST,
-            ])
-            .spawn()?;
+        let mut args: Vec<String> = vec![
+            "--model".into(),
+            self.model_path.to_string_lossy().into_owned(),
+            "--port".into(),
+            LLAMA_PORT.to_string(),
+            "--ctx-size".into(),
+            LLAMA_CTX_SIZE.into(),
+            "--n-gpu-layers".into(),
+            LLAMA_GPU_LAYERS.into(),
+            "--host".into(),
+            LLAMA_HOST.into(),
+        ];
+
+        if let Some(ref mmproj) = self.mmproj_path {
+            args.push("--mmproj".into());
+            args.push(mmproj.to_string_lossy().into_owned());
+        }
+
+        let child = Command::new(&self.binary_path).args(&args).spawn()?;
 
         self.child = Some(child);
         Ok(())

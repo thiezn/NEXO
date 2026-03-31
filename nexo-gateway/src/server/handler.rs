@@ -3,8 +3,8 @@ use crate::server::state::{PeerInfo, SharedState};
 use futures_util::{SinkExt, StreamExt};
 use nexo_ws_schema::{
     AgentParams, AgentStatus, ConnectParams, CronCreateParams, CronDeleteParams, ErrorPayload,
-    EventKind, Frame, HealthResponse, HelloOk, Method, ModelStatusParams, PROTOCOL_VERSION,
-    PrefillCollectionCreateParams, PrefillCollectionDeleteParams,
+    EventKind, Frame, HealthResponse, HelloOk, ImageAnalyzeParams, Method, ModelStatusParams,
+    PROTOCOL_VERSION, PrefillCollectionCreateParams, PrefillCollectionDeleteParams,
     PrefillMarkdownCreateParams, PrefillMarkdownDeleteParams, PresencePayload, Role,
     SessionClearParams, SessionCreateParams, SessionGetParams, StatusResponse, ToolsCatalogResponse,
     ToolsExecuteParams, ToolsRegisterParams, ToolsRegisterResponse, WsError,
@@ -913,6 +913,114 @@ async fn dispatch_method(
                     nexo_ws_schema::PrefillCollectionDeleteResponse { deleted },
                 ),
                 Err(frame) => frame,
+            }
+        }
+        Method::ImageAnalyze => {
+            let image_params: ImageAnalyzeParams =
+                match parse_params(request_id, params, "image.analyze") {
+                    Ok(p) => p,
+                    Err(f) => return f,
+                };
+
+            let (node_sender, forwarded_id) = {
+                let state_read = state.read().await;
+                match state_read.find_image_analyze_peer() {
+                    Some((_, sender)) => (sender, Frame::new_id()),
+                    None => {
+                        return Frame::error_response(
+                            request_id,
+                            ErrorPayload {
+                                code: "no_vision_node".into(),
+                                message: "No vision-capable node is connected".into(),
+                            },
+                        );
+                    }
+                }
+            };
+
+            let forwarded_frame = match Frame::request(Method::ImageAnalyze, &image_params) {
+                Ok(mut f) => {
+                    if let Frame::Request { ref mut id, .. } = f {
+                        *id = forwarded_id.clone();
+                    }
+                    f
+                }
+                Err(e) => {
+                    return Frame::error_response(
+                        request_id,
+                        ErrorPayload {
+                            code: "internal_error".into(),
+                            message: format!("Failed to build forwarded request: {e}"),
+                        },
+                    );
+                }
+            };
+
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            {
+                let mut state_write = state.write().await;
+                state_write
+                    .pending_requests
+                    .insert(forwarded_id.clone(), response_tx);
+            }
+
+            if node_sender.send(forwarded_frame).await.is_err() {
+                let mut state_write = state.write().await;
+                state_write.pending_requests.remove(&forwarded_id);
+                return Frame::error_response(
+                    request_id,
+                    ErrorPayload {
+                        code: "vision_unavailable".into(),
+                        message: "Failed to send request to vision node".into(),
+                    },
+                );
+            }
+
+            match tokio::time::timeout(std::time::Duration::from_secs(60), response_rx).await {
+                Ok(Ok(Frame::Response {
+                    ok, payload, error, ..
+                })) => {
+                    if ok {
+                        Frame::Response {
+                            id: request_id.to_string(),
+                            ok: true,
+                            payload,
+                            error: None,
+                        }
+                    } else {
+                        Frame::Response {
+                            id: request_id.to_string(),
+                            ok: false,
+                            payload: None,
+                            error,
+                        }
+                    }
+                }
+                Ok(Ok(_)) => Frame::error_response(
+                    request_id,
+                    ErrorPayload {
+                        code: "internal_error".into(),
+                        message: "Unexpected frame type from node".into(),
+                    },
+                ),
+                Ok(Err(_)) => Frame::error_response(
+                    request_id,
+                    ErrorPayload {
+                        code: "vision_unavailable".into(),
+                        message: "Vision node disconnected during image analysis".into(),
+                    },
+                ),
+                Err(_) => {
+                    let mut state_write = state.write().await;
+                    state_write.pending_requests.remove(&forwarded_id);
+                    Frame::error_response(
+                        request_id,
+                        ErrorPayload {
+                            code: "timeout".into(),
+                            message: "Image analysis timed out (60s)".into(),
+                        },
+                    )
+                }
             }
         }
         Method::ModelLoad | Method::ModelUnload => Frame::error_response(

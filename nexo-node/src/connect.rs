@@ -1,13 +1,15 @@
 use crate::config::NodeConfig;
 use crate::download::registry::DEFAULT_INFERENCE_MODEL;
 use crate::inference_clients::{
-    ChatMessage, ChatRequest, ChatRole, InferenceClients, InferenceConfig, ToolCallRequest,
+    ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, InferenceClients, InferenceConfig,
+    ToolCallRequest,
 };
 use crate::registry::ToolRegistry;
+use base64::Engine;
 use nexo_ws_client::{NexoConnection, default_node_connect_params, perform_handshake};
 use nexo_ws_schema::{
-    ErrorPayload, Frame, Method, ModelLoadResponse, ModelStatusParams, ModelUnloadResponse,
-    ToolsExecuteParams, ToolsExecuteResponse, ToolsRegisterParams,
+    ErrorPayload, Frame, ImageAnalyzeParams, Method, ModelLoadResponse, ModelStatusParams,
+    ModelUnloadResponse, ToolsExecuteParams, ToolsExecuteResponse, ToolsRegisterParams,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -17,6 +19,7 @@ pub async fn run_node(
     config: &NodeConfig,
     registry: &ToolRegistry,
     has_inference: bool,
+    has_vision: bool,
 ) -> utl_helpers::Result {
     let inference = InferenceClients::new(InferenceConfig::default());
     let mut attempt = 0u32;
@@ -27,7 +30,7 @@ pub async fn run_node(
             config.gateway_url
         );
 
-        match connect_and_run(config, registry, &inference, has_inference).await {
+        match connect_and_run(config, registry, &inference, has_inference, has_vision).await {
             Ok(()) => {
                 tracing::info!("Node disconnected gracefully");
                 break;
@@ -49,6 +52,7 @@ async fn connect_and_run(
     registry: &ToolRegistry,
     inference: &InferenceClients,
     has_inference: bool,
+    has_vision: bool,
 ) -> utl_helpers::Result {
     // Step 1: Connect to gateway
     let mut conn = NexoConnection::connect(&config.gateway_url, &config.auth_token)
@@ -61,6 +65,9 @@ async fn connect_and_run(
     let (mut capabilities, commands) = registry.capabilities_and_commands();
     if has_inference {
         capabilities.push("llm".to_string());
+    }
+    if has_vision {
+        capabilities.push("vision".to_string());
     }
     tracing::debug!(
         "Handshaking with capabilities={capabilities:?}, commands={commands:?}"
@@ -173,6 +180,13 @@ async fn connect_and_run(
             }) => {
                 handle_agent_inference(&mut conn, &id, params, inference, &mut prefill_cache)
                     .await?;
+            }
+            Some(Frame::Request {
+                id,
+                method: Method::ImageAnalyze,
+                params,
+            }) => {
+                handle_image_analyze(&mut conn, &id, params, inference).await?;
             }
             Some(Frame::Request {
                 id,
@@ -453,6 +467,96 @@ async fn handle_agent_inference(
             },
         )
     });
+
+    conn.send_frame(&response)
+        .await
+        .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+
+    Ok(())
+}
+
+async fn handle_image_analyze(
+    conn: &mut NexoConnection,
+    request_id: &str,
+    params: serde_json::Value,
+    inference: &InferenceClients,
+) -> utl_helpers::Result {
+    let analyze_params: ImageAnalyzeParams = match serde_json::from_value(params) {
+        Ok(p) => p,
+        Err(e) => {
+            let err = Frame::error_response(
+                request_id,
+                ErrorPayload {
+                    code: "invalid_params".into(),
+                    message: format!("Invalid image.analyze params: {e}"),
+                },
+            );
+            conn.send_frame(&err)
+                .await
+                .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+            return Ok(());
+        }
+    };
+
+    let image_bytes =
+        match base64::engine::general_purpose::STANDARD.decode(&analyze_params.image_data) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                let err = Frame::error_response(
+                    request_id,
+                    ErrorPayload {
+                        code: "invalid_params".into(),
+                        message: format!("Invalid base64 image data: {e}"),
+                    },
+                );
+                conn.send_frame(&err)
+                    .await
+                    .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+                return Ok(());
+            }
+        };
+
+    tracing::info!(
+        "Analyzing image ({} bytes, prompt: '{:.80}')",
+        image_bytes.len(),
+        analyze_params.prompt
+    );
+
+    let req = ImageAnalysisRequest {
+        image_data: image_bytes,
+        prompt: analyze_params.prompt,
+        max_tokens: analyze_params.max_tokens,
+        temperature: analyze_params.temperature,
+    };
+
+    let response = match inference.analyze_image(req).await {
+        Ok(resp) => {
+            let payload = serde_json::json!({
+                "text": resp.text,
+                "tokensGenerated": resp.tokens_generated,
+                "inferenceTimeMs": resp.inference_time_ms,
+            });
+            Frame::ok_response(request_id, &payload).unwrap_or_else(|e| {
+                Frame::error_response(
+                    request_id,
+                    ErrorPayload {
+                        code: "internal_error".into(),
+                        message: e.to_string(),
+                    },
+                )
+            })
+        }
+        Err(e) => {
+            tracing::error!("Image analysis failed: {e}");
+            Frame::error_response(
+                request_id,
+                ErrorPayload {
+                    code: "inference_error".into(),
+                    message: e.to_string(),
+                },
+            )
+        }
+    };
 
     conn.send_frame(&response)
         .await

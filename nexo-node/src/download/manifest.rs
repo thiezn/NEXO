@@ -11,11 +11,16 @@ pub trait Component: Clone + std::fmt::Debug + Send + Sync + 'static {
 pub enum GgufComponent {
     /// The GGUF weights file.
     Weights,
+    /// The multimodal vision projector (mmproj) file for image analysis.
+    VisionProjector,
 }
 
 impl Component for GgufComponent {
     fn name(&self) -> &str {
-        "weights"
+        match self {
+            Self::Weights => "weights",
+            Self::VisionProjector => "vision_projector",
+        }
     }
 
     fn is_model_specific(&self) -> bool {
