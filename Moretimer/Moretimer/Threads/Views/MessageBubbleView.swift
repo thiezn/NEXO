@@ -24,22 +24,30 @@ struct MessageBubbleView: View {
         HStack {
             if isUser { Spacer(minLength: 60) }
 
-            Group {
-                if message.isThinking && message.content.isEmpty {
-                    thinkingIndicator
-                } else {
-                    Text(message.content)
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+                if let imageData = message.imageData {
+                    imageFromData(imageData, contentMode: .fill)
+                        .frame(maxWidth: 220, maxHeight: 160)
+                        .clipShape(.rect(cornerRadius: 12))
                 }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .glassEffect(
-                .regular.tint(isUser ? .blue : .gray),
-                in: .rect(cornerRadius: 16)
-            )
-            .overlay(alignment: .bottomTrailing) {
-                if message.isThinking && !message.content.isEmpty {
-                    streamingDot
+
+                Group {
+                    if message.isThinking && message.content.isEmpty {
+                        thinkingIndicator
+                    } else {
+                        Text(message.content)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .glassEffect(
+                    .regular.tint(isUser ? .blue : .gray),
+                    in: .rect(cornerRadius: 16)
+                )
+                .overlay(alignment: .bottomTrailing) {
+                    if message.isThinking && !message.content.isEmpty {
+                        streamingDot
+                    }
                 }
             }
 

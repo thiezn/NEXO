@@ -572,7 +572,7 @@ pub struct ImageAnalyzeParams {
 }
 
 fn default_image_analyze_max_tokens() -> usize {
-    1024
+    4096
 }
 
 fn default_image_analyze_temperature() -> f64 {

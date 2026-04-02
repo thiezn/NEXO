@@ -13,6 +13,7 @@ const MODEL_LOAD_TIMEOUT_SECS: u64 = 300;
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
 
 /// Run one complete agent loop for a given run.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     run_id: &str,
     session_id: &str,
@@ -31,8 +32,16 @@ pub async fn run(
             .await
     {
         tracing::error!("Failed to persist user message: {e}");
-        emit_event(event_tx, run_id, session_id, AgentStatus::Failed, None, None);
-        let _ = super::session::finish_run(db, run_id, AgentStatus::Failed, Some(&e.to_string())).await;
+        emit_event(
+            event_tx,
+            run_id,
+            session_id,
+            AgentStatus::Failed,
+            None,
+            None,
+        );
+        let _ =
+            super::session::finish_run(db, run_id, AgentStatus::Failed, Some(&e.to_string())).await;
         return;
     }
 
@@ -153,8 +162,8 @@ pub async fn run(
                     None,
                     None,
                 );
-                let _ =
-                    super::session::finish_run(db, run_id, AgentStatus::Completed, Some(&text)).await;
+                let _ = super::session::finish_run(db, run_id, AgentStatus::Completed, Some(&text))
+                    .await;
                 super::locks::release_all_for_run(db, run_id).await.ok();
                 return;
             }
@@ -304,7 +313,9 @@ async fn ensure_model_loaded(
         .and_then(|m| m.clone());
 
     if let Some(old_model) = currently_loaded {
-        tracing::info!("Unloading model '{old_model}' from node {peer_id} before loading '{model_id}'");
+        tracing::info!(
+            "Unloading model '{old_model}' from node {peer_id} before loading '{model_id}'"
+        );
         let unload_params = ModelUnloadParams {
             model_id: old_model.clone(),
         };
@@ -315,7 +326,11 @@ async fn ensure_model_loaded(
             params: serde_json::to_value(&unload_params).unwrap_or_default(),
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
-        state.write().await.pending_requests.insert(unload_fwd_id.clone(), tx);
+        state
+            .write()
+            .await
+            .pending_requests
+            .insert(unload_fwd_id.clone(), tx);
         if node_sender.send(frame).await.is_err() {
             state.write().await.pending_requests.remove(&unload_fwd_id);
         } else {
@@ -337,7 +352,11 @@ async fn ensure_model_loaded(
     };
 
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    state.write().await.pending_requests.insert(load_fwd_id.clone(), response_tx);
+    state
+        .write()
+        .await
+        .pending_requests
+        .insert(load_fwd_id.clone(), response_tx);
 
     if node_sender.send(load_frame).await.is_err() {
         state.write().await.pending_requests.remove(&load_fwd_id);
@@ -353,7 +372,9 @@ async fn ensure_model_loaded(
     )
     .await
     {
-        Ok(Ok(Frame::Response { ok: true, payload, .. })) => {
+        Ok(Ok(Frame::Response {
+            ok: true, payload, ..
+        })) => {
             let loaded = payload
                 .as_ref()
                 .and_then(|p| serde_json::from_value::<ModelLoadResponse>(p.clone()).ok())
@@ -361,7 +382,10 @@ async fn ensure_model_loaded(
                 .unwrap_or(true);
 
             if loaded {
-                state.write().await.set_loaded_model(&peer_id, Some(model_id.to_string()));
+                state
+                    .write()
+                    .await
+                    .set_loaded_model(&peer_id, Some(model_id.to_string()));
                 tracing::info!("Model '{model_id}' loaded on node {peer_id}");
                 Ok(node_sender)
             } else {
@@ -370,13 +394,19 @@ async fn ensure_model_loaded(
                 )))
             }
         }
-        Ok(Ok(Frame::Response { ok: false, error, .. })) => Err(InferenceOutcome::Error(
+        Ok(Ok(Frame::Response {
+            ok: false, error, ..
+        })) => Err(InferenceOutcome::Error(
             error
                 .map(|e| format!("ModelLoad error: {}", e.message))
                 .unwrap_or_else(|| format!("ModelLoad failed on node {peer_id}")),
         )),
-        Ok(Ok(_)) => Err(InferenceOutcome::Error("Unexpected frame type from node during model load".into())),
-        Ok(Err(_)) => Err(InferenceOutcome::Error("Node disconnected during model load".into())),
+        Ok(Ok(_)) => Err(InferenceOutcome::Error(
+            "Unexpected frame type from node during model load".into(),
+        )),
+        Ok(Err(_)) => Err(InferenceOutcome::Error(
+            "Node disconnected during model load".into(),
+        )),
         Err(_) => {
             state.write().await.pending_requests.remove(&load_fwd_id);
             Err(InferenceOutcome::Error(format!(
@@ -389,6 +419,7 @@ async fn ensure_model_loaded(
 // ── Inference execution ─────────────────────────────────────
 
 /// Forward an inference request to an LLM-capable node and parse the response.
+#[allow(clippy::too_many_arguments)]
 async fn run_inference(
     run_id: &str,
     messages: &[super::context::ContextMessage],
@@ -405,11 +436,12 @@ async fn run_inference(
     if !soul_content.is_empty() {
         system_parts.push(soul_content.to_string());
     }
-    if let Some(prefill) = prefill_content {
-        if !prefill.is_empty() {
-            system_parts.push(prefill.to_string());
-        }
+    if let Some(prefill) = prefill_content
+        && !prefill.is_empty()
+    {
+        system_parts.push(prefill.to_string());
     }
+
     if !tool_descriptions.is_empty() {
         system_parts.push(tool_descriptions.to_string());
     }
@@ -720,11 +752,7 @@ fn emit_queued_event(event_tx: &broadcast::Sender<Frame>, run_id: &str, session_
 
 /// Derive a capability name from a tool name (e.g. "echo.run" -> "echo").
 fn tool_capability(tool_name: &str) -> String {
-    tool_name
-        .split('.')
-        .next()
-        .unwrap_or(tool_name)
-        .to_string()
+    tool_name.split('.').next().unwrap_or(tool_name).to_string()
 }
 
 fn emit_event(

@@ -274,6 +274,12 @@ final class NexoService {
         return try response.payload(as: AgentResponse.self)
     }
 
+    func imageAnalyze(imageData: String, prompt: String, idempotencyKey: String) async throws -> ImageAnalyzeResponse {
+        let params = ImageAnalyzeParams(imageData: imageData, prompt: prompt, idempotencyKey: idempotencyKey)
+        let response = try await guardedRequest(.imageAnalyze, params: params)
+        return try response.payload(as: ImageAnalyzeResponse.self)
+    }
+
     func toolsCatalog(filter: String? = nil) async throws -> ToolsCatalogResponse {
         let params = ToolsCatalogParams(filter: filter)
         let response = try await guardedRequest(.toolsCatalog, params: params)

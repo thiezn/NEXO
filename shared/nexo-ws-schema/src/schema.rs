@@ -6,6 +6,7 @@ use crate::methods::Method;
 
 /// Available schema sections for generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum SchemaSection {
     All,
     Frames,

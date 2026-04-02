@@ -1,2 +1,0 @@
--- Prefill data has been migrated to git-backed storage (~/.nexo/nexo-storage).
--- Tables were removed from the initial migration; this file is kept for ordering.

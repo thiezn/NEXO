@@ -1,5 +1,5 @@
-use crate::config::ClientConfig;
-use nexo_ws_client::{NexoConnection, perform_handshake};
+use super::helpers::connect_and_handshake;
+use nexo_ws_client::NexoConnection;
 use nexo_ws_schema::{
     AgentParams, CronCreateParams, CronDeleteParams, Frame, Method, PrefillCollectionCreateParams,
     PrefillCollectionDeleteParams, PrefillMarkdownCreateParams, PrefillMarkdownDeleteParams,
@@ -9,33 +9,9 @@ use nexo_ws_schema::{
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 pub async fn run_connect(url_override: Option<String>) -> utl_helpers::Result {
-    let config = ClientConfig::load()?;
-    let url = url_override.unwrap_or_else(|| config.gateway_url.clone());
+    let (mut conn, _hello) = connect_and_handshake(url_override.as_deref()).await?;
 
-    tracing::info!("Connecting to {url}...");
-
-    let mut conn = NexoConnection::connect(&url, &config.auth_token)
-        .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Connection failed: {e}")))?;
-
-    let params = nexo_ws_client::default_user_connect_params(
-        &config.client_id,
-        &config.client_version,
-        config.platform,
-        &config.device_id,
-    );
-
-    let hello = perform_handshake(&mut conn, params)
-        .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Handshake failed: {e}")))?;
-
-    tracing::info!(
-        "Connected! Protocol v{}, tick interval {}ms",
-        hello.protocol,
-        hello.policy.tick_interval_ms
-    );
-
-    println!("Connected to {url}");
+    println!("Connected!");
     print_help();
 
     let stdin = BufReader::new(tokio::io::stdin());

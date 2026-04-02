@@ -8,7 +8,7 @@ name = "nexo"
 path = "src/main.rs"
 
 [dependencies]
-nexo-ws-schema = { path = "../shared/nexo-ws-schema" }
+nexo-ws-schema = { path = "../shared/nexo-ws-schema", features = ["clap"] }
 nexo-tool-spec = { path = "../shared/nexo-tool-spec" }
 utl-helpers = { path = "../shared/utl-helpers", features = ["config", "interactive"] }
 sqlx = { version = "0", features = [

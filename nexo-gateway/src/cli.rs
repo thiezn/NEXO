@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
+use nexo_ws_schema::SchemaSection;
 use utl_helpers::LogLevel;
 
 #[derive(Parser)]
@@ -33,21 +34,11 @@ pub enum Command {
     /// Generate JSON schemas for the WebSocket protocol
     Schema {
         /// Section to generate
-        #[arg(value_enum, default_value_t = SchemaTarget::All)]
-        section: SchemaTarget,
+        #[arg(value_enum, default_value_t = SchemaSection::All)]
+        section: SchemaSection,
 
         /// Output file (stdout if omitted)
         #[arg(short, long)]
         output: Option<String>,
     },
-}
-
-#[derive(ValueEnum, Clone, Debug)]
-pub enum SchemaTarget {
-    All,
-    Frames,
-    Connect,
-    Methods,
-    Events,
-    Errors,
 }

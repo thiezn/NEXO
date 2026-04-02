@@ -92,6 +92,7 @@ final class MessageEntity {
     var role: MessageRole
     var createdAt: Date
     var thread: ThreadEntity?
+    @Attribute(.externalStorage) var imageData: Data?
     /// Transient flag for streaming UI state (not persisted).
     @Transient var isThinking: Bool = false
 
@@ -104,9 +105,10 @@ final class MessageEntity {
 
     var isQuestionMessage: Bool { !questions.isEmpty }
 
-    init(content: String, role: MessageRole) {
+    init(content: String, role: MessageRole, imageData: Data? = nil) {
         self.content = content
         self.role = role
+        self.imageData = imageData
         self.createdAt = Date()
     }
 }

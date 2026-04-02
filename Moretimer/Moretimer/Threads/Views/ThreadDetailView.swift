@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
 import OSLog
 
 struct ThreadDetailView: View {
@@ -11,6 +12,10 @@ struct ThreadDetailView: View {
     @State private var showSettings = false
     @State private var showDeckPicker = false
     @State private var activeRun: ActiveRun?
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var selectedImageData: Data?
+    @State private var showImageAnalyzeSheet = false
+    @State private var isAnalyzing = false
     @FocusState private var isInputFocused: Bool
 
     private var isConnected: Bool { nexoService.connectionState.isConnected }
@@ -37,10 +42,19 @@ struct ThreadDetailView: View {
 
             Divider()
 
-            MessageInputBar(text: $messageText, isFocused: $isInputFocused) { content in
-                sendMessage(content)
+            HStack(spacing: 0) {
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Image(systemName: AppIcon.imageUpload)
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading)
+                }
+
+                MessageInputBar(text: $messageText, isFocused: $isInputFocused) { content in
+                    sendMessage(content)
+                }
             }
-            .disabled(activeRun != nil || !isConnected)
+            .disabled(activeRun != nil || isAnalyzing || !isConnected)
         }
         .navigationTitle(thread.title)
         .toolbarTitleDisplayMode(.inline)
@@ -60,6 +74,22 @@ struct ThreadDetailView: View {
         }
         .sheet(isPresented: $showDeckPicker) {
             LearningDeckPickerView(thread: thread, learningService: learningService)
+        }
+        .onChange(of: selectedPhoto) { _, newItem in
+            Task {
+                if let data = try? await newItem?.loadTransferable(type: Data.self) {
+                    selectedImageData = data
+                    showImageAnalyzeSheet = true
+                }
+                selectedPhoto = nil
+            }
+        }
+        .sheet(isPresented: $showImageAnalyzeSheet) {
+            if let imageData = selectedImageData {
+                ImageAnalyzeSheet(imageData: imageData) { data, prompt in
+                    sendImageAnalyze(imageData: data, prompt: prompt)
+                }
+            }
         }
         .task {
             if !thread.isRead {
@@ -88,13 +118,46 @@ struct ThreadDetailView: View {
     // MARK: - Message Sending
 
     @discardableResult
-    private func insertMessage(content: String, role: MessageRole) -> MessageEntity {
-        let message = MessageEntity(content: content, role: role)
+    private func insertMessage(content: String, role: MessageRole, imageData: Data? = nil) -> MessageEntity {
+        let message = MessageEntity(content: content, role: role, imageData: imageData)
         message.thread = thread
         thread.messages.append(message)
         thread.lastMessageAt = Date()
         modelContext.insert(message)
         return message
+    }
+
+    private func sendImageAnalyze(imageData: Data, prompt: String) {
+        insertMessage(content: prompt, role: .user, imageData: imageData)
+        let placeholder = insertMessage(content: "", role: .assistant)
+        placeholder.isThinking = true
+        try? modelContext.save()
+
+        let base64String = imageData.base64EncodedString()
+        Task {
+            await performImageAnalyze(base64Image: base64String, prompt: prompt, placeholder: placeholder)
+        }
+    }
+
+    private func performImageAnalyze(base64Image: String, prompt: String, placeholder: MessageEntity) async {
+        isAnalyzing = true
+        defer {
+            isAnalyzing = false
+            placeholder.isThinking = false
+            try? modelContext.save()
+        }
+
+        do {
+            let response = try await nexoService.imageAnalyze(
+                imageData: base64Image,
+                prompt: prompt,
+                idempotencyKey: UUID().uuidString
+            )
+            placeholder.content = response.text
+        } catch {
+            Logger.nexo.error("Image analysis failed: \(error.localizedDescription)")
+            placeholder.content = "Image analysis failed: \(error.localizedDescription)"
+        }
     }
 
     private func sendMessage(_ content: String) {

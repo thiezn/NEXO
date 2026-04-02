@@ -40,6 +40,9 @@ enum NexoMethod: String, Codable, Sendable {
     case modelUnload = "model.unload"
     case modelStatus = "model.status"
 
+    // Image
+    case imageAnalyze = "image.analyze"
+
     // Prefill
     case prefillFetch = "prefill.fetch"
     case prefillMarkdownCreate = "prefill.markdown.create"
@@ -229,6 +232,20 @@ struct AgentParams: Codable, Sendable {
 
 struct SystemPresenceParams: Codable, Sendable {
     let status: String
+}
+
+struct ImageAnalyzeParams: Codable, Sendable {
+    let imageData: String
+    let prompt: String
+    var maxTokens: Int = 1024
+    var temperature: Double = 0.3
+    let idempotencyKey: String
+}
+
+struct ImageAnalyzeResponse: Codable, Sendable {
+    let text: String
+    let tokensGenerated: Int
+    let inferenceTimeMs: UInt64
 }
 
 struct ToolsCatalogParams: Codable, Sendable {

@@ -1,8 +1,12 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
+use nexo_ws_schema::SchemaSection;
 use utl_helpers::LogLevel;
 
 #[derive(Parser)]
-#[command(name = "nexo-client", about = "NEXO Client - Connect to a NEXO Gateway")]
+#[command(
+    name = "nexo-client",
+    about = "NEXO Client - Connect to a NEXO Gateway"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -42,24 +46,25 @@ pub enum Command {
         model: Option<String>,
     },
 
+    /// Analyze an image using the NEXO Gateway
+    ImageAnalyze {
+        /// Path to the image file
+        #[arg(long)]
+        image_path: String,
+
+        /// Prompt for the image analysis
+        #[arg(long)]
+        prompt: String,
+    },
+
     /// Generate JSON schemas for the WebSocket protocol
     Schema {
         /// Section to generate
-        #[arg(value_enum, default_value_t = SchemaTarget::All)]
-        section: SchemaTarget,
+        #[arg(value_enum, default_value_t = SchemaSection::All)]
+        section: SchemaSection,
 
         /// Output file (stdout if omitted)
         #[arg(short, long)]
         output: Option<String>,
     },
-}
-
-#[derive(ValueEnum, Clone, Debug)]
-pub enum SchemaTarget {
-    All,
-    Frames,
-    Connect,
-    Methods,
-    Events,
-    Errors,
 }

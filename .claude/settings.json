@@ -30,7 +30,8 @@
       "Bash(python3 .claude/skills/nexo-ai-model-builder/scripts/hf_downloader.py:*)",
       "Read(//tmp/**)",
       "Bash(2)",
-      "Bash(tailscale status:*)"
+      "Bash(tailscale status:*)",
+      "Bash(git -C /Users/Mathijs.Mortimer/Development/nexo mv nexo-gateway/src/server/handler.rs nexo-gateway/src/server/handler/mod.rs)"
     ],
     "deny": [
       "WebFetch"

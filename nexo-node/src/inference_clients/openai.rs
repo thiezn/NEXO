@@ -42,6 +42,9 @@ struct OaiChoice {
 #[derive(Deserialize)]
 struct OaiChoiceMessage {
     content: Option<String>,
+    /// Reasoning/thinking content returned by models with native thinking support (e.g. Qwen3.5 peg-native).
+    #[serde(default)]
+    reasoning_content: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<OaiToolCall>>,
 }
@@ -78,9 +81,22 @@ struct TtsRequest {
 }
 
 struct CompletionResult {
-    choice: OaiChoiceMessage,
+    content: Option<String>,
+    reasoning_content: Option<String>,
+    tool_calls: Option<Vec<OaiToolCall>>,
     tokens_generated: usize,
     inference_time_ms: u64,
+}
+
+impl CompletionResult {
+    /// Returns `content`, falling back to `reasoning_content` for models that
+    /// put all output into the reasoning field (e.g. Qwen3.5 peg-native).
+    fn text_content(&self) -> String {
+        self.content
+            .clone()
+            .or_else(|| self.reasoning_content.clone())
+            .unwrap_or_default()
+    }
 }
 
 async fn post_chat_completion(
@@ -112,7 +128,9 @@ async fn post_chat_completion(
         .with_context(|| format!("{label} returned no choices"))?;
 
     Ok(CompletionResult {
-        choice: choice.message,
+        content: choice.message.content,
+        reasoning_content: choice.message.reasoning_content,
+        tool_calls: choice.message.tool_calls,
         tokens_generated: resp.usage.map_or(0, |u| u.completion_tokens),
         inference_time_ms: elapsed.as_millis() as u64,
     })
@@ -168,7 +186,7 @@ pub(super) async fn chat(
     let result = post_chat_completion(http, base_url, &body, "llama-server").await?;
 
     Ok(ChatResponse {
-        text: result.choice.content.unwrap_or_default(),
+        text: result.text_content(),
         tokens_generated: result.tokens_generated,
         inference_time_ms: result.inference_time_ms,
     })
@@ -190,7 +208,7 @@ pub(super) async fn tool_call(
 
     let result = post_chat_completion(http, base_url, &body, "llama-server").await?;
 
-    let tool_calls = match result.choice.tool_calls {
+    let tool_calls = match result.tool_calls {
         Some(calls) => calls
             .into_iter()
             .map(|tc| {
@@ -207,7 +225,7 @@ pub(super) async fn tool_call(
 
     Ok(ToolCallResponse {
         tool_calls,
-        reasoning: result.choice.content,
+        reasoning: result.reasoning_content.or(result.content),
         tokens_generated: result.tokens_generated,
         inference_time_ms: result.inference_time_ms,
     })
@@ -244,7 +262,7 @@ pub(super) async fn analyze_image(
     let result = post_chat_completion(http, base_url, &body, "llama-server").await?;
 
     Ok(ImageAnalysisResponse {
-        text: result.choice.content.unwrap_or_default(),
+        text: result.text_content(),
         tokens_generated: result.tokens_generated,
         inference_time_ms: result.inference_time_ms,
     })
