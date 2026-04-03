@@ -49,6 +49,12 @@ pub(super) async fn handle_model_status(
             Ok(p) => p,
             Err(f) => return f,
         };
+    tracing::info!(
+        "Node {peer_id} model.status: loaded={:?}, available={:?}",
+        status_params.loaded_models,
+        status_params.available_models,
+    );
+
     let model_became_available = !status_params.loaded_models.is_empty();
     {
         let mut sw = state.write().await;

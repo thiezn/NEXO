@@ -122,7 +122,7 @@ fn hardlink_or_copy(src: &std::path::Path, dst: &std::path::Path) -> Result<(), 
 
 // ── SHA-256 verification ────────────────────────────────────────────
 
-fn verify_sha256(path: &std::path::Path, expected: &str) -> anyhow::Result<bool> {
+pub fn verify_sha256(path: &std::path::Path, expected: &str) -> anyhow::Result<bool> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     std::io::copy(&mut file, &mut hasher)?;

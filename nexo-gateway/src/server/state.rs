@@ -2,7 +2,7 @@ use crate::agent::gateway_tools::GatewayToolExecutor;
 use crate::memory::git::GitStorage;
 use nexo_spec::model::{LoadedModelInfo, ModelCategory};
 use nexo_ws_schema::{Frame, Role, Scope, ToolEntry, ToolSpecEntry};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock, broadcast, mpsc, oneshot};
@@ -121,7 +121,10 @@ impl GatewayState {
     }
 
     /// Find the first node that has `model_id` available on disk (not necessarily loaded).
-    pub fn find_capable_peer_for_model(&self, model_id: &str) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+    pub fn find_capable_peer_for_model(
+        &self,
+        model_id: &str,
+    ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
         for (peer_id, peer) in &self.peers {
             if peer.role != Role::Node {
                 continue;
@@ -130,10 +133,9 @@ impl GatewayState {
                 .available_models
                 .get(peer_id)
                 .is_some_and(|models| models.iter().any(|m| m == model_id));
-            if has_model {
-                if let Some(sender) = self.peer_senders.get(peer_id) {
-                    return Some((peer_id.clone(), sender.clone()));
-                }
+
+            if has_model && let Some(sender) = self.peer_senders.get(peer_id) {
+                return Some((peer_id.clone(), sender.clone()));
             }
         }
         None
@@ -148,12 +150,11 @@ impl GatewayState {
             if peer.role != Role::Node {
                 continue;
             }
-            if let Some(models) = self.loaded_models.get(peer_id) {
-                if models.iter().any(|m| m.categories.iter().any(&pred)) {
-                    if let Some(sender) = self.peer_senders.get(peer_id) {
-                        return Some((peer_id.clone(), sender.clone()));
-                    }
-                }
+            if let Some(models) = self.loaded_models.get(peer_id)
+                && models.iter().any(|m| m.categories.iter().any(&pred))
+                && let Some(sender) = self.peer_senders.get(peer_id)
+            {
+                return Some((peer_id.clone(), sender.clone()));
             }
         }
         None
@@ -174,34 +175,12 @@ impl GatewayState {
         self.find_any_llm_peer().is_some()
     }
 
-    /// Returns the set of peer_ids of nodes with Chat or Tool models loaded.
-    pub fn llm_peer_ids(&self) -> HashSet<PeerId> {
-        self.peers
-            .values()
-            .filter(|p| {
-                p.role == Role::Node
-                    && self
-                        .loaded_models
-                        .get(&p.id)
-                        .is_some_and(|models| {
-                            models.iter().any(|m| {
-                                m.categories.iter().any(is_llm_category)
-                            })
-                        })
-            })
-            .map(|p| p.id.clone())
-            .collect()
-    }
-
     /// Register tools provided by a node. Returns the number of tools registered.
     pub fn register_tools(&mut self, peer_id: &str, tools: Vec<ToolSpecEntry>) -> u32 {
         let count = tools.len() as u32;
         let now = chrono::Utc::now();
         for spec in tools {
-            tracing::debug!(
-                "Registered tool '{}' from peer {peer_id}",
-                spec.name,
-            );
+            tracing::debug!("Registered tool '{}' from peer {peer_id}", spec.name,);
             self.tool_registry.insert(
                 spec.name.clone(),
                 RegisteredTool {
@@ -227,9 +206,7 @@ impl GatewayState {
         });
         let removed = before - self.tool_registry.len();
         if removed > 0 {
-            tracing::info!(
-                "Deregistered {removed} tool(s) for peer {peer_id}"
-            );
+            tracing::info!("Deregistered {removed} tool(s) for peer {peer_id}");
         }
     }
 
@@ -350,8 +327,14 @@ mod tests {
     #[test]
     fn all_capabilities_aggregation() {
         let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
-        state.add_peer(make_node_peer("n1", vec!["epub".into(), "game".into()]), dummy_sender());
-        state.add_peer(make_node_peer("n2", vec!["game".into(), "tts".into()]), dummy_sender());
+        state.add_peer(
+            make_node_peer("n1", vec!["epub".into(), "game".into()]),
+            dummy_sender(),
+        );
+        state.add_peer(
+            make_node_peer("n2", vec!["game".into(), "tts".into()]),
+            dummy_sender(),
+        );
         let caps = state.all_capabilities();
         assert_eq!(caps, vec!["epub", "game", "tts"]);
     }

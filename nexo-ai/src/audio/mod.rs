@@ -1,11 +1,13 @@
 pub mod decode;
 pub mod encode;
+pub mod mel;
 pub mod playback;
 pub mod record;
 pub mod resample;
 
 pub use decode::{load_bytes, load_file};
 pub use encode::{encode_wav, save_wav};
+pub use mel::{MelConfig, mel_spectrogram};
 pub use playback::{PlaybackHandle, play, play_async};
 pub use record::{RecordConfig, record_microphone};
 pub use resample::resample;

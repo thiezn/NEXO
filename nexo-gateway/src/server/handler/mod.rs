@@ -213,6 +213,11 @@ async fn wait_for_connect<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpi
         connected_at: chrono::Utc::now(),
     };
 
+    tracing::info!(
+        "Peer connected: id={}, client={}, role={:?}, capabilities={:?}, commands={:?}, available_models={:?}",
+        peer.id, peer.client_id, peer.role, peer.capabilities, peer.commands, models,
+    );
+
     // Create per-peer directed channel
     let (directed_tx, directed_rx) = mpsc::channel(32);
     {

@@ -5,6 +5,7 @@
 //!
 //! Run all:  `cargo test -p nexo-ai --test model_inference -- --ignored`
 //! Run one:  `cargo test -p nexo-ai --test model_inference -- --ignored test_whisper_large_v3_turbo`
+#![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 use std::sync::Once;
@@ -172,11 +173,7 @@ macro_rules! imagine_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = <$model_type>::new(
-                $model_name.into(),
-                memory_bytes,
-                model_dir,
-            );
+            let mut model = <$model_type>::new($model_name.into(), memory_bytes, model_dir);
 
             model.load().expect("failed to load model");
             assert!(model.is_loaded());
@@ -191,9 +188,7 @@ macro_rules! imagine_test {
                 seed: 42,
                 batch_size: 1,
             };
-            let response = imagine
-                .imagine(&request)
-                .expect("image generation failed");
+            let response = imagine.imagine(&request).expect("image generation failed");
 
             eprintln!("generated {} image(s)", response.images.len());
             assert!(
@@ -207,14 +202,46 @@ macro_rules! imagine_test {
     };
 }
 
-imagine_test!(test_flux_2_klein_4b, "flux-2-klein-4b", nexo_ai::models::flux2::FluxModel);
-imagine_test!(test_flux_2_klein_9b, "flux-2-klein-9b", nexo_ai::models::flux2::FluxModel);
-imagine_test!(test_flux_2_dev, "flux-2-dev", nexo_ai::models::flux2::FluxModel);
-imagine_test!(test_z_image_turbo, "z-image-turbo", nexo_ai::models::z_image::ZImageModel);
-imagine_test!(test_qwen_image_q4, "qwen-image-q4", nexo_ai::models::qwen_image::QwenImageModel);
-imagine_test!(test_qwen_image_q6, "qwen-image-q6", nexo_ai::models::qwen_image::QwenImageModel);
-imagine_test!(test_qwen_image_q8, "qwen-image-q8", nexo_ai::models::qwen_image::QwenImageModel);
-imagine_test!(test_qwen_image_bf16, "qwen-image-bf16", nexo_ai::models::qwen_image::QwenImageModel);
+imagine_test!(
+    test_flux_2_klein_4b,
+    "flux-2-klein-4b",
+    nexo_ai::models::flux2::FluxModel
+);
+imagine_test!(
+    test_flux_2_klein_9b,
+    "flux-2-klein-9b",
+    nexo_ai::models::flux2::FluxModel
+);
+imagine_test!(
+    test_flux_2_dev,
+    "flux-2-dev",
+    nexo_ai::models::flux2::FluxModel
+);
+imagine_test!(
+    test_z_image_turbo,
+    "z-image-turbo",
+    nexo_ai::models::z_image::ZImageModel
+);
+imagine_test!(
+    test_qwen_image_q4,
+    "qwen-image-q4",
+    nexo_ai::models::qwen_image::QwenImageModel
+);
+imagine_test!(
+    test_qwen_image_q6,
+    "qwen-image-q6",
+    nexo_ai::models::qwen_image::QwenImageModel
+);
+imagine_test!(
+    test_qwen_image_q8,
+    "qwen-image-q8",
+    nexo_ai::models::qwen_image::QwenImageModel
+);
+imagine_test!(
+    test_qwen_image_bf16,
+    "qwen-image-bf16",
+    nexo_ai::models::qwen_image::QwenImageModel
+);
 
 // ── Imagine (File Output) ───────────────────────────────────────────────────
 
@@ -227,11 +254,7 @@ macro_rules! imagine_file_test {
         #[timeout(900_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = <$model_type>::new(
-                $model_name.into(),
-                memory_bytes,
-                model_dir,
-            );
+            let mut model = <$model_type>::new($model_name.into(), memory_bytes, model_dir);
 
             model.load().expect("failed to load model");
             assert!(model.is_loaded());
@@ -248,19 +271,22 @@ macro_rules! imagine_file_test {
                     seed: 42,
                     batch_size: 1,
                 };
-                let response = imagine
-                    .imagine(&request)
-                    .expect("image generation failed");
+                let response = imagine.imagine(&request).expect("image generation failed");
 
                 assert!(!response.images.is_empty(), "no images generated");
                 let img = &response.images[0];
-                assert!(img.data.len() > 1000, "image data suspiciously small ({} bytes)", img.data.len());
+                assert!(
+                    img.data.len() > 1000,
+                    "image data suspiciously small ({} bytes)",
+                    img.data.len()
+                );
                 assert_eq!(img.width, 256);
                 assert_eq!(img.height, 256);
 
                 // Verify valid PNG by decoding
-                let decoded = image::load_from_memory_with_format(&img.data, image::ImageFormat::Png)
-                    .expect("generated data is not valid PNG");
+                let decoded =
+                    image::load_from_memory_with_format(&img.data, image::ImageFormat::Png)
+                        .expect("generated data is not valid PNG");
                 assert_eq!(decoded.width(), 256);
                 assert_eq!(decoded.height(), 256);
 
@@ -285,9 +311,12 @@ macro_rules! imagine_file_test {
                 let rgb = decoded.to_rgb8();
                 let first_pixel = rgb.get_pixel(0, 0);
                 let center_pixel = rgb.get_pixel(128, 128);
-                let has_variation = first_pixel != center_pixel
-                    || rgb.pixels().any(|p| p != first_pixel);
-                assert!(has_variation, "image appears to be a single solid color (likely garbled)");
+                let has_variation =
+                    first_pixel != center_pixel || rgb.pixels().any(|p| p != first_pixel);
+                assert!(
+                    has_variation,
+                    "image appears to be a single solid color (likely garbled)"
+                );
             }));
 
             model.unload();
@@ -331,11 +360,7 @@ macro_rules! chat_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = <$model_type>::new(
-                $model_name.into(),
-                memory_bytes,
-                model_dir,
-            );
+            let mut model = <$model_type>::new($model_name.into(), memory_bytes, model_dir);
 
             model.load().expect("failed to load model");
             assert!(model.is_loaded());
@@ -364,10 +389,31 @@ macro_rules! chat_test {
     };
 }
 
-chat_test!(test_gemma_4_e2b_it_chat, "gemma-4-e2b-it", nexo_ai::models::gemma4::Gemma4Model);
-chat_test!(test_gemma_4_e4b_it_chat, "gemma-4-e4b-it", nexo_ai::models::gemma4::Gemma4Model);
-chat_test!(test_gemma_4_26b_a4b_it_chat, "gemma-4-26b-a4b-it", nexo_ai::models::gemma4::Gemma4Model);
-chat_test!(test_gemma_4_31b_it_chat, "gemma-4-31b-it", nexo_ai::models::gemma4::Gemma4Model);
+chat_test!(
+    test_gemma_4_e4b_chat,
+    "gemma-4-e4b",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+chat_test!(
+    test_gemma_4_e2b_it_chat,
+    "gemma-4-e2b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+chat_test!(
+    test_gemma_4_e4b_it_chat,
+    "gemma-4-e4b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+chat_test!(
+    test_gemma_4_26b_a4b_it_chat,
+    "gemma-4-26b-a4b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+chat_test!(
+    test_gemma_4_31b_it_chat,
+    "gemma-4-31b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
 
 // ── Gemma 4 (Performance) ──────────────────────────────────────────────────
 
@@ -379,11 +425,7 @@ macro_rules! perf_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = <$model_type>::new(
-                $model_name.into(),
-                memory_bytes,
-                model_dir,
-            );
+            let mut model = <$model_type>::new($model_name.into(), memory_bytes, model_dir);
 
             model.load().expect("failed to load model");
             assert!(model.is_loaded());
@@ -447,10 +489,30 @@ macro_rules! perf_test {
     };
 }
 
-perf_test!(test_gemma_4_e2b_it_perf, "gemma-4-e2b-it", 15.0, nexo_ai::models::gemma4::Gemma4Model);
-perf_test!(test_gemma_4_e4b_it_perf, "gemma-4-e4b-it", 10.0, nexo_ai::models::gemma4::Gemma4Model);
-perf_test!(test_gemma_4_26b_a4b_it_perf, "gemma-4-26b-a4b-it", 5.0, nexo_ai::models::gemma4::Gemma4Model);
-perf_test!(test_gemma_4_31b_it_perf, "gemma-4-31b-it", 2.0, nexo_ai::models::gemma4::Gemma4Model);
+perf_test!(
+    test_gemma_4_e2b_it_perf,
+    "gemma-4-e2b-it",
+    15.0,
+    nexo_ai::models::gemma4::Gemma4Model
+);
+perf_test!(
+    test_gemma_4_e4b_it_perf,
+    "gemma-4-e4b-it",
+    10.0,
+    nexo_ai::models::gemma4::Gemma4Model
+);
+perf_test!(
+    test_gemma_4_26b_a4b_it_perf,
+    "gemma-4-26b-a4b-it",
+    5.0,
+    nexo_ai::models::gemma4::Gemma4Model
+);
+perf_test!(
+    test_gemma_4_31b_it_perf,
+    "gemma-4-31b-it",
+    2.0,
+    nexo_ai::models::gemma4::Gemma4Model
+);
 
 // ── Gemma 4 (Tool) ─────────────────────────────────────────────────────────
 
@@ -509,10 +571,26 @@ macro_rules! tool_test {
     };
 }
 
-tool_test!(test_gemma_4_e2b_it_tool, "gemma-4-e2b-it", nexo_ai::models::gemma4::Gemma4Model);
-tool_test!(test_gemma_4_e4b_it_tool, "gemma-4-e4b-it", nexo_ai::models::gemma4::Gemma4Model);
-tool_test!(test_gemma_4_26b_a4b_it_tool, "gemma-4-26b-a4b-it", nexo_ai::models::gemma4::Gemma4Model);
-tool_test!(test_gemma_4_31b_it_tool, "gemma-4-31b-it", nexo_ai::models::gemma4::Gemma4Model);
+tool_test!(
+    test_gemma_4_e2b_it_tool,
+    "gemma-4-e2b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+tool_test!(
+    test_gemma_4_e4b_it_tool,
+    "gemma-4-e4b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+tool_test!(
+    test_gemma_4_26b_a4b_it_tool,
+    "gemma-4-26b-a4b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+tool_test!(
+    test_gemma_4_31b_it_tool,
+    "gemma-4-31b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
 
 // ── Gemma 4 (Image) ──────────────────────────────────────────────────────
 
@@ -539,11 +617,7 @@ macro_rules! image_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = <$model_type>::new(
-                $model_name.into(),
-                memory_bytes,
-                model_dir,
-            );
+            let mut model = <$model_type>::new($model_name.into(), memory_bytes, model_dir);
 
             model.load().expect("failed to load model");
             assert!(model.is_loaded());
@@ -560,7 +634,10 @@ macro_rules! image_test {
                 .expect("image analysis failed");
 
             eprintln!("image response: {:?}", response.text);
-            assert!(!response.text.is_empty(), "image analysis returned empty text");
+            assert!(
+                !response.text.is_empty(),
+                "image analysis returned empty text"
+            );
             assert!(response.tokens_generated > 0);
 
             model.unload();
@@ -569,7 +646,23 @@ macro_rules! image_test {
     };
 }
 
-image_test!(test_gemma_4_e2b_it_image, "gemma-4-e2b-it", nexo_ai::models::gemma4::Gemma4Model);
-image_test!(test_gemma_4_e4b_it_image, "gemma-4-e4b-it", nexo_ai::models::gemma4::Gemma4Model);
-image_test!(test_gemma_4_26b_a4b_it_image, "gemma-4-26b-a4b-it", nexo_ai::models::gemma4::Gemma4Model);
-image_test!(test_gemma_4_31b_it_image, "gemma-4-31b-it", nexo_ai::models::gemma4::Gemma4Model);
+image_test!(
+    test_gemma_4_e2b_it_image,
+    "gemma-4-e2b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+image_test!(
+    test_gemma_4_e4b_it_image,
+    "gemma-4-e4b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+image_test!(
+    test_gemma_4_26b_a4b_it_image,
+    "gemma-4-26b-a4b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);
+image_test!(
+    test_gemma_4_31b_it_image,
+    "gemma-4-31b-it",
+    nexo_ai::models::gemma4::Gemma4Model
+);

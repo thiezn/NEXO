@@ -263,8 +263,9 @@ impl Completer for ReplHelper {
         // Delegate to file completer for /listen and /image commands.
         if trimmed.starts_with("/listen ") || trimmed.starts_with("/image ") {
             // For /image, only complete the first argument (file path).
-            if trimmed.starts_with("/image ") {
-                let after_cmd = &trimmed["/image ".len()..];
+            if trimmed.starts_with("/image ")
+                && let Some(after_cmd) = trimmed.strip_prefix("/image ")
+            {
                 // If there's already a space after the first arg, we're on the prompt — no completion.
                 if after_cmd.contains(' ') {
                     return Ok((pos, vec![]));
@@ -448,6 +449,7 @@ fn complete_comma_sep(
 
 pub fn run_repl(
     coordinator: &mut Coordinator,
+    ai_config: &mut crate::config::AiConfig,
     shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<()> {
     let config = rustyline::Config::builder()
@@ -470,7 +472,7 @@ pub fn run_repl(
     println!();
 
     let refresh = |rl: &mut rustyline::Editor<ReplHelper, rustyline::history::DefaultHistory>,
-                    coord: &Coordinator| {
+                   coord: &Coordinator| {
         if let Some(helper) = rl.helper_mut() {
             helper.data = CompletionData::from_coordinator(coord);
         }
@@ -507,21 +509,27 @@ pub fn run_repl(
                     }
                     ReplCommand::LoadCategories { categories } => {
                         handle_load_categories(coordinator, &categories);
+                        sync_and_save(coordinator, ai_config);
                     }
                     ReplCommand::LoadModels { models } => {
                         handle_load_models(coordinator, &models);
+                        sync_and_save(coordinator, ai_config);
                     }
                     ReplCommand::UnloadModels { models } => {
                         handle_unload_models(coordinator, &models);
+                        sync_and_save(coordinator, ai_config);
                     }
                     ReplCommand::UnloadCategories { categories } => {
                         handle_unload_categories(coordinator, &categories);
+                        sync_and_save(coordinator, ai_config);
                     }
                     ReplCommand::UnloadAll => {
                         handle_unload_all(coordinator);
+                        sync_and_save(coordinator, ai_config);
                     }
                     ReplCommand::Set { key, value } => {
                         handle_set(coordinator, &key, &value);
+                        sync_and_save(coordinator, ai_config);
                     }
                     ReplCommand::Get { key } => {
                         handle_get(coordinator, key.as_deref());
@@ -919,28 +927,32 @@ fn handle_load_models(coordinator: &mut Coordinator, models: &[String]) {
         let manifest = find_manifest(name);
 
         // For each category of this model, unload any existing active model first.
-        if let Some(ref manifest) = manifest {
+        if let Some(manifest) = manifest {
             let loaded: Vec<(String, Vec<ModelCategory>)> = coordinator
                 .loaded_models()
                 .iter()
                 .map(|(n, cats)| (n.to_string(), cats.to_vec()))
                 .collect();
             for cat in &manifest.categories {
-                if let Some(current) = coordinator.active_model_for(*cat).map(str::to_string) {
-                    if current != *name && coordinator.is_model_loaded(&current) {
-                        let still_needed = loaded.iter().any(|(n, cats)| {
-                            *n == current
-                                && cats.iter().any(|c| {
-                                    c != cat
-                                        && coordinator.active_model_for(*c).is_some_and(|a| a == current)
-                                })
-                        });
-                        if !still_needed {
-                            if let Err(e) = coordinator.unload_model(&current) {
-                                println!("  error unloading {current}: {e}");
-                            } else {
-                                println!("  unloaded {current} ({cat})");
-                            }
+                if let Some(current) = coordinator.active_model_for(*cat).map(str::to_string)
+                    && current != *name
+                    && coordinator.is_model_loaded(&current)
+                {
+                    let still_needed = loaded.iter().any(|(n, cats)| {
+                        *n == current
+                            && cats.iter().any(|c| {
+                                c != cat
+                                    && coordinator
+                                        .active_model_for(*c)
+                                        .is_some_and(|a| a == current)
+                            })
+                    });
+
+                    if !still_needed {
+                        if let Err(e) = coordinator.unload_model(&current) {
+                            println!("  error unloading {current}: {e}");
+                        } else {
+                            println!("  unloaded {current} ({cat})");
                         }
                     }
                 }
@@ -950,7 +962,7 @@ fn handle_load_models(coordinator: &mut Coordinator, models: &[String]) {
         match coordinator.load_model(name) {
             Ok(()) => {
                 println!("  loaded {name}");
-                if let Some(ref manifest) = manifest {
+                if let Some(manifest) = manifest {
                     for cat in &manifest.categories {
                         coordinator.set_active_model(*cat, name.clone());
                     }
@@ -968,7 +980,10 @@ fn handle_unload_models(coordinator: &mut Coordinator, models: &[String]) {
                 println!("  unloaded {name}");
                 if let Some(manifest) = find_manifest(name) {
                     for cat in &manifest.categories {
-                        if coordinator.active_model_for(*cat).is_some_and(|a| a == name.as_str()) {
+                        if coordinator
+                            .active_model_for(*cat)
+                            .is_some_and(|a| a == name.as_str())
+                        {
                             coordinator.remove_active_model(*cat);
                         }
                     }
@@ -1007,7 +1022,7 @@ fn handle_unload_categories(coordinator: &mut Coordinator, categories: &[String]
             println!("  no loaded models for {category}");
         } else {
             for name in to_unload {
-                match coordinator.unload_model(&name) {
+                match coordinator.unload_model(name) {
                     Ok(()) => {
                         println!("  unloaded {name} ({category})");
                         coordinator.remove_active_model(*category);
@@ -1037,7 +1052,7 @@ fn handle_set(coordinator: &mut Coordinator, key: &str, value: &str) {
     } else if key == "startup-categories" {
         let cats = parse_comma_list(value);
         coordinator.config_mut().startup_categories = cats.clone();
-        save_config(coordinator);
+
         println!("  set startup-categories = {}", cats.join(","));
     } else if let Some((model_name, setting)) = key.split_once('.') {
         let settings = coordinator
@@ -1049,7 +1064,6 @@ fn handle_set(coordinator: &mut Coordinator, key: &str, value: &str) {
             "temperature" => {
                 if let Ok(v) = value.parse::<f64>() {
                     settings.temperature = Some(v);
-                    save_config(coordinator);
                     println!("  set {key} = {v}");
                 } else {
                     println!("  invalid value for temperature: {value}");
@@ -1058,7 +1072,6 @@ fn handle_set(coordinator: &mut Coordinator, key: &str, value: &str) {
             "max_tokens" => {
                 if let Ok(v) = value.parse::<usize>() {
                     settings.max_tokens = Some(v);
-                    save_config(coordinator);
                     println!("  set {key} = {v}");
                 } else {
                     println!("  invalid value for max_tokens: {value}");
@@ -1067,7 +1080,6 @@ fn handle_set(coordinator: &mut Coordinator, key: &str, value: &str) {
             "top_p" => {
                 if let Ok(v) = value.parse::<f64>() {
                     settings.top_p = Some(v);
-                    save_config(coordinator);
                     println!("  set {key} = {v}");
                 } else {
                     println!("  invalid value for top_p: {value}");
@@ -1076,7 +1088,6 @@ fn handle_set(coordinator: &mut Coordinator, key: &str, value: &str) {
             "seed" => {
                 if let Ok(v) = value.parse::<u64>() {
                     settings.seed = Some(v);
-                    save_config(coordinator);
                     println!("  set {key} = {v}");
                 } else {
                     println!("  invalid value for seed: {value}");
@@ -1084,7 +1095,6 @@ fn handle_set(coordinator: &mut Coordinator, key: &str, value: &str) {
             }
             "voice_description" => {
                 settings.voice_description = Some(value.to_string());
-                save_config(coordinator);
                 println!("  set {key} = {value}");
             }
             _ => {
@@ -1171,12 +1181,15 @@ fn print_opt<T: std::fmt::Display>(key: &str, value: Option<T>) {
     }
 }
 
-fn save_config(coordinator: &Coordinator) {
-    if let Err(e) = coordinator.config().save() {
+fn sync_and_save(coordinator: &Coordinator, ai_config: &mut crate::config::AiConfig) {
+    let coord_config = coordinator.config();
+    ai_config.active_models = coord_config.active_models.clone();
+    ai_config.startup_categories = coord_config.startup_categories.clone();
+    ai_config.models = coord_config.models.clone();
+    if let Err(e) = ai_config.save() {
         println!("  warning: failed to save config: {e}");
     }
 }
-
 
 fn print_token_stats(tokens_generated: usize, inference_time_ms: u64) {
     let secs = inference_time_ms as f64 / 1000.0;
@@ -1302,10 +1315,7 @@ fn handle_tool(coordinator: &mut Coordinator, text: &str) {
                 }
             }
             let secs = response.inference_time_ms as f64 / 1000.0;
-            println!(
-                "\n  ({} tokens in {:.1}s)",
-                response.tokens_generated, secs,
-            );
+            println!("\n  ({} tokens in {:.1}s)", response.tokens_generated, secs,);
             coordinator.stats_mut().record_text_generation(
                 &model_name,
                 ModelCategory::Tool,

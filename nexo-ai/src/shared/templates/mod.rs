@@ -5,20 +5,16 @@ use crate::shared::types::{ChatMessage, ToolCall};
 
 /// Controls how a model handles reasoning/thinking.
 /// Different model families map their capabilities onto these variants.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ReasoningMode {
     /// No reasoning output (e.g., Qwen3 enable_thinking=false).
     Disabled,
     /// Model decides whether to reason (e.g., Qwen3 enable_thinking=true).
+    ///
+    #[default]
     Auto,
     /// Explicit effort level for models that support it.
     Effort(ReasoningEffort),
-}
-
-impl Default for ReasoningMode {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

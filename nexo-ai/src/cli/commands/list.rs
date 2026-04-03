@@ -4,7 +4,7 @@ use anyhow::Result;
 
 pub fn run() -> Result<()> {
     let config = AiConfig::load().unwrap_or_default();
-    let coordinator = Coordinator::new(config);
+    let coordinator = Coordinator::new(config.into());
     let models = coordinator.list_models();
 
     if models.is_empty() {

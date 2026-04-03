@@ -7,57 +7,11 @@ use candle_transformers::models::whisper::{N_FFT, SAMPLE_RATE};
 /// The resulting filters match the format expected by
 /// `candle_transformers::models::whisper::audio::pcm_to_mel`.
 pub fn compute_mel_filters(n_mels: usize) -> Vec<f32> {
-    let n_fft = N_FFT;
-    let sample_rate = SAMPLE_RATE as f32;
-    let n_freqs = n_fft / 2 + 1; // 201
-
-    // Frequency of each FFT bin
-    let fft_freqs: Vec<f32> = (0..n_freqs)
-        .map(|i| i as f32 * sample_rate / n_fft as f32)
-        .collect();
-
-    // n_mels + 2 evenly spaced points on the mel scale
-    let f_min = 0.0_f32;
-    let f_max = sample_rate / 2.0;
-    let mel_min = hz_to_mel(f_min);
-    let mel_max = hz_to_mel(f_max);
-
-    let mel_points: Vec<f32> = (0..n_mels + 2)
-        .map(|i| mel_to_hz(mel_min + (mel_max - mel_min) * i as f32 / (n_mels + 1) as f32))
-        .collect();
-
-    // Build triangular filters
-    let mut filters = vec![0.0_f32; n_mels * n_freqs];
-    for m in 0..n_mels {
-        let f_left = mel_points[m];
-        let f_center = mel_points[m + 1];
-        let f_right = mel_points[m + 2];
-
-        for (j, &freq) in fft_freqs.iter().enumerate() {
-            if freq >= f_left && freq <= f_center && f_center > f_left {
-                filters[m * n_freqs + j] = (freq - f_left) / (f_center - f_left);
-            } else if freq > f_center && freq <= f_right && f_right > f_center {
-                filters[m * n_freqs + j] = (f_right - freq) / (f_right - f_center);
-            }
-        }
-
-        // Normalize by the width of the triangle (slaney normalization)
-        let enorm = 2.0 / (f_right - f_left);
-        for j in 0..n_freqs {
-            filters[m * n_freqs + j] *= enorm;
-        }
-    }
-
-    filters
+    crate::audio::mel::compute_mel_filters(n_mels, N_FFT, SAMPLE_RATE as u32)
 }
 
-fn hz_to_mel(f: f32) -> f32 {
-    2595.0 * (1.0 + f / 700.0).log10()
-}
-
-fn mel_to_hz(mel: f32) -> f32 {
-    700.0 * (10.0_f32.powf(mel / 2595.0) - 1.0)
-}
+// Re-export shared helpers for backward compatibility.
+pub use crate::audio::mel::{hz_to_mel, mel_to_hz};
 
 #[cfg(test)]
 mod tests {

@@ -24,6 +24,7 @@ impl super::Coordinator {
             self.stats.record_model_unloaded(name);
         }
         self.slots.clear();
+        self.clear_active_models();
         tracing::info!("unloaded all models");
     }
 

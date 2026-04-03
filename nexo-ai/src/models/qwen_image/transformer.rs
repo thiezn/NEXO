@@ -352,7 +352,7 @@ impl JointAttention {
         key_mask: Option<&Tensor>,
     ) -> candle_core::Result<Tensor> {
         if device.is_metal() {
-            candle_nn::ops::sdpa(q, k, v, None, false, scale as f32, 1.0)
+            candle_nn::ops::sdpa(q, k, v, key_mask, false, scale as f32, 1.0)
         } else {
             // Basic attention for CUDA/CPU
             let mut attn_weights = (q.matmul(&k.transpose(2, 3)?)? * scale)?;

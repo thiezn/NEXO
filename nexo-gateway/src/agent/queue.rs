@@ -18,23 +18,29 @@ pub async fn drain_queue(
     }
 
     // Fetch all queued runs in order they were queued
-    let queued: Vec<(String, String, String, Option<String>, Option<String>, Option<String>)> =
-        match sqlx::query_as(
-            "SELECT ar.id, ar.session_id, ar.queued_prompt, ar.queued_context,
+    let queued: Vec<(
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = match sqlx::query_as(
+        "SELECT ar.id, ar.session_id, ar.queued_prompt, ar.queued_context,
                     ar.model_id, ar.queued_peer_id
-             FROM agent_runs ar
-             WHERE ar.status = 'queued'
-             ORDER BY ar.queued_at ASC",
-        )
-        .fetch_all(db)
-        .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::error!("Failed to fetch queued runs: {e}");
-                return;
-            }
-        };
+            FROM agent_runs ar
+            WHERE ar.status = 'queued'
+            ORDER BY ar.queued_at ASC",
+    )
+    .fetch_all(db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("Failed to fetch queued runs: {e}");
+            return;
+        }
+    };
 
     if queued.is_empty() {
         return;

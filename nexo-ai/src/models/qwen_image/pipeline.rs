@@ -262,7 +262,7 @@ fn load_vae(files: &ModelFiles, device: &Device, dtype: DType) -> Result<QwenIma
 /// 2. Load transformer + VAE -> denoise -> decode
 pub(crate) fn load(model_dir: &Path) -> Result<LoadedState> {
     let files = ModelFiles::discover(model_dir)?;
-    let device = crate::device::create_device(|msg| tracing::info!("{msg}"))?;
+    let device = crate::device::create_device()?;
 
     // Use BF16 on GPU (matches Qwen-Image training dtype), F32 on CPU
     let dtype = if device.is_cpu() {
@@ -316,7 +316,7 @@ pub(crate) fn generate(
     request: &ImagineRequest,
 ) -> Result<ImagineResponse> {
     let files = ModelFiles::discover(model_dir)?;
-    let device = crate::device::create_device(|msg| tracing::info!("{msg}"))?;
+    let device = crate::device::create_device()?;
     let dtype = if device.is_cpu() {
         DType::F32
     } else {

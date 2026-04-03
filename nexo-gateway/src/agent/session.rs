@@ -42,13 +42,15 @@ pub async fn list_sessions(
 
     Ok(rows
         .into_iter()
-        .map(|(id, name, created_at, last_active_at, count)| SessionEntry {
-            session_id: id,
-            name,
-            created_at,
-            last_active_at,
-            message_count: count as u32,
-        })
+        .map(
+            |(id, name, created_at, last_active_at, count)| SessionEntry {
+                session_id: id,
+                name,
+                created_at,
+                last_active_at,
+                message_count: count as u32,
+            },
+        )
         .collect())
 }
 
@@ -67,15 +69,20 @@ pub async fn get_session(
         return Ok(None);
     };
 
-    let msg_rows: Vec<(String, String, String, String, Option<String>, Option<String>)> =
-        sqlx::query_as(
-            "SELECT id, role, content, created_at, tool_call_id, tool_name
-             FROM messages WHERE session_id = ? ORDER BY created_at ASC",
-        )
-        .bind(session_id)
-        .fetch_all(pool)
-        .await?;
-
+    let msg_rows: Vec<(
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT id, role, content, created_at, tool_call_id, tool_name
+            FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+    )
+    .bind(session_id)
+    .fetch_all(pool)
+    .await?;
     let messages = msg_rows
         .into_iter()
         .map(
@@ -180,8 +187,9 @@ pub async fn finish_run(
     status: AgentStatus,
     summary: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    let status_str =
-        serde_json::to_value(status).ok().and_then(|v| v.as_str().map(String::from));
+    let status_str = serde_json::to_value(status)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from));
     sqlx::query(
         "UPDATE agent_runs SET status = ?, summary = ?, finished_at = datetime('now') WHERE id = ?",
     )
@@ -215,12 +223,11 @@ mod tests {
             .unwrap();
         assert!(!sid.is_empty());
 
-        let (name,): (Option<String>,) =
-            sqlx::query_as("SELECT name FROM sessions WHERE id = ?")
-                .bind(&sid)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (name,): (Option<String>,) = sqlx::query_as("SELECT name FROM sessions WHERE id = ?")
+            .bind(&sid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(name.as_deref(), Some("test session"));
     }
 
@@ -285,7 +292,9 @@ mod tests {
             .await
             .unwrap();
 
-        let (sid, _) = create_session(&pool, "u1", Some("chat"), None).await.unwrap();
+        let (sid, _) = create_session(&pool, "u1", Some("chat"), None)
+            .await
+            .unwrap();
         insert_message(&pool, &sid, None, "user", "hello", None, None)
             .await
             .unwrap();
@@ -319,7 +328,9 @@ mod tests {
             .unwrap();
 
         let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
-        create_run(&pool, "run-1", &sid, "idem-1", None).await.unwrap();
+        create_run(&pool, "run-1", &sid, "idem-1", None)
+            .await
+            .unwrap();
         insert_message(&pool, &sid, Some("run-1"), "user", "hello", None, None)
             .await
             .unwrap();
@@ -344,12 +355,11 @@ mod tests {
                 .unwrap();
         assert_eq!(run_count, 0);
 
-        let (sess_count,): (i32,) =
-            sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE id = ?")
-                .bind(&sid)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (sess_count,): (i32,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE id = ?")
+            .bind(&sid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(sess_count, 0);
     }
 
@@ -408,7 +418,9 @@ mod tests {
             .unwrap();
 
         let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
-        create_run(&pool, "run-1", &sid, "idem-1", None).await.unwrap();
+        create_run(&pool, "run-1", &sid, "idem-1", None)
+            .await
+            .unwrap();
 
         let (status,): (String,) =
             sqlx::query_as("SELECT status FROM agent_runs WHERE id = 'run-1'")
@@ -421,13 +433,12 @@ mod tests {
             .await
             .unwrap();
 
-        let (status, summary, finished): (String, Option<String>, Option<String>) =
-            sqlx::query_as(
-                "SELECT status, summary, finished_at FROM agent_runs WHERE id = 'run-1'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let (status, summary, finished): (String, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT status, summary, finished_at FROM agent_runs WHERE id = 'run-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(status, "completed");
         assert_eq!(summary.as_deref(), Some("All done"));
         assert!(finished.is_some());

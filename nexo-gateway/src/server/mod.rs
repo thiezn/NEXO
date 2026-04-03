@@ -16,10 +16,21 @@ use tokio::sync::RwLock;
 
 /// Start the gateway WebSocket server.
 pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
+    tracing::info!(
+        "Gateway config: host={}, port={}, tick_interval={}ms, db={}, storage={}",
+        config.host,
+        config.port,
+        config.tick_interval_ms,
+        config.db_path,
+        config.storage_root,
+    );
+
     let db_path = utl_helpers::resolve_path_str(&config.db_path)?;
     let db = crate::memory::persistent::connect(&db_path).await?;
+    tracing::info!("Database connected: {}", db_path.display());
 
     let storage_root = utl_helpers::resolve_path_str(&config.storage_root)?;
+    tracing::info!("Storage root: {}", storage_root.display());
 
     // Open git-backed storage (optional — allows gateway to run without persistent storage)
     let git_storage = match utl_helpers::resolve_path_str(&config.nexo_storage_path) {
@@ -55,6 +66,11 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
     for tool in nexo_io::tools::all_tools() {
         gateway_tools.register(tool);
     }
+
+    tracing::info!(
+        "Registered {} gateway tool(s)",
+        gateway_tools.tool_entries().len(),
+    );
 
     let mut gateway_state = GatewayState::new(storage_root);
     gateway_state.gateway_tools = gateway_tools;

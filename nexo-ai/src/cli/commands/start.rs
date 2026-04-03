@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub async fn run(categories: Option<Vec<String>>) -> Result<()> {
-    let config = AiConfig::load().unwrap_or_default();
-    let mut coordinator = Coordinator::new(config);
+    let mut ai_config = AiConfig::load().unwrap_or_default();
+    let mut coordinator = Coordinator::new(ai_config.clone().into());
 
     // Load specified categories or startup defaults from config.
     if let Some(cats) = categories {
@@ -57,5 +57,5 @@ pub async fn run(categories: Option<Vec<String>>) -> Result<()> {
     .ok();
 
     // Enter REPL.
-    repl::run_repl(&mut coordinator, shutdown)
+    repl::run_repl(&mut coordinator, &mut ai_config, shutdown)
 }

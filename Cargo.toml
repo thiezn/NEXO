@@ -12,6 +12,7 @@ members = [
     "nexo-tools/core/nexo-notes",
     "nexo-tools/nexo-io",
     "nexo-ai",
+    "integration-tests",
 ]
 
 resolver = "3"

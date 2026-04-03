@@ -1,0 +1,17 @@
+[package]
+name = "integration-tests"
+version = "0.1.0"
+edition = "2024"
+
+# This crate has no library or binary — only integration tests.
+
+[dev-dependencies]
+nexo-gateway = { path = "../nexo-gateway" }
+nexo-ws-client = { path = "../shared/nexo-ws-client" }
+nexo-ws-schema = { path = "../shared/nexo-ws-schema" }
+nexo-spec = { path = "../shared/nexo-spec", features = ["tool"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+
+[lints]
+workspace = true

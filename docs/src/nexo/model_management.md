@@ -240,7 +240,7 @@ default_width = 1024
 default_height = 1024
 ```
 
-### node.toml
+### nexo-node.toml
 
 ```toml
 # URL of the nexo-gateway WebSocket

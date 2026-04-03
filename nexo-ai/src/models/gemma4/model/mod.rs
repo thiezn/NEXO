@@ -94,19 +94,38 @@ impl Model {
         seqlen_offset: usize,
     ) -> Result<Tensor> {
         let (b_size, seq_len) = input_ids.dims2()?;
+        tracing::trace!("forward_multimodal: input_ids shape=({}, {})", b_size, seq_len);
         let mut input_embeds = self.language_model.embed_tokens(input_ids)?;
+
+        // Compute PLE from original token IDs before merging multimodal embeds
+        let per_layer_inputs = self
+            .language_model
+            .compute_per_layer_inputs(input_ids, &input_embeds)?;
 
         // ── Vision embedding injection ──────────────────────────────────
         if let Some(pixel_values) = pixel_values {
             let image_mask = input_ids
                 .to_dtype(DType::F32)?
                 .eq(self.cfg.image_token_id as f64)?;
+            if tracing::enabled!(tracing::Level::TRACE) {
+                let mask_count = image_mask
+                    .to_dtype(DType::F32)?
+                    .sum_all()?
+                    .to_scalar::<f32>()? as usize;
+                tracing::trace!(
+                    "vision injection: {} images, {} mask positions",
+                    pixel_values.len(),
+                    mask_count,
+                );
+            }
 
             let vision_features = self.vision_tower.forward(pixel_values)?;
+            tracing::trace!("vision features shape={:?}", vision_features.shape());
             let image_embeds = self
                 .embed_vision
                 .forward(&vision_features)?
                 .to_dtype(input_embeds.dtype())?;
+            tracing::trace!("image embeds shape={:?}", image_embeds.shape());
 
             // Replace image token positions with vision embeddings
             let image_embeds_flat = image_embeds.squeeze(0)?;
@@ -127,8 +146,20 @@ impl Model {
             let audio_mask = input_ids
                 .to_dtype(DType::F32)?
                 .eq(self.cfg.audio_token_id as f64)?;
+            if tracing::enabled!(tracing::Level::TRACE) {
+                let mask_count = audio_mask
+                    .to_dtype(DType::F32)?
+                    .sum_all()?
+                    .to_scalar::<f32>()? as usize;
+                tracing::trace!(
+                    "audio injection: mel={:?}, {} mask positions",
+                    audio_mel.shape(),
+                    mask_count,
+                );
+            }
 
             let (audio_features, enc_mask) = audio_tower.forward(audio_mel, audio_mel_mask)?;
+            tracing::trace!("audio features shape={:?}", audio_features.shape());
             // Filter valid frames: where enc_mask == 0
             let valid = enc_mask.eq(0.0)?;
             let batch = audio_features.dim(0)?;
@@ -150,6 +181,7 @@ impl Model {
                 let audio_embeds = embed_audio
                     .forward(&audio_feats)?
                     .to_dtype(input_embeds.dtype())?;
+                tracing::trace!("audio embeds shape={:?}", audio_embeds.shape());
 
                 let audio_embeds_flat = audio_embeds.squeeze(0)?;
                 let mask_expanded = audio_mask
@@ -163,8 +195,17 @@ impl Model {
             }
         }
 
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let norm = input_embeds.to_dtype(DType::F32)?.sqr()?.mean_all()?.to_scalar::<f32>().unwrap_or(f32::NAN).sqrt();
+            tracing::trace!(
+                "input_embeds after injection: shape={:?}, norm={:.4}",
+                input_embeds.shape(),
+                norm,
+            );
+        }
+
         self.language_model
-            .forward_embeds(&input_embeds, seqlen_offset, b_size, seq_len)
+            .forward_embeds(&input_embeds, seqlen_offset, b_size, seq_len, per_layer_inputs.as_ref())
     }
 
     pub fn clear_kv_cache(&mut self) {

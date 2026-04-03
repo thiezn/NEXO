@@ -97,6 +97,28 @@ pub struct ImageAnalysisResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Audio analysis (prompted audio understanding)
+// ---------------------------------------------------------------------------
+
+/// Request for prompted audio analysis (e.g. "describe what you hear").
+#[derive(Debug, Clone)]
+pub struct AudioAnalysisRequest {
+    pub pcm_samples: Vec<f32>,
+    pub sample_rate: u32,
+    pub prompt: String,
+    pub max_tokens: usize,
+    pub temperature: f64,
+}
+
+/// Response from audio analysis.
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioAnalysisResponse {
+    pub text: String,
+    pub tokens_generated: usize,
+    pub inference_time_ms: u64,
+}
+
+// ---------------------------------------------------------------------------
 // Listen (speech-to-text)
 // ---------------------------------------------------------------------------
 

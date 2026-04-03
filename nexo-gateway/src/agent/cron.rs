@@ -12,8 +12,7 @@ pub async fn create_job(
 ) -> Result<String, sqlx::Error> {
     let id = Frame::new_id();
     sqlx::query(
-        "INSERT INTO cron_jobs (id, name, schedule, prompt, session_id)
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO cron_jobs (id, name, schedule, prompt, session_id) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(name)
@@ -27,13 +26,12 @@ pub async fn create_job(
 
 /// List all cron jobs.
 pub async fn list_jobs(pool: &SqlitePool) -> Result<Vec<CronEntry>, sqlx::Error> {
-    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>)> =
-        sqlx::query_as(
-            "SELECT id, name, schedule, enabled, last_run_at, next_run_at
-             FROM cron_jobs ORDER BY created_at",
-        )
-        .fetch_all(pool)
-        .await?;
+    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT id, name, schedule, enabled, last_run_at, next_run_at
+            FROM cron_jobs ORDER BY created_at",
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows
         .into_iter()

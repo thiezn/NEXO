@@ -29,11 +29,6 @@ impl GatewayToolExecutor {
         self.tools.get(name)
     }
 
-    /// Check if a tool is registered as a gateway-native tool.
-    pub fn has_tool(&self, name: &str) -> bool {
-        self.tools.contains_key(name)
-    }
-
     /// Build `ToolEntry` descriptors for all registered gateway-native tools.
     /// These are always available (not dependent on a connected peer).
     pub fn tool_entries(&self) -> Vec<ToolEntry> {
@@ -50,11 +45,6 @@ impl GatewayToolExecutor {
                 }
             })
             .collect()
-    }
-
-    /// Number of registered gateway tools.
-    pub fn tool_count(&self) -> usize {
-        self.tools.len()
     }
 }
 
@@ -97,9 +87,8 @@ mod tests {
     fn register_and_find_tool() {
         let mut executor = GatewayToolExecutor::new();
         executor.register(Arc::new(DummyTool));
-        assert!(executor.has_tool("dummy.test"));
-        assert!(!executor.has_tool("other.tool"));
-        assert_eq!(executor.tool_count(), 1);
+        assert!(executor.get_tool("dummy.test").is_some());
+        assert!(executor.get_tool("other.tool").is_none());
     }
 
     #[test]

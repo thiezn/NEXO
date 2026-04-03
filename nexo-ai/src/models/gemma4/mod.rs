@@ -6,10 +6,13 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::shared::model_traits::{ChatModel, ImageModel, KvCacheable, ModelInfo, ToolModel};
+use crate::shared::model_traits::{
+    AudioAnalysisModel, ChatModel, ImageModel, KvCacheable, ModelInfo, ToolModel,
+};
 use crate::shared::types::{
-    ChatRequest, ChatResponse, ImageAnalysisRequest, ImageAnalysisResponse, LayerKvSnapshot,
-    ModelCategory, ToolCallRequest, ToolCallResponse,
+    AudioAnalysisRequest, AudioAnalysisResponse, ChatRequest, ChatResponse,
+    ImageAnalysisRequest, ImageAnalysisResponse, LayerKvSnapshot, ModelCategory, ToolCallRequest,
+    ToolCallResponse,
 };
 
 pub struct Gemma4Model {
@@ -48,7 +51,12 @@ impl ModelInfo for Gemma4Model {
     }
 
     fn categories(&self) -> &[ModelCategory] {
-        &[ModelCategory::Chat, ModelCategory::Tool, ModelCategory::Image]
+        &[
+            ModelCategory::Chat,
+            ModelCategory::Tool,
+            ModelCategory::Image,
+            ModelCategory::Listen,
+        ]
     }
 
     fn memory_estimate_bytes(&self) -> u64 {
@@ -80,6 +88,10 @@ impl ModelInfo for Gemma4Model {
     }
 
     fn as_image(&mut self) -> Option<&mut dyn ImageModel> {
+        Some(self)
+    }
+
+    fn as_audio_analysis(&mut self) -> Option<&mut dyn AudioAnalysisModel> {
         Some(self)
     }
 
@@ -177,6 +189,19 @@ impl ImageModel for Gemma4Model {
     }
 }
 
+impl AudioAnalysisModel for Gemma4Model {
+    fn analyze_audio(
+        &mut self,
+        request: &AudioAnalysisRequest,
+    ) -> Result<AudioAnalysisResponse> {
+        let state = self
+            .loaded
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?;
+        pipeline::analyze_audio(state, request, &self.model_dir)
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -198,7 +223,12 @@ mod tests {
         assert_eq!(model.family(), "gemma4");
         assert_eq!(
             model.categories(),
-            &[ModelCategory::Chat, ModelCategory::Tool, ModelCategory::Image]
+            &[
+                ModelCategory::Chat,
+                ModelCategory::Tool,
+                ModelCategory::Image,
+                ModelCategory::Listen,
+            ]
         );
         assert_eq!(model.memory_estimate_bytes(), 14_890_000_000);
     }
@@ -231,6 +261,12 @@ mod tests {
     fn as_kv_cacheable_returns_some() {
         let mut model = make_model();
         assert!(model.as_kv_cacheable().is_some());
+    }
+
+    #[test]
+    fn as_audio_analysis_returns_some() {
+        let mut model = make_model();
+        assert!(model.as_audio_analysis().is_some());
     }
 
     #[test]

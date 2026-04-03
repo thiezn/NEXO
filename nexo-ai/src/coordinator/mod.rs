@@ -1,7 +1,7 @@
 pub mod load;
 pub mod unload;
 
-use crate::config::AiConfig;
+use crate::config::CoordinatorConfig;
 use crate::shared::model_traits::ModelInfo;
 use crate::shared::types::ModelCategory;
 use crate::statistics::StatsCollector;
@@ -34,14 +34,14 @@ impl ModelSlot {
 }
 
 pub struct Coordinator {
-    config: AiConfig,
+    config: CoordinatorConfig,
     slots: HashMap<String, ModelSlot>,
     active_models: HashMap<ModelCategory, String>,
     stats: StatsCollector,
 }
 
 impl Coordinator {
-    pub fn new(config: AiConfig) -> Self {
+    pub fn new(config: CoordinatorConfig) -> Self {
         let active_models = config
             .active_models
             .iter()
@@ -61,10 +61,10 @@ impl Coordinator {
         }
     }
 
-    pub fn config(&self) -> &AiConfig {
+    pub fn config(&self) -> &CoordinatorConfig {
         &self.config
     }
-    pub fn config_mut(&mut self) -> &mut AiConfig {
+    pub fn config_mut(&mut self) -> &mut CoordinatorConfig {
         &mut self.config
     }
 
@@ -94,25 +94,16 @@ impl Coordinator {
     pub fn set_active_model(&mut self, category: ModelCategory, model_name: String) {
         self.active_models.insert(category, model_name.clone());
         self.config.set_active_model(category, model_name);
-        if let Err(e) = self.config.save() {
-            tracing::warn!("failed to persist config: {e}");
-        }
     }
 
     pub fn remove_active_model(&mut self, category: ModelCategory) {
         self.active_models.remove(&category);
         self.config.remove_active_model(category);
-        if let Err(e) = self.config.save() {
-            tracing::warn!("failed to persist config: {e}");
-        }
     }
 
     pub fn clear_active_models(&mut self) {
         self.active_models.clear();
         self.config.clear_active_models();
-        if let Err(e) = self.config.save() {
-            tracing::warn!("failed to persist config: {e}");
-        }
     }
 
     pub fn is_model_loaded(&self, name: &str) -> bool {
@@ -145,8 +136,8 @@ mod tests {
     use super::*;
     use crate::models::stub::StubModel;
 
-    fn config_with_active_models() -> AiConfig {
-        let mut config = AiConfig::default();
+    fn config_with_active_models() -> CoordinatorConfig {
+        let mut config = CoordinatorConfig::default();
         config
             .active_models
             .insert("chat".to_string(), "test-chat".to_string());
@@ -186,19 +177,19 @@ mod tests {
 
     #[test]
     fn loaded_models_empty_when_nothing_loaded() {
-        let coord = Coordinator::new(AiConfig::default());
+        let coord = Coordinator::new(CoordinatorConfig::default());
         assert!(coord.loaded_models().is_empty());
     }
 
     #[test]
     fn total_memory_used_zero_when_nothing_loaded() {
-        let coord = Coordinator::new(AiConfig::default());
+        let coord = Coordinator::new(CoordinatorConfig::default());
         assert_eq!(coord.total_memory_used(), 0);
     }
 
     #[test]
     fn unload_all_clears_slots() {
-        let mut coord = Coordinator::new(AiConfig::default());
+        let mut coord = Coordinator::new(CoordinatorConfig::default());
         let mut stub = StubModel::new("m1", 1_000_000);
         stub.load().unwrap();
         coord.slots.insert(
@@ -213,7 +204,7 @@ mod tests {
 
     #[test]
     fn free_memory_with_loaded_stubs() {
-        let mut coord = Coordinator::new(AiConfig::default());
+        let mut coord = Coordinator::new(CoordinatorConfig::default());
 
         let mut s1 = StubModel::new("small", 1_000_000);
         s1.load().unwrap();

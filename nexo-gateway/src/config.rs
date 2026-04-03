@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Gateway configuration, stored at `~/.nexo/gateway.toml`.
+/// Gateway configuration, stored at `~/.nexo/nexo-gateway.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GatewayConfig {
@@ -36,7 +36,7 @@ impl GatewayConfig {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".nexo")
-            .join("gateway.toml")
+            .join("nexo-gateway.toml")
     }
 
     pub fn load() -> utl_helpers::Result<Self> {

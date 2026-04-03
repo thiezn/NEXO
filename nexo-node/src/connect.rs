@@ -3,6 +3,7 @@ use crate::kv_cache::manager::SessionCacheManager;
 use crate::registry::ToolRegistry;
 use base64::Engine;
 use nexo_ai::coordinator::Coordinator;
+use nexo_ai::registry::find_manifest;
 use nexo_ai::shared::types::{
     ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, ModelCategory, ToolCallRequest,
 };
@@ -401,7 +402,15 @@ async fn dispatch_agent_inference(
     let tools: Vec<serde_json::Value> = params
         .get("tools")
         .and_then(|v| v.as_array())
-        .cloned()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| {
+                    // Accept both OpenAI format {"type":"function","function":{...}}
+                    // and flat format {"name":...,"description":...,"parameters":...}
+                    t.get("function").cloned().or_else(|| Some(t.clone()))
+                })
+                .collect()
+        })
         .unwrap_or_default();
 
     let prefill_sha = params
@@ -468,7 +477,25 @@ async fn dispatch_agent_inference(
         })
         .collect();
 
+    // Log the last message for conversation tracking
+    if let Some(last) = chat_messages.last() {
+        tracing::info!(
+            "Inference request {}: last message role={:?}, content='{:.120}'",
+            request_id,
+            last.role,
+            last.content,
+        );
+    }
+
     // Determine which model to use
+    tracing::debug!(
+        "dispatch_agent_inference {}: resolving model (model_id={:?}, has_tools={}, session_id={:?}, messages={})",
+        request_id,
+        model_id,
+        !tools.is_empty(),
+        session_id,
+        chat_messages.len(),
+    );
     let coord = coordinator.lock()?;
     let model_name = if let Some(id) = &model_id {
         id.clone()
@@ -488,6 +515,10 @@ async fn dispatch_agent_inference(
     drop(coord);
 
     if model_name.is_empty() {
+        tracing::warn!(
+            "dispatch_agent_inference {}: no model available",
+            request_id
+        );
         let _ = tx
             .send((
                 request_id.to_string(),
@@ -496,6 +527,16 @@ async fn dispatch_agent_inference(
             .await;
         return Ok(());
     }
+
+    tracing::debug!(
+        "dispatch_agent_inference {}: using model '{}', temperature={}, top_p={}, top_k={:?}, max_tokens={}",
+        request_id,
+        model_name,
+        settings.temperature.unwrap_or(1.0),
+        settings.top_p.unwrap_or(0.95),
+        settings.top_k.or(Some(64)),
+        settings.max_tokens.unwrap_or(2048),
+    );
 
     // Spawn blocking inference
     let coord = coordinator.clone();
@@ -511,8 +552,20 @@ async fn dispatch_agent_inference(
     let max_tokens = settings.max_tokens.unwrap_or(2048);
 
     tokio::task::spawn_blocking(move || {
+        tracing::debug!(
+            "dispatch_agent_inference {}: spawn_blocking started",
+            request_id
+        );
         let result = (|| -> Result<serde_json::Value, String> {
+            tracing::debug!(
+                "dispatch_agent_inference {}: acquiring coordinator lock",
+                request_id
+            );
             let mut coord = coord.lock().unwrap();
+            tracing::debug!(
+                "dispatch_agent_inference {}: coordinator lock acquired",
+                request_id
+            );
             let model = coord
                 .model_mut(&model_name)
                 .ok_or_else(|| format!("Model '{model_name}' not loaded"))?;
@@ -521,6 +574,12 @@ async fn dispatch_agent_inference(
             if let Some(kv) = model.as_kv_cacheable() {
                 let current = kv.current_session_id().map(String::from);
                 let target = session_id.as_deref();
+                tracing::debug!(
+                    "dispatch_agent_inference {}: KV cache current={:?}, target={:?}",
+                    request_id,
+                    current,
+                    target,
+                );
 
                 if current.as_deref() != target && target.is_some() {
                     let mgr = cache_mgr.lock().unwrap();
@@ -553,10 +612,21 @@ async fn dispatch_agent_inference(
                 }
             }
 
+            tracing::debug!(
+                "dispatch_agent_inference {}: KV cache handling complete",
+                request_id
+            );
+
             // Re-borrow model after kv_cacheable borrow ends
             let model = coord
                 .model_mut(&model_name)
                 .ok_or_else(|| format!("Model '{model_name}' not loaded"))?;
+
+            tracing::debug!(
+                "dispatch_agent_inference {}: dispatching to {} path",
+                request_id,
+                if has_tools { "tool-call" } else { "chat" },
+            );
 
             if has_tools {
                 let tool_specs: Vec<nexo_spec::tool::ToolSpec> =
@@ -576,9 +646,19 @@ async fn dispatch_agent_inference(
                 let tool_model = model
                     .as_tool()
                     .ok_or_else(|| format!("Model '{model_name}' does not support tool calling"))?;
+                tracing::debug!(
+                    "dispatch_agent_inference {}: starting tool inference ({} tools, {} messages)",
+                    request_id,
+                    req.tools.len(),
+                    req.messages.len()
+                );
                 let resp = tool_model.call_tools(&req).map_err(|e| e.to_string())?;
 
-                tracing::debug!("Raw tool call response: {:?}", resp);
+                tracing::debug!(
+                    "dispatch_agent_inference {}: tool inference complete, {} tool calls",
+                    request_id,
+                    resp.tool_calls.len()
+                );
 
                 if resp.tool_calls.is_empty() {
                     Ok(serde_json::json!({ "content": resp.reasoning.unwrap_or_default() }))
@@ -611,13 +691,28 @@ async fn dispatch_agent_inference(
                 let chat_model = model
                     .as_chat()
                     .ok_or_else(|| format!("Model '{model_name}' does not support chat"))?;
+                tracing::debug!(
+                    "dispatch_agent_inference {}: starting chat inference ({} messages, max_tokens={})",
+                    request_id,
+                    req.messages.len(),
+                    req.max_tokens
+                );
                 let resp = chat_model.chat(&req).map_err(|e| e.to_string())?;
 
-                tracing::debug!("Raw chat response: {}", resp.text);
+                tracing::debug!(
+                    "dispatch_agent_inference {}: chat inference complete, response length={}",
+                    request_id,
+                    resp.text.len()
+                );
 
                 Ok(serde_json::json!({ "content": resp.text }))
             }
         })();
+        tracing::debug!(
+            "dispatch_agent_inference {}: sending result (ok={})",
+            request_id,
+            result.is_ok(),
+        );
         let _ = tx.blocking_send((request_id, result));
     });
 
@@ -751,6 +846,13 @@ async fn handle_model_load(
     send(writer, &response).await?;
 
     if loaded {
+        // Set this model as active for all its supported categories.
+        if let Some(manifest) = find_manifest(&model_id) {
+            let mut coord = coordinator.lock()?;
+            for cat in &manifest.categories {
+                coord.set_active_model(*cat, model_id.clone());
+            }
+        }
         push_model_status(writer, coordinator, available_models).await;
     }
 
@@ -812,6 +914,18 @@ async fn handle_model_unload(
         });
 
     send(writer, &response).await?;
+
+    if unloaded {
+        // Clear active model for categories that were served by this model.
+        if let Some(manifest) = find_manifest(&model_id) {
+            let mut coord = coordinator.lock()?;
+            for cat in &manifest.categories {
+                if coord.active_model_for(*cat).is_some_and(|m| m == model_id) {
+                    coord.remove_active_model(*cat);
+                }
+            }
+        }
+    }
 
     push_model_status(writer, coordinator, available_models).await;
 

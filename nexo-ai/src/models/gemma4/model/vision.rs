@@ -3,12 +3,12 @@
 //! Patch-based ViT with 2D RoPE, clippable linears, pooling,
 //! 4 norms per layer, and optional standardization.
 
-use candle_core::{DType, Device, IndexOp, Module, Result, Tensor, D};
+use candle_core::{D, DType, Device, IndexOp, Module, Result, Tensor};
 use candle_nn::{Activation, Linear, VarBuilder};
 
 use super::config::Gemma4VisionConfig;
 
-// ── RmsNorm (Gemma-style) ───────────────────────────────────────────────────
+// ── RmsNorm (Gemma 4 standard — no +1 offset) ─────────────────────────────────
 
 #[derive(Debug, Clone)]
 struct RmsNorm {
@@ -25,18 +25,7 @@ impl RmsNorm {
 
 impl Module for RmsNorm {
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let x_dtype = x.dtype();
-        let internal_dtype = match x_dtype {
-            DType::F16 | DType::BF16 => DType::F32,
-            d => d,
-        };
-        let hidden_size = x.dim(D::Minus1)?;
-        let x = x.to_dtype(internal_dtype)?;
-        let norm_x = (x.sqr()?.sum_keepdim(D::Minus1)? / hidden_size as f64)?;
-        let x_normed = x.broadcast_div(&(norm_x + self.eps)?.sqrt()?)?;
-        x_normed
-            .to_dtype(x_dtype)?
-            .broadcast_mul(&(&self.weight + 1.0)?)
+        candle_nn::ops::rms_norm(&x.contiguous()?, &self.weight, self.eps as f32)
     }
 }
 
@@ -204,10 +193,14 @@ impl VisionAttention {
         let num_heads = cfg.num_attention_heads;
         let num_kv_heads = cfg.num_key_value_heads;
         let head_dim = cfg.head_dim;
-        let q_proj = candle_nn::linear_no_bias(cfg.hidden_size, num_heads * head_dim, vb.pp("q_proj"))?;
-        let k_proj = candle_nn::linear_no_bias(cfg.hidden_size, num_kv_heads * head_dim, vb.pp("k_proj"))?;
-        let v_proj = candle_nn::linear_no_bias(cfg.hidden_size, num_kv_heads * head_dim, vb.pp("v_proj"))?;
-        let o_proj = candle_nn::linear_no_bias(num_heads * head_dim, cfg.hidden_size, vb.pp("o_proj"))?;
+        let q_proj =
+            candle_nn::linear_no_bias(cfg.hidden_size, num_heads * head_dim, vb.pp("q_proj"))?;
+        let k_proj =
+            candle_nn::linear_no_bias(cfg.hidden_size, num_kv_heads * head_dim, vb.pp("k_proj"))?;
+        let v_proj =
+            candle_nn::linear_no_bias(cfg.hidden_size, num_kv_heads * head_dim, vb.pp("v_proj"))?;
+        let o_proj =
+            candle_nn::linear_no_bias(num_heads * head_dim, cfg.hidden_size, vb.pp("o_proj"))?;
         let q_norm = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("q_norm"))?;
         let k_norm = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("k_norm"))?;
         Ok(Self {
@@ -412,7 +405,7 @@ impl VisionPooler {
             .to_dtype(original_dtype)?;
 
         // Scale by sqrt(hidden_size)
-        Ok((output * (self.hidden_size as f64).sqrt())?)
+        output * (self.hidden_size as f64).sqrt()
     }
 
     fn forward(
@@ -487,6 +480,10 @@ impl VisionTower {
         let ph = h / self.patch_size;
         let pw = w / self.patch_size;
         let num_patches = ph * pw;
+        tracing::trace!(
+            "vision encode_single: image {}×{}, {} patches ({}×{})",
+            w, h, num_patches, pw, ph,
+        );
 
         // Build position IDs [b, num_patches, 2] -> (col, row)
         let mut pos_data = Vec::with_capacity(num_patches * 2);
@@ -500,6 +497,7 @@ impl VisionTower {
             Tensor::from_vec(pos_data, (1, num_patches, 2), &Device::Cpu)?.to_device(device)?;
 
         let embeds = self.patch_embedder.forward(pv, &positions)?;
+        tracing::trace!("vision patch embeds shape={:?}", embeds.shape());
 
         // 2D RoPE
         let (cos, sin) = self.rotary_emb.forward(&positions)?;
@@ -507,8 +505,12 @@ impl VisionTower {
         let sin = sin.to_dtype(dtype)?;
 
         let mut hidden_states = embeds;
-        for layer in &self.encoder_layers {
+        for (i, layer) in self.encoder_layers.iter().enumerate() {
             hidden_states = layer.forward(&hidden_states, &cos, &sin)?;
+            if tracing::enabled!(tracing::Level::TRACE) {
+                let norm = hidden_states.to_dtype(DType::F32)?.sqr()?.mean_all()?.to_scalar::<f32>().unwrap_or(f32::NAN).sqrt();
+                tracing::trace!("vision layer {}: norm={:.4}", i, norm);
+            }
         }
 
         // Pool
@@ -517,6 +519,7 @@ impl VisionTower {
         let pooled = self
             .pooler
             .forward(&hidden_states, &positions, Some(output_length))?;
+        tracing::trace!("vision pooled shape={:?}", pooled.shape());
 
         pooled.squeeze(0)
     }
@@ -525,6 +528,7 @@ impl VisionTower {
     pub fn forward(&self, pixel_values_list: &[Tensor]) -> Result<Tensor> {
         let device = pixel_values_list[0].device().clone();
         let dtype = pixel_values_list[0].dtype();
+        tracing::trace!("VisionTower: encoding {} image(s)", pixel_values_list.len());
 
         let mut all_tokens = Vec::with_capacity(pixel_values_list.len());
         for pv in pixel_values_list {
@@ -541,8 +545,10 @@ impl VisionTower {
                 .to_device(hidden_states.device())?
                 .to_dtype(hidden_states.dtype())?;
             hidden_states = (hidden_states.broadcast_sub(&std_bias)?).broadcast_mul(&std_scale)?;
+            tracing::trace!("vision: applied standardization");
         }
 
+        tracing::trace!("VisionTower output shape={:?}", hidden_states.shape());
         hidden_states.unsqueeze(0)
     }
 }

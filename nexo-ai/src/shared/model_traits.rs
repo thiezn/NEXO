@@ -62,6 +62,7 @@ pub trait ModelInfo: Send {
     fn as_tool(&mut self) -> Option<&mut dyn ToolModel> { None }
     fn as_image(&mut self) -> Option<&mut dyn ImageModel> { None }
     fn as_listen(&mut self) -> Option<&mut dyn ListenModel> { None }
+    fn as_audio_analysis(&mut self) -> Option<&mut dyn AudioAnalysisModel> { None }
     fn as_talk(&mut self) -> Option<&mut dyn TalkModel> { None }
     fn as_imagine(&mut self) -> Option<&mut dyn ImagineModel> { None }
     fn as_embed(&mut self) -> Option<&mut dyn EmbedModel> { None }
@@ -86,6 +87,11 @@ pub trait ImageModel: ModelInfo {
 /// Speech-to-text transcription.
 pub trait ListenModel: ModelInfo {
     fn transcribe(&mut self, request: &ListenRequest) -> Result<ListenResponse>;
+}
+
+/// Prompted audio understanding (describe, answer questions about audio).
+pub trait AudioAnalysisModel: ModelInfo {
+    fn analyze_audio(&mut self, request: &AudioAnalysisRequest) -> Result<AudioAnalysisResponse>;
 }
 
 /// Text-to-speech synthesis.

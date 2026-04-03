@@ -4,12 +4,15 @@
 
 use std::sync::Arc;
 
-use candle_core::{DType, Device, Module, Result, Tensor, D};
-use candle_nn::{linear_b as linear_bias, Activation, Linear, VarBuilder};
+use candle_core::{D, DType, Device, Module, Result, Tensor};
+use candle_nn::{Activation, Linear, VarBuilder, linear_b as linear_bias};
 
 use super::config::Gemma4TextConfig;
 
-// ── RmsNorm (Gemma-style with +1 offset) ────────────────────────────────────
+// ── RmsNorm (Gemma 4 text — no +1 offset) ──────────────────────────────────
+//
+// Gemma 4 changed from Gemma 2/3: norm weights are applied directly (no +1
+// offset). The stored weights are already the actual scale factors.
 
 #[derive(Debug, Clone)]
 struct RmsNorm {
@@ -26,18 +29,7 @@ impl RmsNorm {
 
 impl Module for RmsNorm {
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let x_dtype = x.dtype();
-        let internal_dtype = match x_dtype {
-            DType::F16 | DType::BF16 => DType::F32,
-            d => d,
-        };
-        let hidden_size = x.dim(D::Minus1)?;
-        let x = x.to_dtype(internal_dtype)?;
-        let norm_x = (x.sqr()?.sum_keepdim(D::Minus1)? / hidden_size as f64)?;
-        let x_normed = x.broadcast_div(&(norm_x + self.eps)?.sqrt()?)?;
-        x_normed
-            .to_dtype(x_dtype)?
-            .broadcast_mul(&(&self.weight + 1.0)?)
+        candle_nn::ops::rms_norm(&x.contiguous()?, &self.weight, self.eps as f32)
     }
 }
 
@@ -59,20 +51,26 @@ struct RotaryEmbedding {
 }
 
 impl RotaryEmbedding {
-    fn new(dtype: DType, head_dim: usize, rope_theta: f64, max_seq_len: usize, dev: &Device) -> Result<Self> {
+    fn new(
+        dtype: DType,
+        head_dim: usize,
+        rope_theta: f64,
+        max_seq_len: usize,
+        dev: &Device,
+    ) -> Result<Self> {
         let inv_freq: Vec<_> = (0..head_dim)
             .step_by(2)
             .map(|i| 1f32 / rope_theta.powf(i as f64 / head_dim as f64) as f32)
             .collect();
         let inv_freq_len = inv_freq.len();
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?.to_dtype(dtype)?;
+        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?;
         let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
-            .to_dtype(dtype)?
+            .to_dtype(DType::F32)?
             .reshape((max_seq_len, 1))?;
         let freqs = t.matmul(&inv_freq)?;
         Ok(Self {
-            sin: freqs.sin()?,
-            cos: freqs.cos()?,
+            sin: freqs.sin()?.to_dtype(dtype)?,
+            cos: freqs.cos()?.to_dtype(dtype)?,
         })
     }
 
@@ -158,7 +156,13 @@ struct MLP {
 }
 
 impl MLP {
-    fn new(hidden_size: usize, intermediate_size: usize, act: Activation, bias: bool, vb: VarBuilder) -> Result<Self> {
+    fn new(
+        hidden_size: usize,
+        intermediate_size: usize,
+        act: Activation,
+        bias: bool,
+        vb: VarBuilder,
+    ) -> Result<Self> {
         let gate_proj = linear_bias(hidden_size, intermediate_size, bias, vb.pp("gate_proj"))?;
         let up_proj = linear_bias(hidden_size, intermediate_size, bias, vb.pp("up_proj"))?;
         let down_proj = linear_bias(intermediate_size, hidden_size, bias, vb.pp("down_proj"))?;
@@ -179,10 +183,34 @@ impl Module for MLP {
     }
 }
 
-// ── Flash attention (not supported — always use standard attention) ─────────
+// ── Trace helpers ──────────────────────────────────────────────────────────
 
-fn flash_attn(_: &Tensor, _: &Tensor, _: &Tensor, _: f32, _: bool) -> Result<Tensor> {
-    candle_core::bail!("flash attention not supported")
+/// Compute RMS norm of a tensor for trace logging. Returns NaN on error.
+/// Casts to F32 first to avoid BF16 overflow in the squaring step.
+fn trace_rms(xs: &Tensor) -> f32 {
+    xs.to_dtype(DType::F32)
+        .and_then(|x| x.sqr())
+        .and_then(|x| x.mean_all())
+        .and_then(|x| x.to_scalar::<f32>())
+        .unwrap_or(f32::NAN)
+        .sqrt()
+}
+
+/// Log top-k token IDs and logit values at trace level.
+fn trace_top_k_logits(logits: &Tensor, label: &str) -> Result<()> {
+    if tracing::enabled!(tracing::Level::TRACE) {
+        let flat = logits.squeeze(0)?.squeeze(0)?.to_dtype(DType::F32)?;
+        let flat_vec: Vec<f32> = flat.to_vec1()?;
+        let mut indexed: Vec<(usize, f32)> = flat_vec.into_iter().enumerate().collect();
+        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let top5: Vec<_> = indexed
+            .iter()
+            .take(5)
+            .map(|(i, v)| format!("{}:{:.2}", i, v))
+            .collect();
+        tracing::trace!("{}: [{}]", label, top5.join(", "));
+    }
+    Ok(())
 }
 
 // ── KvCache ─────────────────────────────────────────────────────────────────
@@ -191,6 +219,43 @@ fn flash_attn(_: &Tensor, _: &Tensor, _: &Tensor, _: f32, _: bool) -> Result<Ten
 enum KvCache {
     Normal(candle_nn::kv_cache::KvCache),
     Rotating(candle_nn::kv_cache::RotatingKvCache),
+}
+
+impl KvCache {
+    fn reset(&mut self) {
+        match self {
+            KvCache::Normal(c) => c.reset(),
+            KvCache::Rotating(c) => c.reset(),
+        }
+    }
+
+    fn current_seq_len(&self) -> usize {
+        match self {
+            KvCache::Normal(c) => c.current_seq_len(),
+            KvCache::Rotating(c) => c.current_seq_len(),
+        }
+    }
+
+    fn k(&self) -> Result<Option<Tensor>> {
+        match self {
+            KvCache::Normal(c) => c.k(),
+            KvCache::Rotating(c) => c.k(),
+        }
+    }
+
+    fn v(&self) -> Result<Option<Tensor>> {
+        match self {
+            KvCache::Normal(c) => c.v(),
+            KvCache::Rotating(c) => c.v(),
+        }
+    }
+
+    fn append(&mut self, k: &Tensor, v: &Tensor) -> Result<(Tensor, Tensor)> {
+        match self {
+            KvCache::Normal(c) => c.append(k, v),
+            KvCache::Rotating(c) => c.append(k, v),
+        }
+    }
 }
 
 pub use crate::shared::types::LayerKvSnapshot;
@@ -213,8 +278,9 @@ struct Attention {
     is_sliding: bool,
     rotary_emb_global: Arc<ProportionalRotaryEmbedding>,
     rotary_emb_local: Arc<RotaryEmbedding>,
-    kv_cache: KvCache,
-    use_flash_attn: bool,
+    layer_idx: usize,
+    /// If set, this layer reads K/V from the donor layer's cache instead of its own.
+    kv_shared_layer_index: Option<usize>,
 }
 
 impl Attention {
@@ -248,17 +314,7 @@ impl Attention {
         let q_norm = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("q_norm"))?;
         let k_norm = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("k_norm"))?;
 
-        let kv_cache = if is_sliding {
-            KvCache::Rotating(candle_nn::kv_cache::RotatingKvCache::new(
-                2,
-                cfg.effective_sliding_window(),
-            ))
-        } else {
-            KvCache::Normal(candle_nn::kv_cache::KvCache::new(
-                2,
-                cfg.max_position_embeddings,
-            ))
-        };
+        let kv_shared_layer_index = cfg.kv_shared_layer_index(layer_idx);
 
         Ok(Self {
             q_proj,
@@ -275,17 +331,18 @@ impl Attention {
             is_sliding,
             rotary_emb_global,
             rotary_emb_local,
-            kv_cache,
-            use_flash_attn: cfg.use_flash_attn,
+            layer_idx,
+            kv_shared_layer_index,
         })
     }
 
     fn forward(
-        &mut self,
+        &self,
         xs: &Tensor,
         attention_mask: Option<&Tensor>,
         sliding_attention_mask: Option<&Tensor>,
         seqlen_offset: usize,
+        kv_caches: &mut [KvCache],
     ) -> Result<Tensor> {
         let (b_sz, q_len, _) = xs.dims3()?;
 
@@ -303,6 +360,15 @@ impl Attention {
             .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
             .transpose(1, 2)?;
 
+        tracing::trace!(
+            "layer {} attn: Q={:?} K={:?} V={:?} ({})",
+            self.layer_idx,
+            q.shape(),
+            k.shape(),
+            v.shape(),
+            if self.is_sliding { "sliding" } else { "global" },
+        );
+
         // Q/K norms
         q = self.q_norm.forward(&q)?;
         k = self.k_norm.forward(&k)?;
@@ -318,9 +384,30 @@ impl Attention {
                 .apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
         };
 
-        let (k, v) = match &mut self.kv_cache {
-            KvCache::Normal(cache) => cache.append(&k, &v)?,
-            KvCache::Rotating(cache) => cache.append(&k, &v)?,
+        // KV cache: shared layers read from donor, non-shared append to own cache
+        let (k, v) = if let Some(donor_idx) = self.kv_shared_layer_index {
+            let donor = &kv_caches[donor_idx];
+            let dk = donor
+                .k()?
+                .ok_or_else(|| candle_core::Error::Msg(format!("donor layer {} K cache empty", donor_idx)))?;
+            let dv = donor
+                .v()?
+                .ok_or_else(|| candle_core::Error::Msg(format!("donor layer {} V cache empty", donor_idx)))?;
+            tracing::trace!(
+                "layer {} attn: shared, reading KV from donor layer {} (kv_len={})",
+                self.layer_idx,
+                donor_idx,
+                dk.dim(2)?,
+            );
+            (dk, dv)
+        } else {
+            let (k, v) = kv_caches[self.layer_idx].append(&k, &v)?;
+            tracing::trace!(
+                "layer {} attn: appended to own cache (kv_len={})",
+                self.layer_idx,
+                k.dim(2)?,
+            );
+            (k, v)
         };
 
         let k = candle_transformers::utils::repeat_kv(k, self.num_kv_groups)?.contiguous()?;
@@ -332,17 +419,35 @@ impl Attention {
             attention_mask
         };
 
-        let attn_output = if self.use_flash_attn {
-            let q = q.transpose(1, 2)?;
-            let k = k.transpose(1, 2)?;
-            let v = v.transpose(1, 2)?;
-            let scale = 1f32 / (self.head_dim as f32).sqrt();
-            flash_attn(&q, &k, &v, scale, mask.is_some())?.transpose(1, 2)?
-        } else {
-            let scale = 1f64 / f64::sqrt(self.head_dim as f64);
-            let attn_weights = (q.matmul(&k.transpose(2, 3)?)? * scale)?;
+        // Adjust mask to match actual KV cache length (may differ for shared
+        // layers or rotating caches that trimmed to window size).
+        let kv_seq_len = k.dim(2)?;
+        let mask = mask
+            .map(|m| {
+                let mask_kv_len = m.dim(D::Minus1)?;
+                if mask_kv_len > kv_seq_len {
+                    m.narrow(D::Minus1, mask_kv_len - kv_seq_len, kv_seq_len)
+                } else {
+                    Ok(m.clone())
+                }
+            })
+            .transpose()?;
 
-            let attn_weights = match mask {
+        tracing::trace!(
+            "layer {} attn: kv_seq_len={}, mask={:?}",
+            self.layer_idx,
+            kv_seq_len,
+            mask.as_ref().map(|m| format!("{:?}", m.shape())),
+        );
+
+        // Gemma 4 uses QK-norm; attention scaling is 1.0 (not 1/sqrt(head_dim)).
+        let scale = 1.0f32;
+        let attn_output = if q.device().is_metal() && mask.is_none() {
+            // Metal-accelerated SDPA (no mask path — single-token decode)
+            candle_nn::ops::sdpa(&q, &k, &v, None, false, scale, 1.0)?
+        } else {
+            let attn_weights = (q.matmul(&k.transpose(2, 3)?)? * scale as f64)?;
+            let attn_weights = match &mask {
                 None => attn_weights,
                 Some(mask) => attn_weights.broadcast_add(mask)?,
             };
@@ -353,61 +458,6 @@ impl Attention {
             .transpose(1, 2)?
             .reshape((b_sz, q_len, ()))?
             .apply(&self.o_proj)
-    }
-
-    fn clear_kv_cache(&mut self) {
-        match &mut self.kv_cache {
-            KvCache::Normal(c) => c.reset(),
-            KvCache::Rotating(c) => c.reset(),
-        }
-    }
-
-    fn kv_cache_seq_len(&self) -> usize {
-        match &self.kv_cache {
-            KvCache::Normal(c) => c.current_seq_len(),
-            KvCache::Rotating(c) => c.current_seq_len(),
-        }
-    }
-
-    fn save_kv_cache(&self, layer_idx: usize) -> Result<LayerKvSnapshot> {
-        match &self.kv_cache {
-            KvCache::Normal(c) => Ok(LayerKvSnapshot {
-                layer_idx,
-                is_sliding: false,
-                k_data: c.k()?,
-                v_data: c.v()?,
-                offset: 0,
-                current_seq_len: c.current_seq_len(),
-            }),
-            KvCache::Rotating(c) => Ok(LayerKvSnapshot {
-                layer_idx,
-                is_sliding: true,
-                k_data: c.k()?,
-                v_data: c.v()?,
-                offset: c.offset(),
-                current_seq_len: c.current_seq_len(),
-            }),
-        }
-    }
-
-    fn restore_kv_cache(&mut self, snap: &LayerKvSnapshot) -> Result<()> {
-        match &mut self.kv_cache {
-            KvCache::Normal(c) => {
-                c.reset();
-                if let (Some(k), Some(v)) = (&snap.k_data, &snap.v_data) {
-                    c.k_cache_mut().append(k)?;
-                    c.v_cache_mut().append(v)?;
-                }
-            }
-            KvCache::Rotating(c) => {
-                c.reset();
-                if let (Some(k), Some(v)) = (&snap.k_data, &snap.v_data) {
-                    c.k_cache_mut().append(k)?;
-                    c.v_cache_mut().append(v)?;
-                }
-            }
-        }
-        Ok(())
     }
 }
 
@@ -423,6 +473,12 @@ struct DecoderLayer {
     post_feedforward_layernorm: RmsNorm,
     #[allow(dead_code)]
     is_sliding: bool,
+    // Per-Layer Embedding (PLE) injection
+    per_layer_input_gate: Option<Linear>,
+    per_layer_projection: Option<Linear>,
+    post_per_layer_input_norm: Option<RmsNorm>,
+    ple_act_fn: Activation,
+    layer_scalar: Option<Tensor>,
 }
 
 impl DecoderLayer {
@@ -465,6 +521,32 @@ impl DecoderLayer {
             cfg.rms_norm_eps,
             vb.pp("post_feedforward_layernorm"),
         )?;
+
+        // PLE per-layer weights (only if hidden_size_per_layer_input > 0)
+        let ple_dim = cfg.hidden_size_per_layer_input;
+        let (per_layer_input_gate, per_layer_projection, post_per_layer_input_norm, layer_scalar) =
+            if ple_dim > 0 {
+                let gate = candle_nn::linear_no_bias(
+                    cfg.hidden_size,
+                    ple_dim,
+                    vb.pp("per_layer_input_gate"),
+                )?;
+                let proj = candle_nn::linear_no_bias(
+                    ple_dim,
+                    cfg.hidden_size,
+                    vb.pp("per_layer_projection"),
+                )?;
+                let norm = RmsNorm::new(
+                    cfg.hidden_size,
+                    cfg.rms_norm_eps,
+                    vb.pp("post_per_layer_input_norm"),
+                )?;
+                let scalar = vb.get(1, "layer_scalar")?;
+                (Some(gate), Some(proj), Some(norm), Some(scalar))
+            } else {
+                (None, None, None, None)
+            };
+
         Ok(Self {
             self_attn,
             mlp,
@@ -473,44 +555,76 @@ impl DecoderLayer {
             pre_feedforward_layernorm,
             post_feedforward_layernorm,
             is_sliding,
+            per_layer_input_gate,
+            per_layer_projection,
+            post_per_layer_input_norm,
+            ple_act_fn: cfg.hidden_activation,
+            layer_scalar,
         })
     }
 
     fn forward(
-        &mut self,
+        &self,
         xs: &Tensor,
         attention_mask: Option<&Tensor>,
         sliding_attention_mask: Option<&Tensor>,
         seqlen_offset: usize,
+        per_layer_input: Option<&Tensor>,
+        kv_caches: &mut [KvCache],
     ) -> Result<Tensor> {
+        // Attention block
         let residual = xs;
         let xs = self.input_layernorm.forward(xs)?;
-        let xs = self
-            .self_attn
-            .forward(&xs, attention_mask, sliding_attention_mask, seqlen_offset)?;
+        let xs = self.self_attn.forward(
+            &xs,
+            attention_mask,
+            sliding_attention_mask,
+            seqlen_offset,
+            kv_caches,
+        )?;
         let xs = xs.apply(&self.post_attention_layernorm)?;
         let xs = (xs + residual)?;
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("layer {} after attn+res: norm={:.4}", self.self_attn.layer_idx, trace_rms(&xs));
+        }
+
+        // MLP block
         let residual = &xs;
         let xs = xs.apply(&self.pre_feedforward_layernorm)?;
         let xs = xs.apply(&self.mlp)?;
         let xs = xs.apply(&self.post_feedforward_layernorm)?;
-        residual + xs
-    }
+        let mut xs = (residual + xs)?;
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("layer {} after mlp+res: norm={:.4}", self.self_attn.layer_idx, trace_rms(&xs));
+        }
 
-    fn clear_kv_cache(&mut self) {
-        self.self_attn.clear_kv_cache()
-    }
+        // PLE injection (after attention + MLP)
+        if let (Some(gate), Some(proj), Some(norm), Some(ple_input)) = (
+            &self.per_layer_input_gate,
+            &self.per_layer_projection,
+            &self.post_per_layer_input_norm,
+            per_layer_input,
+        ) {
+            let residual = &xs;
+            let gated = xs.apply(gate)?.apply(&self.ple_act_fn)?;
+            let gated = (gated * ple_input)?;
+            let projected = gated.apply(proj)?;
+            let normed = norm.forward(&projected)?;
+            xs = (residual + normed)?;
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!("layer {} after PLE: norm={:.4}", self.self_attn.layer_idx, trace_rms(&xs));
+            }
+        }
 
-    fn kv_cache_seq_len(&self) -> usize {
-        self.self_attn.kv_cache_seq_len()
-    }
+        // Per-layer scalar
+        if let Some(scalar) = &self.layer_scalar {
+            xs = xs.broadcast_mul(scalar)?;
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!("layer {} after scalar: norm={:.4}", self.self_attn.layer_idx, trace_rms(&xs));
+            }
+        }
 
-    fn save_kv_cache(&self, layer_idx: usize) -> Result<LayerKvSnapshot> {
-        self.self_attn.save_kv_cache(layer_idx)
-    }
-
-    fn restore_kv_cache(&mut self, snap: &LayerKvSnapshot) -> Result<()> {
-        self.self_attn.restore_kv_cache(snap)
+        Ok(xs)
     }
 }
 
@@ -565,13 +679,20 @@ pub struct TextModel {
     dtype: DType,
     hidden_size: usize,
     sliding_window: usize,
+    // Per-Layer Embeddings (PLE)
+    embed_tokens_per_layer: Option<candle_nn::Embedding>,
+    per_layer_model_projection: Option<Linear>,
+    per_layer_projection_norm: Option<RmsNorm>,
+    ple_dim: usize,
+    // Shared KV cache pool — one slot per layer. Shared layers leave their
+    // slot empty and read from the donor's slot instead.
+    kv_caches: Vec<KvCache>,
 }
 
 impl TextModel {
     pub fn new(cfg: &Gemma4TextConfig, vb: VarBuilder) -> Result<Self> {
-        let vb_m = vb.pp("model");
         let embed_tokens =
-            candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb_m.pp("embed_tokens"))?;
+            candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("embed_tokens"))?;
 
         let rotary_emb_global = Arc::new(ProportionalRotaryEmbedding::new(
             vb.dtype(),
@@ -579,18 +700,18 @@ impl TextModel {
             cfg.rope_theta,
             cfg.partial_rotary_factor(),
             cfg.max_position_embeddings,
-            vb_m.device(),
+            vb.device(),
         )?);
         let rotary_emb_local = Arc::new(RotaryEmbedding::new(
             vb.dtype(),
             cfg.head_dim,
             cfg.rope_local_base_freq(),
             cfg.max_position_embeddings,
-            vb_m.device(),
+            vb.device(),
         )?);
 
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
-        let vb_l = vb_m.pp("layers");
+        let vb_l = vb.pp("layers");
         for layer_idx in 0..cfg.num_hidden_layers {
             let layer = DecoderLayer::new(
                 rotary_emb_global.clone(),
@@ -601,12 +722,64 @@ impl TextModel {
             )?;
             layers.push(layer)
         }
-        let norm = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb_m.pp("norm"))?;
+        let norm = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("norm"))?;
         let lm_head = if cfg.tie_word_embeddings {
             Linear::new(embed_tokens.embeddings().clone(), None)
         } else {
             candle_nn::linear_no_bias(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?
         };
+
+        // PLE global weights
+        let ple_dim = cfg.hidden_size_per_layer_input;
+        let (embed_tokens_per_layer, per_layer_model_projection, per_layer_projection_norm) =
+            if ple_dim > 0 {
+                let ple_vocab = cfg.vocab_size_per_layer_input.unwrap_or(cfg.vocab_size);
+                let total_ple_dim = cfg.num_hidden_layers * ple_dim;
+                let emb = candle_nn::embedding(
+                    ple_vocab,
+                    total_ple_dim,
+                    vb.pp("embed_tokens_per_layer"),
+                )?;
+                let proj = candle_nn::linear_no_bias(
+                    cfg.hidden_size,
+                    total_ple_dim,
+                    vb.pp("per_layer_model_projection"),
+                )?;
+                let norm = RmsNorm::new(
+                    ple_dim,
+                    cfg.rms_norm_eps,
+                    vb.pp("per_layer_projection_norm"),
+                )?;
+                (Some(emb), Some(proj), Some(norm))
+            } else {
+                (None, None, None)
+            };
+
+        // Build KV cache pool — one per layer. Shared layers' slots are never
+        // written to; they read from their donor's slot during forward.
+        let mut kv_caches = Vec::with_capacity(cfg.num_hidden_layers);
+        for layer_idx in 0..cfg.num_hidden_layers {
+            if cfg.is_sliding(layer_idx) {
+                kv_caches.push(KvCache::Rotating(
+                    candle_nn::kv_cache::RotatingKvCache::new(2, cfg.effective_sliding_window()),
+                ));
+            } else {
+                kv_caches.push(KvCache::Normal(candle_nn::kv_cache::KvCache::new(
+                    2,
+                    cfg.max_position_embeddings,
+                )));
+            }
+        }
+
+        if cfg.num_kv_shared_layers > 0 {
+            tracing::info!(
+                "KV sharing: layers {}-{} share caches with donors in 0-{}",
+                cfg.first_kv_shared_layer_idx(),
+                cfg.num_hidden_layers - 1,
+                cfg.first_kv_shared_layer_idx() - 1,
+            );
+        }
+
         Ok(Self {
             embed_tokens,
             layers,
@@ -617,6 +790,11 @@ impl TextModel {
             dtype: vb.dtype(),
             hidden_size: cfg.hidden_size,
             sliding_window: cfg.sliding_window,
+            embed_tokens_per_layer,
+            per_layer_model_projection,
+            per_layer_projection_norm,
+            ple_dim,
+            kv_caches,
         })
     }
 
@@ -650,13 +828,66 @@ impl TextModel {
 
     pub fn embed_tokens(&self, input_ids: &Tensor) -> Result<Tensor> {
         let xs = self.embed_tokens.forward(input_ids)?;
-        xs * (self.hidden_size as f64).sqrt()
+        let xs = (xs * (self.hidden_size as f64).sqrt())?;
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "embed_tokens: shape={:?}, dtype={:?}, norm={:.4}",
+                xs.shape(),
+                xs.dtype(),
+                trace_rms(&xs),
+            );
+        }
+        Ok(xs)
+    }
+
+    /// Compute per-layer embedding inputs from token IDs and main embeddings.
+    /// Returns a tensor of shape [B, S, num_layers, ple_dim] or None if PLE is disabled.
+    pub fn compute_per_layer_inputs(
+        &self,
+        input_ids: &Tensor,
+        inputs_embeds: &Tensor,
+    ) -> Result<Option<Tensor>> {
+        let (emb_pl, proj, norm) = match (
+            &self.embed_tokens_per_layer,
+            &self.per_layer_model_projection,
+            &self.per_layer_projection_norm,
+        ) {
+            (Some(e), Some(p), Some(n)) => (e, p, n),
+            _ => return Ok(None),
+        };
+
+        let dims = input_ids.dims();
+        let ple_embed_scale = (self.ple_dim as f64).sqrt();
+
+        // Token-identity stream: embed_tokens_per_layer(input_ids) * sqrt(ple_dim)
+        // -> reshape [B, S, num_layers, ple_dim]
+        let token_identity = (emb_pl.forward(input_ids)? * ple_embed_scale)?;
+        let mut shape = dims.to_vec();
+        shape.push(self.layers.len());
+        shape.push(self.ple_dim);
+        let token_identity = token_identity.reshape(shape.as_slice())?;
+        tracing::trace!("PLE token_identity shape={:?}", token_identity.shape());
+
+        // Context-aware stream: per_layer_model_projection(inputs_embeds) * 1/sqrt(hidden_size)
+        // -> reshape [B, S, num_layers, ple_dim] -> RMSNorm
+        let proj_scale = (self.hidden_size as f64).powf(-0.5);
+        let context_proj = (inputs_embeds.apply(proj)? * proj_scale)?;
+        let context_proj = context_proj.reshape(shape.as_slice())?;
+        let context_proj = norm.forward(&context_proj)?;
+        tracing::trace!("PLE context_proj shape={:?}", context_proj.shape());
+
+        // Combine: (context_proj + token_identity) * 1/sqrt(2)
+        let combined = ((context_proj + token_identity)? * std::f64::consts::FRAC_1_SQRT_2)?;
+        tracing::trace!("PLE combined shape={:?}", combined.shape());
+
+        Ok(Some(combined))
     }
 
     pub fn forward(&mut self, input_ids: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
         let (b_size, seq_len) = input_ids.dims2()?;
         let xs = self.embed_tokens(input_ids)?;
-        self.forward_embeds(&xs, seqlen_offset, b_size, seq_len)
+        let per_layer_inputs = self.compute_per_layer_inputs(input_ids, &xs)?;
+        self.forward_embeds(&xs, seqlen_offset, b_size, seq_len, per_layer_inputs.as_ref())
     }
 
     pub fn forward_embeds(
@@ -665,54 +896,107 @@ impl TextModel {
         seqlen_offset: usize,
         batch_size: usize,
         seq_len: usize,
+        per_layer_inputs: Option<&Tensor>,
     ) -> Result<Tensor> {
         let (attention_mask, sliding_attention_mask) =
             self.create_attention_masks(batch_size, seq_len, seqlen_offset)?;
 
+        // Destructure to borrow layers and kv_caches separately.
+        let Self {
+            layers, kv_caches, ..
+        } = self;
+
         let mut xs = xs.clone();
-        for layer in self.layers.iter_mut() {
+        for (i, layer) in layers.iter().enumerate() {
+            // Extract this layer's PLE slice: [B, S, ple_dim]
+            let ple_slice = per_layer_inputs
+                .map(|pli| pli.narrow(pli.dims().len() - 2, i, 1)?.squeeze(pli.dims().len() - 2))
+                .transpose()?;
             xs = layer.forward(
                 &xs,
                 attention_mask.as_ref(),
                 sliding_attention_mask.as_ref(),
                 seqlen_offset,
+                ple_slice.as_ref(),
+                kv_caches,
             )?
         }
         let logits = xs
             .narrow(1, seq_len - 1, 1)?
             .apply(&self.norm)?
             .apply(&self.lm_head)?;
+        tracing::trace!("logits shape={:?}, dtype={:?}", logits.shape(), logits.dtype());
         match self.final_logit_softcapping {
-            None => Ok(logits),
-            Some(sc) => Ok(((logits / sc)?.tanh()? * sc)?),
+            None => {
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    trace_top_k_logits(&logits, "top-5 logits")?;
+                }
+                Ok(logits)
+            }
+            Some(sc) => {
+                let orig_dtype = logits.dtype();
+                let logits = logits.to_dtype(DType::F32)?;
+                let logits = ((logits / sc)?.tanh()? * sc)?.to_dtype(orig_dtype)?;
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    trace_top_k_logits(&logits, "top-5 logits (softcapped)")?;
+                }
+                Ok(logits)
+            }
         }
     }
 
     pub fn clear_kv_cache(&mut self) {
-        for layer in self.layers.iter_mut() {
-            layer.clear_kv_cache()
+        for cache in &mut self.kv_caches {
+            cache.reset();
         }
     }
 
     /// Current number of cached tokens (from the first layer's cache).
     pub fn kv_cache_seq_len(&self) -> usize {
-        self.layers.first().map(|l| l.kv_cache_seq_len()).unwrap_or(0)
+        self.kv_caches[0].current_seq_len()
     }
 
     /// Extract K/V tensors from all layers for saving.
     pub fn save_kv_cache(&self) -> Result<Vec<LayerKvSnapshot>> {
-        self.layers
+        self.kv_caches
             .iter()
             .enumerate()
-            .map(|(idx, layer)| layer.save_kv_cache(idx))
+            .map(|(idx, cache)| {
+                let is_sliding = matches!(cache, KvCache::Rotating(_));
+                let offset = match cache {
+                    KvCache::Rotating(c) => c.offset(),
+                    _ => 0,
+                };
+                Ok(LayerKvSnapshot {
+                    layer_idx: idx,
+                    is_sliding,
+                    k_data: cache.k()?,
+                    v_data: cache.v()?,
+                    offset,
+                    current_seq_len: cache.current_seq_len(),
+                })
+            })
             .collect()
     }
 
     /// Restore K/V cache from saved snapshots.
     pub fn restore_kv_cache(&mut self, snapshots: &[LayerKvSnapshot]) -> Result<()> {
         for snap in snapshots {
-            if snap.layer_idx < self.layers.len() {
-                self.layers[snap.layer_idx].restore_kv_cache(snap)?;
+            if snap.layer_idx < self.kv_caches.len() {
+                let cache = &mut self.kv_caches[snap.layer_idx];
+                cache.reset();
+                if let (Some(k), Some(v)) = (&snap.k_data, &snap.v_data) {
+                    match cache {
+                        KvCache::Normal(c) => {
+                            c.k_cache_mut().append(k)?;
+                            c.v_cache_mut().append(v)?;
+                        }
+                        KvCache::Rotating(c) => {
+                            c.k_cache_mut().append(k)?;
+                            c.v_cache_mut().append(v)?;
+                        }
+                    }
+                }
             }
         }
         Ok(())

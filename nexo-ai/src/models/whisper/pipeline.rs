@@ -29,9 +29,7 @@ pub struct LoadedState {
 pub fn load(model_dir: &Path) -> Result<LoadedState> {
     let start = Instant::now();
 
-    let device = crate::device::create_device(|msg| {
-        tracing::info!("{msg}");
-    })?;
+    let device = crate::device::create_device()?;
     let dtype = crate::device::gpu_dtype(&device);
     tracing::info!("device ready in {:.1}s", start.elapsed().as_secs_f64());
 

@@ -6,21 +6,18 @@ use candle_core::{DType, Device};
 /// Pass `|_| {}` to suppress output.
 ///
 /// Override with env var `NEXO_AI_DEVICE=cpu` to force CPU inference.
-pub fn create_device(on_info: impl Fn(&str)) -> anyhow::Result<Device> {
+pub fn create_device() -> anyhow::Result<Device> {
     let force_cpu = std::env::var("NEXO_AI_DEVICE")
         .map(|v| v.eq_ignore_ascii_case("cpu"))
         .unwrap_or(false);
     if force_cpu {
-        on_info("CPU forced via NEXO_AI_DEVICE=cpu");
         tracing::warn!("CPU forced via NEXO_AI_DEVICE=cpu");
         return Ok(Device::Cpu);
     }
     if candle_core::utils::metal_is_available() {
-        on_info("Metal detected, using GPU");
         tracing::info!("Metal detected, using GPU");
         Ok(Device::new_metal(0)?)
     } else {
-        on_info("No GPU detected, using CPU");
         tracing::warn!("No GPU detected, falling back to CPU");
         Ok(Device::Cpu)
     }
@@ -170,15 +167,16 @@ pub fn preflight_memory_check(component_name: &str, size_bytes: u64) -> anyhow::
 
 /// Return a human-readable memory status string for display.
 ///
-/// Example: `"Memory: 2.3 GB free, 8.1 GB available"`
+/// Example: `"Memory: 2.3 GB free, 8.1 GB inactive (10.4 GB available)"`
 pub fn memory_status_string() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         if let Some(stats) = macos_vm_stats() {
             let available = stats.free + stats.inactive;
             return Some(format!(
-                "Memory: {} free, {} available",
+                "Memory: {} free, {} inactive ({} total available)",
                 fmt_gb(stats.free),
+                fmt_gb(stats.inactive),
                 fmt_gb(available),
             ));
         }

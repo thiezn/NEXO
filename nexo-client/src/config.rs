@@ -2,7 +2,7 @@ use nexo_ws_schema::Platform;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Client configuration, stored at `~/.nexo/client.toml`.
+/// Client configuration, stored at `~/.nexo/nexo-client.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientConfig {
@@ -32,13 +32,14 @@ impl ClientConfig {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".nexo")
-            .join("client.toml")
+            .join("nexo-client.toml")
     }
 
     pub fn load() -> utl_helpers::Result<Self> {
         utl_helpers::config::load_or_create(&Self::config_path())
     }
 
+    /// TODO: Create a init command
     pub fn save(&self) -> utl_helpers::Result {
         utl_helpers::config::save(self, &Self::config_path())
     }
@@ -76,7 +77,10 @@ mod tests {
         // Platform should serialize to a known lowercase string
         let json = serde_json::to_string(&config.platform).unwrap();
         assert!(
-            json == "\"macos\"" || json == "\"ios\"" || json == "\"linux\"" || json == "\"windows\""
+            json == "\"macos\""
+                || json == "\"ios\""
+                || json == "\"linux\""
+                || json == "\"windows\""
         );
     }
 }

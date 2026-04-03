@@ -46,6 +46,12 @@ fn default_global_head_dim() -> usize {
 fn default_use_flash_attn() -> bool {
     false
 }
+fn default_hidden_size_per_layer_input() -> usize {
+    0
+}
+fn default_num_kv_shared_layers() -> usize {
+    0
+}
 
 // ── Rope parameters ─────────────────────────────────────────────────────────
 
@@ -106,6 +112,11 @@ pub struct Gemma4TextConfig {
     pub use_bidirectional_attention: Option<String>,
     #[serde(default = "default_use_flash_attn")]
     pub use_flash_attn: bool,
+    #[serde(default = "default_hidden_size_per_layer_input")]
+    pub hidden_size_per_layer_input: usize,
+    pub vocab_size_per_layer_input: Option<usize>,
+    #[serde(default = "default_num_kv_shared_layers")]
+    pub num_kv_shared_layers: usize,
 }
 
 impl Gemma4TextConfig {
@@ -138,6 +149,25 @@ impl Gemma4TextConfig {
             .get(layer_idx)
             .map(|s| s == "sliding_attention")
             .unwrap_or(false)
+    }
+
+    /// Index of the first layer that shares its KV cache with a donor.
+    pub fn first_kv_shared_layer_idx(&self) -> usize {
+        self.num_hidden_layers
+            .saturating_sub(self.num_kv_shared_layers)
+    }
+
+    /// For a shared layer, returns the donor layer index (the last non-shared
+    /// layer with the same attention type). Returns `None` for non-shared layers.
+    pub fn kv_shared_layer_index(&self, layer_idx: usize) -> Option<usize> {
+        let first = self.first_kv_shared_layer_idx();
+        if first == 0 || layer_idx < first {
+            return None;
+        }
+        let attention_type = &self.layer_types[layer_idx];
+        self.layer_types[..first]
+            .iter()
+            .rposition(|ty| ty == attention_type)
     }
 }
 

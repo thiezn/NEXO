@@ -1,3 +1,3 @@
 # Configuration
 
-All configuration is in ~/.nexo/gateway.toml
+All configuration is in ~/.nexo/nexo-gateway.toml

@@ -190,7 +190,7 @@ pub fn imagine(state: &LoadedState, request: &ImagineRequest) -> Result<ImagineR
         "starting sequential Flux.2 generation"
     );
 
-    let device = crate::device::create_device(|msg| tracing::info!("{msg}"))?;
+    let device = crate::device::create_device()?;
     let gpu_dtype = crate::device::gpu_dtype(&device);
 
     // --- Phase 1: Qwen3 text encoding ---

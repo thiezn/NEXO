@@ -37,7 +37,9 @@
       "Bash(git -C /Users/Mathijs.Mortimer/Development/nexo branch --list 'claude/*')",
       "Read(//Users/Mathijs.Mortimer/Development/**)",
       "Bash(git -C /Users/Mathijs.Mortimer/Development/nexo rm nexo-node/src/download/registry.rs nexo-node/src/download/manifest.rs nexo-node/src/download/pull.rs)",
-      "Read(//^\\\\+\\\\+\\\\+ b\\\\/nexo-node\\\\/src\\\\/connect.rs/,/**)"
+      "Read(//^\\\\+\\\\+\\\\+ b\\\\/nexo-node\\\\/src\\\\/connect.rs/,/**)",
+      "Bash(ls ~/.nexo/models/*/config.json)",
+      "Bash(ls ~/.nexo/local_models/gemma-4-e4b/*.safetensors)"
     ],
     "deny": [
       "WebFetch"
@@ -45,7 +47,8 @@
     "additionalDirectories": [
       "//Users/Mathijs.Mortimer/.cargo/registry",
       "//Users/Mathijs.Mortimer/.nexo",
-      "/tmp"
+      "/tmp",
+      "/private/tmp"
     ]
   },
   "effortLevel": "high",

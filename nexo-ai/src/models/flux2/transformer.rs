@@ -38,8 +38,12 @@ pub(crate) fn scaled_dot_product_attention(
     let q = q.flatten_to(batch_dims.len() - 1)?;
     let k = k.flatten_to(batch_dims.len() - 1)?;
     let v = v.flatten_to(batch_dims.len() - 1)?;
-    let attn_weights = (q.matmul(&k.t()?)? * scale_factor)?;
-    let attn_scores = candle_nn::ops::softmax_last_dim(&attn_weights)?.matmul(&v)?;
+    let attn_scores = if q.device().is_metal() {
+        candle_nn::ops::sdpa(&q, &k, &v, None, false, scale_factor as f32, 1.0)?
+    } else {
+        let attn_weights = (q.matmul(&k.t()?)? * scale_factor)?;
+        candle_nn::ops::softmax_last_dim(&attn_weights)?.matmul(&v)?
+    };
     batch_dims.push(attn_scores.dim(D::Minus2)?);
     batch_dims.push(attn_scores.dim(D::Minus1)?);
     attn_scores.reshape(batch_dims)
