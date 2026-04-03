@@ -72,25 +72,20 @@ impl super::Coordinator {
 
         let model: Box<dyn crate::shared::model_traits::ModelInfo> =
             match manifest.manifest.family.as_str() {
-                "parler" => Box::new(crate::models::talk::parler::ParlerTtsModel::new(
+                "whisper" => Box::new(crate::models::whisper::WhisperModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
                 )),
-                "whisper" => Box::new(crate::models::listen::whisper::WhisperModel::new(
+                "flux" => Box::new(crate::models::flux2::FluxModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
                 )),
-                "flux" => Box::new(crate::models::imagine::flux::FluxModel::new(
-                    model_name.to_string(),
-                    memory_bytes,
-                    model_dir,
-                )),
-                "gemma3" => {
+                "gemma4" => {
                     let settings = self.config.model_settings(model_name);
                     Box::new(
-                        crate::models::multipurpose::gemma3::Gemma3Model::new(
+                        crate::models::gemma4::Gemma4Model::new(
                             model_name.to_string(),
                             memory_bytes,
                             model_dir,
@@ -98,31 +93,16 @@ impl super::Coordinator {
                         .with_max_context_tokens(settings.max_context_tokens),
                     )
                 }
-                "qwen3" => {
-                    let settings = self.config.model_settings(model_name);
-                    Box::new(
-                        crate::models::multipurpose::qwen3::Qwen3Model::new(
-                            model_name.to_string(),
-                            memory_bytes,
-                            model_dir,
-                        )
-                        .with_max_context_tokens(settings.max_context_tokens),
-                    )
-                }
-                "z_image" => Box::new(
-                    crate::models::imagine::z_image::ZImageModel::new(
-                        model_name.to_string(),
-                        memory_bytes,
-                        model_dir,
-                    ),
-                ),
-                "qwen3_embed" => Box::new(
-                    crate::models::embed::qwen3_embed::Qwen3EmbedModel::new(
-                        model_name.to_string(),
-                        memory_bytes,
-                        model_dir,
-                    ),
-                ),
+                "z_image" => Box::new(crate::models::z_image::ZImageModel::new(
+                    model_name.to_string(),
+                    memory_bytes,
+                    model_dir,
+                )),
+                "qwen_image" => Box::new(crate::models::qwen_image::QwenImageModel::new(
+                    model_name.to_string(),
+                    memory_bytes,
+                    model_dir,
+                )),
                 other => anyhow::bail!("unsupported model family '{other}'"),
             };
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexo_tool_spec::tool::{Tool, ToolResult};
+use nexo_spec::tool::{Tool, ToolResult};
 
 use crate::transform;
 

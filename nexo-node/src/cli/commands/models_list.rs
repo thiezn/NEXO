@@ -16,11 +16,12 @@ pub fn run() -> utl_helpers::Result {
 
     let mdir = default_models_dir();
 
-    for manifest in manifests {
-        let downloaded = manifest.files.iter().all(|f| {
-            let path = mdir.join(storage_path(manifest, f));
-            path.exists()
-        });
+    for entry in manifests {
+        let manifest = &entry.manifest;
+        let downloaded = manifest
+            .files
+            .iter()
+            .all(|f| mdir.join(storage_path(manifest, f)).exists());
 
         println!(
             "{:<30} {:<10.1} {:<12} {}",

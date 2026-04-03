@@ -127,7 +127,7 @@ macro_rules! listen_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = nexo_ai::models::listen::whisper::WhisperModel::new(
+            let mut model = nexo_ai::models::whisper::WhisperModel::new(
                 $model_name.into(),
                 memory_bytes,
                 model_dir,
@@ -161,114 +161,6 @@ macro_rules! listen_test {
 listen_test!(test_whisper_large_v3_turbo, "whisper-large-v3-turbo");
 listen_test!(test_whisper_large_v3, "whisper-large-v3");
 listen_test!(test_distil_large_v3, "distil-large-v3");
-
-// ── Parler (Talk) ────────────────────────────────────────────────────────────
-
-fn parler_request() -> TalkRequest {
-    TalkRequest {
-        text: "Hello world.".into(),
-        voice_description: "A warm female voice.".into(),
-        max_tokens: 50,
-        temperature: 1.0,
-        seed: 42,
-    }
-}
-
-macro_rules! talk_test {
-    ($name:ident, $model_name:expr, $timeout:expr) => {
-        #[test]
-        #[ignore]
-        #[serial]
-        #[timeout($timeout)]
-        fn $name() {
-            let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = nexo_ai::models::talk::parler::ParlerTtsModel::new(
-                $model_name.into(),
-                memory_bytes,
-                model_dir,
-            );
-
-            model.load().expect("failed to load model");
-            assert!(model.is_loaded());
-
-            let talk = model.as_talk().expect("should be a talk model");
-            let response = talk
-                .synthesize(&parler_request())
-                .expect("synthesis failed");
-
-            eprintln!(
-                "generated {} samples at {} Hz ({:.1}s)",
-                response.pcm_samples.len(),
-                response.sample_rate,
-                response.pcm_samples.len() as f64 / response.sample_rate as f64
-            );
-            assert!(
-                !response.pcm_samples.is_empty(),
-                "synthesis returned empty PCM"
-            );
-            assert!(response.sample_rate > 0, "invalid sample rate");
-
-            model.unload();
-            assert!(!model.is_loaded());
-        }
-    };
-}
-
-talk_test!(test_parler_mini, "parler-mini", 600_000);
-talk_test!(test_parler_large, "parler-large", 900_000);
-
-// ── Parler (Performance) ────────────────────────────────────────────────────
-
-macro_rules! talk_perf_test {
-    ($name:ident, $model_name:expr, $max_seconds:expr) => {
-        #[test]
-        #[ignore]
-        #[serial]
-        #[timeout(600_000)]
-        fn $name() {
-            let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = nexo_ai::models::talk::parler::ParlerTtsModel::new(
-                $model_name.into(),
-                memory_bytes,
-                model_dir,
-            );
-
-            model.load().expect("failed to load model");
-            assert!(model.is_loaded());
-
-            let talk = model.as_talk().expect("should be a talk model");
-            let request = TalkRequest {
-                text: "Hello world.".into(),
-                voice_description: "A warm female voice.".into(),
-                max_tokens: 50,
-                temperature: 1.0,
-                seed: 42,
-            };
-            let response = talk.synthesize(&request).expect("synthesis failed");
-
-            let audio_duration = response.pcm_samples.len() as f64 / response.sample_rate as f64;
-            let inference_secs = response.inference_time_ms as f64 / 1000.0;
-            let rtf = inference_secs / audio_duration;
-
-            eprintln!(
-                "PERF: {} — {:.1}s audio in {:.1}s = {:.1}x realtime (max: {:.0}s)",
-                $model_name, audio_duration, inference_secs, rtf, $max_seconds as f64,
-            );
-
-            assert!(
-                inference_secs <= $max_seconds as f64,
-                "Performance regression: {:.1}s > {:.0}s maximum for {}",
-                inference_secs, $max_seconds as f64, $model_name,
-            );
-
-            model.unload();
-            assert!(!model.is_loaded());
-        }
-    };
-}
-
-talk_perf_test!(test_parler_mini_perf, "parler-mini", 60);
-talk_perf_test!(test_parler_large_perf, "parler-large", 120);
 
 // ── Imagine ─────────────────────────────────────────────────────────────────
 
@@ -315,10 +207,14 @@ macro_rules! imagine_test {
     };
 }
 
-imagine_test!(test_flux_2_klein_4b, "flux-2-klein-4b", nexo_ai::models::imagine::flux::FluxModel);
-imagine_test!(test_flux_2_klein_9b, "flux-2-klein-9b", nexo_ai::models::imagine::flux::FluxModel);
-imagine_test!(test_flux_2_dev, "flux-2-dev", nexo_ai::models::imagine::flux::FluxModel);
-imagine_test!(test_z_image_turbo, "z-image-turbo", nexo_ai::models::imagine::z_image::ZImageModel);
+imagine_test!(test_flux_2_klein_4b, "flux-2-klein-4b", nexo_ai::models::flux2::FluxModel);
+imagine_test!(test_flux_2_klein_9b, "flux-2-klein-9b", nexo_ai::models::flux2::FluxModel);
+imagine_test!(test_flux_2_dev, "flux-2-dev", nexo_ai::models::flux2::FluxModel);
+imagine_test!(test_z_image_turbo, "z-image-turbo", nexo_ai::models::z_image::ZImageModel);
+imagine_test!(test_qwen_image_q4, "qwen-image-q4", nexo_ai::models::qwen_image::QwenImageModel);
+imagine_test!(test_qwen_image_q6, "qwen-image-q6", nexo_ai::models::qwen_image::QwenImageModel);
+imagine_test!(test_qwen_image_q8, "qwen-image-q8", nexo_ai::models::qwen_image::QwenImageModel);
+imagine_test!(test_qwen_image_bf16, "qwen-image-bf16", nexo_ai::models::qwen_image::QwenImageModel);
 
 // ── Imagine (File Output) ───────────────────────────────────────────────────
 
@@ -407,7 +303,7 @@ macro_rules! imagine_file_test {
 imagine_file_test!(
     test_z_image_turbo_avocado,
     "z-image-turbo",
-    nexo_ai::models::imagine::z_image::ZImageModel,
+    nexo_ai::models::z_image::ZImageModel,
     "avocado",
     "z-image-test-avocado.png",
     4
@@ -416,13 +312,13 @@ imagine_file_test!(
 imagine_file_test!(
     test_flux_2_klein_4b_avocado,
     "flux-2-klein-4b",
-    nexo_ai::models::imagine::flux::FluxModel,
+    nexo_ai::models::flux2::FluxModel,
     "avocado",
     "flux-test-avocado.png",
     4
 );
 
-// ── Gemma 3 (Chat) ─────────────────────────────────────────────────────────
+// ── Gemma 4 (Chat) ─────────────────────────────────────────────────────────
 
 macro_rules! chat_test {
     ($name:ident, $model_name:expr, $model_type:path) => {
@@ -453,6 +349,8 @@ macro_rules! chat_test {
                 max_tokens: $max_tokens,
                 temperature: 0.1,
                 top_p: 0.9,
+                top_k: None,
+                session_id: None,
             };
             let response = chat.chat(&request).expect("chat failed");
 
@@ -466,11 +364,12 @@ macro_rules! chat_test {
     };
 }
 
-chat_test!(test_gemma_3_4b_it_chat, "gemma-3-4b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-chat_test!(test_gemma_3_12b_it_chat, "gemma-3-12b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-chat_test!(test_gemma_3_27b_it_chat, "gemma-3-27b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
+chat_test!(test_gemma_4_e2b_it_chat, "gemma-4-e2b-it", nexo_ai::models::gemma4::Gemma4Model);
+chat_test!(test_gemma_4_e4b_it_chat, "gemma-4-e4b-it", nexo_ai::models::gemma4::Gemma4Model);
+chat_test!(test_gemma_4_26b_a4b_it_chat, "gemma-4-26b-a4b-it", nexo_ai::models::gemma4::Gemma4Model);
+chat_test!(test_gemma_4_31b_it_chat, "gemma-4-31b-it", nexo_ai::models::gemma4::Gemma4Model);
 
-// ── Gemma 3 (Performance) ──────────────────────────────────────────────────
+// ── Gemma 4 (Performance) ──────────────────────────────────────────────────
 
 macro_rules! perf_test {
     ($name:ident, $model_name:expr, $min_tok_per_sec:expr, $model_type:path) => {
@@ -500,6 +399,8 @@ macro_rules! perf_test {
                 max_tokens: 2,
                 temperature: 0.1,
                 top_p: 0.9,
+                top_k: None,
+                session_id: None,
             };
             let _ = chat.chat(&warmup);
 
@@ -512,6 +413,8 @@ macro_rules! perf_test {
                 max_tokens: 128,
                 temperature: 0.1,
                 top_p: 0.9,
+                top_k: None,
+                session_id: None,
             };
             let response = chat.chat(&request).expect("chat failed");
 
@@ -544,11 +447,12 @@ macro_rules! perf_test {
     };
 }
 
-perf_test!(test_gemma_3_4b_it_perf, "gemma-3-4b-it", 10.0, nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-perf_test!(test_gemma_3_12b_it_perf, "gemma-3-12b-it", 5.0, nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-perf_test!(test_gemma_3_27b_it_perf, "gemma-3-27b-it", 2.0, nexo_ai::models::multipurpose::gemma3::Gemma3Model);
+perf_test!(test_gemma_4_e2b_it_perf, "gemma-4-e2b-it", 15.0, nexo_ai::models::gemma4::Gemma4Model);
+perf_test!(test_gemma_4_e4b_it_perf, "gemma-4-e4b-it", 10.0, nexo_ai::models::gemma4::Gemma4Model);
+perf_test!(test_gemma_4_26b_a4b_it_perf, "gemma-4-26b-a4b-it", 5.0, nexo_ai::models::gemma4::Gemma4Model);
+perf_test!(test_gemma_4_31b_it_perf, "gemma-4-31b-it", 2.0, nexo_ai::models::gemma4::Gemma4Model);
 
-// ── Gemma 3 (Tool) ─────────────────────────────────────────────────────────
+// ── Gemma 4 (Tool) ─────────────────────────────────────────────────────────
 
 macro_rules! tool_test {
     ($name:ident, $model_name:expr, $model_type:path) => {
@@ -576,7 +480,7 @@ macro_rules! tool_test {
                     role: ChatRole::User,
                     content: "What is the weather in Amsterdam?".into(),
                 }],
-                tools: vec![nexo_tool_spec::tool::ToolSpec {
+                tools: vec![nexo_spec::tool::ToolSpec {
                     name: "get_weather".into(),
                     description: "Get the current weather for a city".into(),
                     parameters: serde_json::json!({
@@ -589,6 +493,9 @@ macro_rules! tool_test {
                 }],
                 max_tokens: $max_tokens,
                 temperature: 0.1,
+                top_p: 0.9,
+                top_k: None,
+                session_id: None,
             };
             let response = tool.call_tools(&request).expect("tool call failed");
 
@@ -602,11 +509,12 @@ macro_rules! tool_test {
     };
 }
 
-tool_test!(test_gemma_3_4b_it_tool, "gemma-3-4b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-tool_test!(test_gemma_3_12b_it_tool, "gemma-3-12b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-tool_test!(test_gemma_3_27b_it_tool, "gemma-3-27b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
+tool_test!(test_gemma_4_e2b_it_tool, "gemma-4-e2b-it", nexo_ai::models::gemma4::Gemma4Model);
+tool_test!(test_gemma_4_e4b_it_tool, "gemma-4-e4b-it", nexo_ai::models::gemma4::Gemma4Model);
+tool_test!(test_gemma_4_26b_a4b_it_tool, "gemma-4-26b-a4b-it", nexo_ai::models::gemma4::Gemma4Model);
+tool_test!(test_gemma_4_31b_it_tool, "gemma-4-31b-it", nexo_ai::models::gemma4::Gemma4Model);
 
-// ── Gemma 3 (Image) ──────────────────────────────────────────────────────
+// ── Gemma 4 (Image) ──────────────────────────────────────────────────────
 
 /// Create a small test image (solid red 64x64 PNG) in memory.
 fn create_test_image() -> Vec<u8> {
@@ -661,28 +569,7 @@ macro_rules! image_test {
     };
 }
 
-image_test!(test_gemma_3_4b_it_image, "gemma-3-4b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-image_test!(test_gemma_3_12b_it_image, "gemma-3-12b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-image_test!(test_gemma_3_27b_it_image, "gemma-3-27b-it", nexo_ai::models::multipurpose::gemma3::Gemma3Model);
-
-// ── Qwen3 (Chat) ───────────────────────────────────────────────────────────
-
-chat_test!(test_qwen3_4b_q5km_chat, "qwen3-4b-q5km", nexo_ai::models::multipurpose::qwen3::Qwen3Model, 256);
-chat_test!(test_qwen3_30b_a3b_q4km_chat, "qwen3-30b-a3b-q4km", nexo_ai::models::multipurpose::qwen3::Qwen3Model, 256);
-chat_test!(test_qwen3_vl_4b_chat, "qwen3-vl-4b", nexo_ai::models::multipurpose::qwen3::Qwen3Model, 256);
-
-// ── Qwen3 (Tool) ───────────────────────────────────────────────────────────
-
-tool_test!(test_qwen3_4b_q5km_tool, "qwen3-4b-q5km", nexo_ai::models::multipurpose::qwen3::Qwen3Model, 256);
-tool_test!(test_qwen3_30b_a3b_q4km_tool, "qwen3-30b-a3b-q4km", nexo_ai::models::multipurpose::qwen3::Qwen3Model, 256);
-tool_test!(test_qwen3_vl_4b_tool, "qwen3-vl-4b", nexo_ai::models::multipurpose::qwen3::Qwen3Model, 256);
-
-// ── Qwen3 (Image) ──────────────────────────────────────────────────────────
-
-image_test!(test_qwen3_vl_4b_image, "qwen3-vl-4b", nexo_ai::models::multipurpose::qwen3::Qwen3Model, 256);
-
-// ── Qwen3 (Performance) ────────────────────────────────────────────────────
-
-perf_test!(test_qwen3_4b_q5km_perf, "qwen3-4b-q5km", 15.0, nexo_ai::models::multipurpose::qwen3::Qwen3Model);
-perf_test!(test_qwen3_30b_a3b_q4km_perf, "qwen3-30b-a3b-q4km", 8.0, nexo_ai::models::multipurpose::qwen3::Qwen3Model);
-perf_test!(test_qwen3_vl_4b_perf, "qwen3-vl-4b", 10.0, nexo_ai::models::multipurpose::qwen3::Qwen3Model);
+image_test!(test_gemma_4_e2b_it_image, "gemma-4-e2b-it", nexo_ai::models::gemma4::Gemma4Model);
+image_test!(test_gemma_4_e4b_it_image, "gemma-4-e4b-it", nexo_ai::models::gemma4::Gemma4Model);
+image_test!(test_gemma_4_26b_a4b_it_image, "gemma-4-26b-a4b-it", nexo_ai::models::gemma4::Gemma4Model);
+image_test!(test_gemma_4_31b_it_image, "gemma-4-31b-it", nexo_ai::models::gemma4::Gemma4Model);

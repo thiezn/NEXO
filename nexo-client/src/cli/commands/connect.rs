@@ -119,6 +119,7 @@ async fn handle_user_input(
                     session_id,
                     context: None,
                     model_id,
+                    thinking: None,
                 },
             )?
         }

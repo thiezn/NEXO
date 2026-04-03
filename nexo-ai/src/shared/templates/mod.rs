@@ -38,7 +38,7 @@ pub trait ChatTemplate: Send {
     fn format_with_tools(
         &self,
         messages: &[ChatMessage],
-        tools: &[nexo_tool_spec::tool::ToolSpec],
+        tools: &[nexo_spec::tool::ToolSpec],
         reasoning: &ReasoningMode,
     ) -> String;
 
@@ -56,7 +56,7 @@ pub trait ChatTemplate: Send {
 // ── Shared formatting helpers ──────────────────────────────────────────────
 
 /// Format tool specs as `<tools>` XML with JSON objects (Qwen3 official style).
-pub fn format_tools_xml(tools: &[nexo_tool_spec::tool::ToolSpec]) -> String {
+pub fn format_tools_xml(tools: &[nexo_spec::tool::ToolSpec]) -> String {
     let mut out = String::from("<tools>");
     for tool in tools {
         out.push('\n');
@@ -67,6 +67,6 @@ pub fn format_tools_xml(tools: &[nexo_tool_spec::tool::ToolSpec]) -> String {
 }
 
 /// Format tool specs as a pretty-printed JSON array (Gemma3 style).
-pub fn format_tools_json(tools: &[nexo_tool_spec::tool::ToolSpec]) -> String {
+pub fn format_tools_json(tools: &[nexo_spec::tool::ToolSpec]) -> String {
     serde_json::to_string_pretty(tools).unwrap_or_default()
 }

@@ -1,12 +1,25 @@
 use crate::error::{ClientError, Result};
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use nexo_ws_schema::Frame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
+
 /// A WebSocket connection to a NEXO Gateway.
 pub struct NexoConnection {
-    ws: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: WsStream,
+}
+
+/// Write half of a split [`NexoConnection`].
+pub struct WriteHalf {
+    sink: SplitSink<WsStream, Message>,
+}
+
+/// Read half of a split [`NexoConnection`].
+pub struct ReadHalf {
+    stream: SplitStream<WsStream>,
 }
 
 impl NexoConnection {
@@ -76,6 +89,54 @@ impl NexoConnection {
     pub async fn close(&mut self) -> Result<()> {
         self.ws.close(None).await?;
         Ok(())
+    }
+
+    /// Split this connection into independent read and write halves.
+    pub fn into_split(self) -> (WriteHalf, ReadHalf) {
+        let (sink, stream) = self.ws.split();
+        (WriteHalf { sink }, ReadHalf { stream })
+    }
+}
+
+impl WriteHalf {
+    /// Send a typed Frame as a JSON text message.
+    pub async fn send_frame(&mut self, frame: &Frame) -> Result<()> {
+        let json = serde_json::to_string(frame)?;
+        tracing::trace!(">>> {json}");
+        self.sink.send(Message::Text(json.into())).await?;
+        Ok(())
+    }
+
+    /// Close the write half gracefully.
+    pub async fn close(&mut self) -> Result<()> {
+        self.sink.close().await?;
+        Ok(())
+    }
+}
+
+impl ReadHalf {
+    /// Receive the next Frame. Returns `None` if the connection is closed.
+    pub async fn recv_frame(&mut self) -> Result<Option<Frame>> {
+        loop {
+            match self.stream.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    tracing::trace!("<<< {text}");
+                    let frame: Frame = serde_json::from_str(&text)?;
+                    return Ok(Some(frame));
+                }
+                Some(Ok(Message::Close(_))) | None => {
+                    return Ok(None);
+                }
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {
+                    continue;
+                }
+                Some(Ok(Message::Binary(_))) => {
+                    tracing::warn!("Received unexpected binary message, ignoring");
+                    continue;
+                }
+                Some(Err(e)) => return Err(e.into()),
+            }
+        }
     }
 }
 

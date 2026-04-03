@@ -52,6 +52,7 @@ impl Coordinator {
                     .map(|c| (c, model_name.clone()))
             })
             .collect();
+
         Self {
             config,
             slots: HashMap::new(),
@@ -122,7 +123,10 @@ impl Coordinator {
         crate::registry::list_models(|name| self.is_model_loaded(name))
     }
 
-    pub fn model_mut(&mut self, name: &str) -> Option<&mut dyn crate::shared::model_traits::ModelInfo> {
+    pub fn model_mut(
+        &mut self,
+        name: &str,
+    ) -> Option<&mut dyn crate::shared::model_traits::ModelInfo> {
         self.slots.get_mut(name).map(|s| s.model_mut())
     }
 

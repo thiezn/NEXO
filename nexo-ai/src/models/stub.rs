@@ -69,6 +69,8 @@ mod tests {
             max_tokens: 100,
             temperature: 0.7,
             top_p: 0.9,
+            top_k: None,
+            session_id: None,
         };
         let result = model.chat(&request);
         assert!(result.is_err());
@@ -88,6 +90,8 @@ mod tests {
             max_tokens: 100,
             temperature: 0.7,
             top_p: 0.9,
+            top_k: None,
+            session_id: None,
         };
         let response = model.chat(&request).unwrap();
         assert_eq!(response.text, "stub response");

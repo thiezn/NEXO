@@ -213,13 +213,41 @@ sequenceDiagram
     GW-->>App: event:agent {status: completed}
 ```
 
+## Thinking mode
+
+When `thinking: true` is set in the agent request, the gateway enables Gemma 4's
+extended thinking capability:
+
+1. **Injection**: The `<|think|>` token is prepended to the system prompt before inference.
+2. **Response format**: The model may return thinking content wrapped in
+   `<|channel>thought\n...<channel|>` blocks alongside the visible reply.
+3. **Stripping**: The gateway strips thinking blocks from the raw response. Only the
+   visible text is persisted to the session history. Thinking content is emitted as
+   an ephemeral `thinkingContent` field in the `streaming` agent event.
+4. **Multi-turn**: Because thinking content is never persisted, subsequent turns in
+   the same session automatically receive a clean history — no special handling is needed.
+
+### Gemma 4 sampling parameters
+
+When using Gemma 4 models, the recommended sampling configuration is:
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `temperature` | `1.0` | Required for thinking mode |
+| `top_p` | `0.95` | Nucleus sampling |
+| `top_k` | `64` | Top-k filtering before top-p |
+
+> **Note**: Queued runs that are drained on node reconnect lose the `thinking` flag
+> and default to `thinking: false`.
+
 ## System prompt composition
 
-The system prompt is assembled from three sources, in order:
+The system prompt is assembled from these sources, in order:
 
-1. **SOUL.md** — Always loaded from `~/.nexo/nexo-storage/SOUL.md` (if it exists). Defines the agent's personality and persistent instructions.
-2. **Prefill collection** — If the session has a `prefill_collection_id`, the gateway resolves it from `PREFILL/collections.json`, reads each referenced markdown file, and concatenates them.
-3. **Tool descriptions** — A structured description of all available tools (both node-registered and gateway-native).
+1. **Thinking token** — If `thinking: true`, the `<|think|>` token is prepended.
+2. **SOUL.md** — Always loaded from `~/.nexo/nexo-storage/SOUL.md` (if it exists). Defines the agent's personality and persistent instructions.
+3. **Prefill collection** — If the session has a `prefill_collection_id`, the gateway resolves it from `PREFILL/collections.json`, reads each referenced markdown file, and concatenates them.
+4. **Tool descriptions** — A structured description of all available tools (both node-registered and gateway-native).
 
 If none of these produce content, a default "You are a helpful assistant." prompt is used.
 

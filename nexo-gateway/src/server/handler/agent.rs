@@ -63,6 +63,7 @@ pub(super) async fn handle_agent(
         return internal_error(request_id, format!("Failed to create run: {e}"));
     }
 
+    let thinking = agent_params.thinking.unwrap_or(false);
     let cmd = AgentCommand::RunAgent {
         run_id: run_id.clone(),
         session_id: session_id.clone(),
@@ -71,6 +72,7 @@ pub(super) async fn handle_agent(
         peer_id: peer_id.to_string(),
         model_id: agent_params.model_id,
         prefill_collection_id,
+        thinking,
     };
     if let Err(e) = agent_handle.submit(cmd).await {
         tracing::error!("Failed to submit agent command: {e}");

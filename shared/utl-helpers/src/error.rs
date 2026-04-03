@@ -24,6 +24,12 @@ impl fmt::Display for Error {
 
 impl StdError for Error {}
 
+impl<T> From<std::sync::PoisonError<T>> for Error {
+    fn from(e: std::sync::PoisonError<T>) -> Self {
+        Error::Other(format!("Arc Lock poisoned: {}", e))
+    }
+}
+
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
         Error::Io(e.to_string())

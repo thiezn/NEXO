@@ -1,4 +1,4 @@
-use nexo_tool_spec::tool::Tool;
+use nexo_spec::tool::Tool;
 use nexo_ws_schema::ToolEntry;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,7 +69,7 @@ impl Default for GatewayToolExecutor {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use nexo_tool_spec::tool::ToolResult;
+    use nexo_spec::tool::ToolResult;
 
     struct DummyTool;
 

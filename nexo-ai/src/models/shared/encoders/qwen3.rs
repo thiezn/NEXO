@@ -258,6 +258,23 @@ impl Qwen3TextEncoder {
         Tensor::from_slice(&mask, (b, 1, l, l), &self.device)?.to_dtype(self.dtype)
     }
 
+    /// Run all encoder layers and return the final hidden state.
+    ///
+    /// Returns the output of the last layer with shape `(B, seq_len, hidden_size)`.
+    /// Used by Z-Image which expects 2560-dim caption features.
+    fn forward(&self, input_ids: &Tensor) -> CResult<Tensor> {
+        let (b, l) = input_ids.dims2()?;
+        let mut hidden = self.embed_tokens.forward(input_ids)?;
+
+        let mask = if l == 1 { None } else { Some(self.causal_mask(b, l)?) };
+
+        for layer in &self.layers {
+            hidden = layer.forward(&hidden, mask.as_ref())?;
+        }
+
+        Ok(hidden)
+    }
+
     /// Run the encoder and capture hidden states at specified layer indices.
     ///
     /// Returns the concatenation of hidden states from `layer_indices` along
@@ -332,6 +349,32 @@ impl Qwen3Encoder {
             .map_err(|e| anyhow::anyhow!("failed to load Qwen3 tokenizer: {e}"))?;
 
         Ok(Self { model, tokenizer })
+    }
+
+    /// Encode a prompt using all layers and the Qwen3 chat template (no thinking block).
+    ///
+    /// Returns `(hidden_states, token_count)` where `hidden_states` has shape
+    /// `(1, seq_len, 2560)`. Used by Z-Image which expects single-layer 2560-dim features.
+    pub fn encode(
+        &self,
+        prompt: &str,
+        device: &Device,
+        dtype: DType,
+    ) -> Result<(Tensor, usize)> {
+        let formatted = format_prompt_for_qwen3(prompt);
+        let tokens = self
+            .tokenizer
+            .encode(formatted.as_str(), true)
+            .map_err(|e| anyhow::anyhow!("Qwen3 tokenization failed: {e}"))?
+            .get_ids()
+            .to_vec();
+
+        let token_count = tokens.len();
+        let input_ids = Tensor::from_vec(tokens, (1, token_count), device)?;
+
+        let emb = self.model.forward(&input_ids)?;
+        let emb = emb.to_device(device)?.to_dtype(dtype)?;
+        Ok((emb, token_count))
     }
 
     /// Encode prompt and extract hidden states from specific layers.
@@ -413,5 +456,13 @@ mod tests {
         assert_eq!(cfg.num_key_value_heads, 8);
         assert_eq!(cfg.head_dim, 128);
         assert_eq!(cfg.hidden_size * 3, 7680); // context_in_dim
+    }
+
+    #[test]
+    fn z_image_needs_single_layer_2560_dim() {
+        // Z-Image uses cap_feat_dim=2560 which is exactly Qwen3's hidden_size.
+        // The `encode` method returns the final hidden state (all 36 layers).
+        let cfg = Qwen3Config::flux();
+        assert_eq!(cfg.hidden_size, 2560);
     }
 }

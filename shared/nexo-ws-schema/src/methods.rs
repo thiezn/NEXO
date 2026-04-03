@@ -1,3 +1,4 @@
+use nexo_spec::model::LoadedModelInfo;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -113,6 +114,10 @@ pub struct AgentParams {
     /// The model ID to use for inference. If omitted, any available LLM node is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
+    /// Enable thinking mode (Gemma 4). When true the model emits reasoning
+    /// tokens that are returned in the event but not persisted in history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
 }
 
 /// Parameters for the `system-presence` method.
@@ -416,14 +421,13 @@ pub struct ModelUnloadResponse {
 
 // -- model.status --
 
-/// Sent by a node to report its currently loaded model and available models on disk.
-/// Used as both a push notification and a response to gateway queries.
+/// Sent by a node to report its model state.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStatusParams {
-    /// The model currently loaded in VRAM (None if no model is loaded).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub loaded_model_id: Option<String>,
+    /// Models currently loaded with their categories.
+    #[serde(default)]
+    pub loaded_models: Vec<LoadedModelInfo>,
     /// All model IDs available on disk on this node.
     #[serde(default)]
     pub available_models: Vec<String>,
@@ -568,6 +572,9 @@ pub struct ImageAnalyzeParams {
     pub max_tokens: usize,
     #[serde(default = "default_image_analyze_temperature")]
     pub temperature: f64,
+    /// Visual token budget for variable resolution. Common values: 70, 140, 280, 560, 1120.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visual_token_budget: Option<u32>,
     pub idempotency_key: String,
 }
 
@@ -576,7 +583,7 @@ fn default_image_analyze_max_tokens() -> usize {
 }
 
 fn default_image_analyze_temperature() -> f64 {
-    0.3
+    1.0
 }
 
 /// Response payload for `image.analyze`.
@@ -635,6 +642,7 @@ mod tests {
             session_id: Some("sess-1".into()),
             context: Some(serde_json::json!({"files": ["a.rs"]})),
             model_id: None,
+            thinking: None,
         };
         let json = serde_json::to_string(&params).unwrap();
         let decoded: AgentParams = serde_json::from_str(&json).unwrap();
@@ -649,6 +657,7 @@ mod tests {
             session_id: None,
             context: None,
             model_id: None,
+            thinking: None,
         };
         let json = serde_json::to_value(&params).unwrap();
         assert!(!json.as_object().unwrap().contains_key("sessionId"));

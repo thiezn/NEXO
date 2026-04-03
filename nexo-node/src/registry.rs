@@ -1,4 +1,4 @@
-use nexo_tool_spec::tool::{Tool, ToolResult};
+use nexo_spec::tool::{Tool, ToolResult};
 use nexo_ws_schema::ToolSpecEntry;
 
 /// Local tool registry holding all tools this node can execute.
@@ -46,6 +46,7 @@ impl ToolRegistry {
             .iter()
             .map(|c| c.split('.').next().unwrap_or(c).to_string())
             .collect();
+
         capabilities.sort();
         capabilities.dedup();
         (capabilities, commands)

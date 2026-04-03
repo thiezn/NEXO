@@ -9,7 +9,7 @@ mod tools;
 #[cfg(test)]
 mod tests;
 
-use crate::agent::{AgentCommand, AgentHandle};
+use crate::agent::AgentHandle;
 use crate::server::state::{PeerInfo, SharedState};
 use futures_util::{SinkExt, StreamExt};
 use nexo_ws_schema::{
@@ -52,20 +52,13 @@ pub async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
             }
         };
 
-    // Step 2: Send presence event and check if we should drain the agent queue
-    let is_llm_node = {
+    // Step 2: Send presence event
+    // Note: DrainQueue is triggered when we receive ModelStatus (after a model is loaded),
+    // not on initial connect, since we don't know the node's loaded models yet.
+    {
         let state_read = state.read().await;
         if let Some(peer) = state_read.peers.get(&peer_id) {
             broadcast_presence(peer, "online", &state_read.event_tx);
-            peer.role == Role::Node
-                && peer.capabilities.iter().any(|c| c == "llm" || c == "inference")
-        } else {
-            false
-        }
-    };
-    if is_llm_node {
-        if let Err(e) = agent_handle.submit(AgentCommand::DrainQueue).await {
-            tracing::warn!("Failed to submit DrainQueue after LLM node connect: {e}");
         }
     }
 

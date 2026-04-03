@@ -1,10 +1,7 @@
 pub mod stub;
 pub mod shared;
-pub mod chat;
-pub mod tool;
-pub mod image;
-pub mod listen;
-pub mod talk;
-pub mod imagine;
-pub mod multipurpose;
-pub mod embed;
+pub mod whisper;
+pub mod gemma4;
+pub mod flux2;
+pub mod z_image;
+pub mod qwen_image;

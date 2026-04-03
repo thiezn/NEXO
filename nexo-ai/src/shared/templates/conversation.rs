@@ -122,7 +122,7 @@ impl ConversationManager {
     pub fn format_with_tools(
         &self,
         template: &dyn ChatTemplate,
-        tools: &[nexo_tool_spec::tool::ToolSpec],
+        tools: &[nexo_spec::tool::ToolSpec],
     ) -> String {
         template.format_with_tools(&self.messages, tools, &self.reasoning)
     }

@@ -143,6 +143,7 @@ pub async fn run_scheduler(
                 peer_id: "cron".into(),
                 model_id: None,
                 prefill_collection_id: None,
+                thinking: false,
             };
             if let Err(e) = agent_handle.submit(cmd).await {
                 tracing::warn!("Failed to submit cron agent command: {e}");

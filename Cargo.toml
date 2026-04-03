@@ -5,12 +5,13 @@ members = [
     "nexo-tools/plugins/game-extractor",
     "shared/nexo-ws-schema",
     "shared/nexo-ws-client",
-    "shared/nexo-tool-spec",
+    "shared/nexo-spec",
     "nexo-gateway",
     "nexo-node",
     "nexo-client",
-    "nexo-tools/core/nexo-notes", "nexo-tools/nexo-io",
-    # "nexo-ai",
+    "nexo-tools/core/nexo-notes",
+    "nexo-tools/nexo-io",
+    "nexo-ai",
 ]
 
 resolver = "3"

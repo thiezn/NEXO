@@ -22,6 +22,7 @@ pub enum AgentCommand {
         peer_id: String,
         model_id: Option<String>,
         prefill_collection_id: Option<String>,
+        thinking: bool,
     },
     /// Drain queued runs when a new LLM node connects.
     DrainQueue,
@@ -73,8 +74,9 @@ async fn agent_task(
                 peer_id,
                 model_id,
                 prefill_collection_id,
+                thinking,
             } => {
-                tracing::info!("Starting agent run {run_id} (session={session_id})");
+                tracing::info!("Starting agent run {run_id} (session={session_id}, thinking={thinking})");
                 loop_runner::run(
                     &run_id,
                     &session_id,
@@ -86,6 +88,7 @@ async fn agent_task(
                     &event_tx,
                     model_id.as_deref(),
                     prefill_collection_id.as_deref(),
+                    thinking,
                 )
                 .await;
             }

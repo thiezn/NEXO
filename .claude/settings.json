@@ -31,7 +31,13 @@
       "Read(//tmp/**)",
       "Bash(2)",
       "Bash(tailscale status:*)",
-      "Bash(git -C /Users/Mathijs.Mortimer/Development/nexo mv nexo-gateway/src/server/handler.rs nexo-gateway/src/server/handler/mod.rs)"
+      "Bash(git -C /Users/Mathijs.Mortimer/Development/nexo mv nexo-gateway/src/server/handler.rs nexo-gateway/src/server/handler/mod.rs)",
+      "Bash(git rm:*)",
+      "Bash(git -C /Users/Mathijs.Mortimer/Development/nexo worktree list)",
+      "Bash(git -C /Users/Mathijs.Mortimer/Development/nexo branch --list 'claude/*')",
+      "Read(//Users/Mathijs.Mortimer/Development/**)",
+      "Bash(git -C /Users/Mathijs.Mortimer/Development/nexo rm nexo-node/src/download/registry.rs nexo-node/src/download/manifest.rs nexo-node/src/download/pull.rs)",
+      "Read(//^\\\\+\\\\+\\\\+ b\\\\/nexo-node\\\\/src\\\\/connect.rs/,/**)"
     ],
     "deny": [
       "WebFetch"

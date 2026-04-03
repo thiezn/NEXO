@@ -19,7 +19,8 @@ pub async fn run_image_analyze(image_path: String, prompt: String) -> utl_helper
         image_data,
         prompt,
         max_tokens: 4096,
-        temperature: 0.3,
+        temperature: 1.0,
+        visual_token_budget: None,
         idempotency_key: Frame::new_id(),
     };
 

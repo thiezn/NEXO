@@ -4,18 +4,52 @@ This document describes how nexo-gateway and nexo-node cooperate to manage local
 
 ---
 
-## 1. Model Lifecycle
+## 1. Architecture: Embedded Inference via nexo-ai
+
+nexo-node runs inference **directly in-process** using the `nexo-ai` crate and the [Candle](https://github.com/huggingface/candle) ML framework. There are no external inference servers (llama-server, whisper-server, etc.) — all model execution happens within the nexo-node process.
+
+```
+nexo-node → nexo-ai::Coordinator → model traits → Candle inference (CPU/Metal GPU)
+```
+
+The `Coordinator` manages model slots: loading models into memory, unloading them, and routing inference requests to the appropriate model based on its category (chat, tool, image, listen, talk, etc.).
+
+### Model categories
+
+nexo-ai organizes models into capability categories:
+
+| Category | Description | Primary model |
+|----------|-------------|---------------|
+| Chat | Text generation and conversation | Gemma 4 27B |
+| Tool | Function calling with structured output | Gemma 4 27B |
+| Image | Image analysis and understanding | Gemma 4 27B |
+| Imagine | Image generation | Flux Schnell |
+| Listen | Speech-to-text | Whisper Large v3 Turbo |
+| Talk | Text-to-speech | Parler TTS |
+| Embed | Text embeddings | Qwen3 Embed |
+
+### Non-blocking inference
+
+Candle inference is CPU/GPU-bound and synchronous. nexo-node bridges this with the async WebSocket transport using:
+
+1. **Split WebSocket**: The connection is split into independent read/write halves.
+2. **`tokio::select!`**: Multiplexes incoming WS frames and inference completion.
+3. **`spawn_blocking`**: Inference runs on tokio's blocking thread pool, keeping the WS read loop responsive for ticks, pings, and new requests.
+
+This ensures the node can process gateway heartbeats during multi-minute inference runs.
+
+---
+
+## 2. Model Lifecycle
 
 ### Declaration at connect time
 
-When a nexo-node connects, it declares which models are available on-disk in `ConnectParams.models`:
+When nexo-node starts, it scans `~/.nexo/local_models/` for downloaded model files and reports available models to the gateway:
 
 ```toml
-# ~/.nexo/node.toml
-available_models = ["qwen3-30b-a3b", "qwen3-8b"]
+# Auto-detected from disk — not manually configured
+available_models = ["gemma4-27b", "flux-schnell", "whisper-large-v3-turbo"]
 ```
-
-The gateway stores this list in `GatewayState.available_models` and uses it to route model-specific requests.
 
 ### Model load / unload
 
@@ -24,7 +58,7 @@ When an agent run requests a specific `model_id`, the gateway's loop runner call
 1. **Already in VRAM** — if `loaded_models[node]` already equals `model_id`, the run is routed immediately.
 2. **On disk but not loaded** — the gateway sends `Method::ModelLoad` to the capable node and waits up to 300 seconds.
 3. **Previous model loaded** — if the node has a different model in VRAM, the gateway first sends `Method::ModelUnload` (10 s timeout), then `Method::ModelLoad`.
-4. **No eligible node** — the run is queued (see §3).
+4. **No eligible node** — the run is queued (see §4).
 
 The node responds to each request and then pushes a `Method::ModelStatus` frame so the gateway's `loaded_models` map is always up to date.
 
@@ -40,7 +74,7 @@ The node responds to each request and then pushes a `Method::ModelStatus` frame 
 
 ---
 
-## 2. Composable Prefills
+## 3. Composable Prefills
 
 A *prefill* is a system-level prompt prepended to every inference request. The prefill system is composable: individual **markdown files** are stored on disk and grouped into ordered **collections**. Collections are resolved at request time — their combined content is hashed, and only the hash is sent to the node, which caches content by hash.
 
@@ -132,7 +166,7 @@ Client                  Gateway                       Node
 
 ---
 
-## 3. Request Queuing
+## 4. Request Queuing
 
 When an agent run arrives but no suitable LLM node is available, the gateway queues the request instead of failing it.
 
@@ -175,9 +209,36 @@ The `agent_runs` table stores the full request state needed for replay:
 | `queued_peer_id` | Peer that submitted the run |
 | `model_id` | Requested model (may be `NULL`) |
 
+> **Note**: The `thinking` flag is not preserved for queued runs — they replay with `thinking: false`.
+
 ---
 
-## 4. Configuration
+## 5. Configuration
+
+### nexo-ai.toml
+
+```toml
+# Model startup categories — loaded when nexo-node starts
+startup_categories = ["chat", "talk"]
+
+# Active model per category (used when no specific model_id is requested)
+[active_models]
+chat = "gemma4-27b"
+imagine = "flux-schnell"
+
+# Per-model overrides
+[models.gemma4-27b]
+temperature = 1.0
+top_p = 0.95
+top_k = 64
+max_tokens = 4096
+
+[models.flux-schnell]
+default_steps = 4
+default_guidance = 0.0
+default_width = 1024
+default_height = 1024
+```
 
 ### node.toml
 
@@ -185,29 +246,25 @@ The `agent_runs` table stores the full request state needed for replay:
 # URL of the nexo-gateway WebSocket
 gateway_url = "ws://127.0.0.1:6969"
 
-# Models available on disk, declared to the gateway at connect time.
-# This is auto-populated based on downloaded models.
-available_models = ["qwen3.5-35b-ab3b"]
+# Auto-populated based on downloaded models — no manual editing needed.
+available_models = ["gemma4-27b"]
 ```
-
-Inference server URLs default to localhost ports 8001–8004 and are not persisted to `node.toml`.
 
 ---
 
-## 5. Model Downloads
+## 6. Model Downloads
 
-nexo-node includes a built-in download manager for fetching GGUF model files from HuggingFace.
+nexo-node uses nexo-ai's download system to fetch model files (safetensors, tokenizer, config) from HuggingFace.
 
 ### Downloading a model
 
 ```bash
-nexo-node models pull qwen3.5-35b-ab3b   # download the primary inference model
-nexo-node models pull all                 # download all registered models
-nexo-node models list                     # show download status for all models
+nexo-node models pull gemma4-27b            # download a specific model
+nexo-node models pull all                   # download all registered models
+nexo-node models list                       # show download status for all models
 ```
 
-Models are stored at `~/.nexo/models/<model-name>/`. The environment variable
-`NEXO_NODE_MODELS_DIR` overrides this base path.
+Models are stored at `~/.nexo/local_models/<model-name>/`. Model-specific files are stored directly; shared family files (e.g. tokenizers) are stored under `~/.nexo/local_models/shared/<family>/`.
 
 ### HuggingFace mirror
 
@@ -216,7 +273,7 @@ Set `HF_ENDPOINT` to override:
 
 ```bash
 export HF_ENDPOINT=https://huggingface.co   # use primary HF server
-nexo-node models pull qwen3.5-35b-ab3b
+nexo-node models pull gemma4-27b
 ```
 
 For gated models, place a HuggingFace access token in `~/.nexo/hf_token.txt` or set `HF_TOKEN`.
@@ -228,42 +285,27 @@ Files that fail verification are automatically re-downloaded.
 
 ---
 
-## 6. Inference Service Management
+## 7. Gemma 4 Best Practices
 
-nexo-node starts and monitors local inference servers automatically on `nexo-node start`.
+Gemma 4 is the primary model family for chat, tool calling, and image analysis.
 
-### llama-server (primary)
+### Sampling configuration
 
-nexo-node manages `llama-server` (from [llama.cpp](https://github.com/ggml-org/llama.cpp)) for chat and tool-calling inference.
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `temperature` | `1.0` | Do not lower — required for proper thinking mode |
+| `top_p` | `0.95` | Nucleus sampling |
+| `top_k` | `64` | Top-k filtering applied before top-p |
 
-**Installation** — install the binary once manually:
+### Thinking mode
 
-```bash
-# 1. Download macOS binaries from https://github.com/ggml-org/llama.cpp/releases
-# 2. Extract and place the binary:
-mkdir -p ~/.nexo/inference_services/llama_cpp
-cp llama-server ~/.nexo/inference_services/llama_cpp/llama-server
-chmod +x ~/.nexo/inference_services/llama_cpp/llama-server
-```
+When `thinking: true` is set in the agent request:
 
-**Startup** — when `nexo-node start` is run:
+1. `<|think|>` is prepended to the system prompt.
+2. The model may emit `<|channel>thought\n...<channel|>` blocks in its response.
+3. The gateway strips thinking blocks — only visible text is persisted.
+4. Thinking content is sent ephemerally via the `thinkingContent` event field.
 
-1. Checks for the binary at `~/.nexo/inference_services/llama_cpp/llama-server`. If absent, prints the install instructions above and continues connecting to the gateway without inference capability.
-2. Checks for the model GGUF at `~/.nexo/models/qwen3.5-35b-ab3b/`. If absent, prints `nexo-node models pull qwen3.5-35b-ab3b` and continues.
-3. If both are present, spawns `llama-server` on port 8001 and waits up to 60 seconds for it to report healthy.
+### Image analysis
 
-**Lifecycle monitoring** — a background task polls `http://127.0.0.1:8001/health` every 5 seconds. After 3 consecutive failures it stops and restarts llama-server with exponential backoff (5 s → 10 s → 20 s → … → 60 s max). The gateway is not involved in this restart cycle; inference requests will fail with HTTP errors until the service recovers.
-
-**Shutdown** — llama-server is terminated (SIGTERM) when `nexo-node` exits.
-
-### Supported inference services
-
-| Port | Service | Model |
-|------|---------|-------|
-| 8001 | `llama-server` | **Qwen3.5-35B-AB3B** Q4\_K\_M (chat + tool calling) |
-| 8002 | `mlx-tts-server` | Qwen3-TTS |
-| 8003 | `whisper-server` | Whisper (STT) |
-| 8004 | `vllm-mlx` | Qwen3.5-9B (image analysis) |
-| — | `qwen-image-mps` subprocess | Qwen-Image (image generation) |
-
-Ports 8002–8004 and the image subprocess are not yet managed by nexo-node and must be started separately.
+For image analysis requests, Gemma 4 uses `temperature: 1.0` (previously 0.3). An optional `visualTokenBudget` parameter controls the number of visual tokens allocated for processing the image.

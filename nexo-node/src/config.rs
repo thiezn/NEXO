@@ -13,8 +13,6 @@ pub struct NodeConfig {
     pub device_id: String,
     pub auth_token: String,
     pub reconnect_interval_ms: u64,
-    /// Model IDs available on this node's local disk, declared to the gateway at connect time.
-    pub available_models: Vec<String>,
 }
 
 impl Default for NodeConfig {
@@ -27,7 +25,6 @@ impl Default for NodeConfig {
             device_id: "default_node_device".to_string(),
             auth_token: nexo_ws_schema::AUTH_TOKEN.to_string(),
             reconnect_interval_ms: 5000,
-            available_models: vec![],
         }
     }
 }

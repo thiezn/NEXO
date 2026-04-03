@@ -14,6 +14,7 @@ pub use events::{
     TickPayload,
 };
 pub use frame::Frame;
+pub use nexo_spec::model::{LoadedModelInfo, ModelCategory};
 pub use methods::{
     AgentParams, AgentResponse, AgentStatus, CollectionEntry, ConversationMessage, CronCreateParams,
     CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry, CronListParams,

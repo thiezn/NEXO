@@ -1,5 +1,4 @@
-use crate::download::{find_manifest, known_manifests, pull_model};
-use crate::download::manifest::Component;
+use crate::download::{find_manifest, known_manifests, pull_model, Component};
 
 pub async fn run(model: &str, force: bool) -> utl_helpers::Result {
     let manifests: Vec<_> = if model == "all" {
@@ -7,7 +6,10 @@ pub async fn run(model: &str, force: bool) -> utl_helpers::Result {
     } else if let Some(m) = find_manifest(model) {
         vec![m]
     } else {
-        let names: Vec<_> = known_manifests().iter().map(|m| m.name.as_str()).collect();
+        let names: Vec<_> = known_manifests()
+            .iter()
+            .map(|m| m.manifest.name.as_str())
+            .collect();
         return Err(utl_helpers::Error::Other(format!(
             "unknown model '{}'. Known models: {}",
             model,
@@ -15,8 +17,12 @@ pub async fn run(model: &str, force: bool) -> utl_helpers::Result {
         )));
     };
 
-    for manifest in manifests {
-        println!("Pulling model: {} ({:.1} GB)", manifest.name, manifest.size_gb);
+    for entry in manifests {
+        let manifest = &entry.manifest;
+        println!(
+            "Pulling model: {} ({:.1} GB)",
+            manifest.name, manifest.size_gb
+        );
         match pull_model(manifest, force).await {
             Ok(files) => {
                 for (component, path) in &files {

@@ -95,6 +95,7 @@ pub async fn drain_queue(
             event_tx,
             model_id.as_deref(),
             prefill_collection_id.as_deref(),
+            false, // thinking not preserved for queued runs
         )
         .await;
     }

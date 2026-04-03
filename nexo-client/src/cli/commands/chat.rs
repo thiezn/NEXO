@@ -113,6 +113,7 @@ async fn send_agent(
         session_id: Some(session_id.to_string()),
         context: None,
         model_id: model_id.clone(),
+        thinking: None,
     };
 
     let frame =

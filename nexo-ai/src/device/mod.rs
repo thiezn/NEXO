@@ -12,7 +12,7 @@ pub fn create_device(on_info: impl Fn(&str)) -> anyhow::Result<Device> {
         .unwrap_or(false);
     if force_cpu {
         on_info("CPU forced via NEXO_AI_DEVICE=cpu");
-        tracing::info!("CPU forced via NEXO_AI_DEVICE=cpu");
+        tracing::warn!("CPU forced via NEXO_AI_DEVICE=cpu");
         return Ok(Device::Cpu);
     }
     if candle_core::utils::metal_is_available() {
@@ -26,13 +26,26 @@ pub fn create_device(on_info: impl Fn(&str)) -> anyhow::Result<Device> {
     }
 }
 
-/// Determine the appropriate dtype for the given device.
+/// Dtype for image generation pipelines (diffusion denoising loops).
 ///
-/// F16 on GPU (Metal supports F16 natively, halves memory vs F32).
-/// BF16 is NOT used — it has precision issues on Apple GPU.
+/// F32 on Metal — BF16 matmul accumulation errors compound through denoising
+/// loops, causing washed-out blurry images. This matches mold's implementation.
 /// F32 on CPU.
-pub fn gpu_dtype(device: &Device) -> DType {
-    if device.is_cpu() { DType::F32 } else { DType::F16 }
+pub fn gpu_dtype(_device: &Device) -> DType {
+    // Metal image gen needs F32 precision; BF16 causes quality issues
+    DType::F32
+}
+
+/// Dtype for LLM / text model inference.
+///
+/// BF16 on Metal (Apple Silicon supports it natively, halves memory vs F32).
+/// F32 on CPU.
+pub fn gpu_compute_dtype(device: &Device) -> DType {
+    if device.is_cpu() {
+        DType::F32
+    } else {
+        DType::BF16
+    }
 }
 
 // ── macOS VM statistics FFI ─────────────────────────────────────────────────
@@ -211,9 +224,14 @@ mod tests {
     }
 
     #[test]
-    fn gpu_dtype_returns_f32_for_cpu() {
-        // CPU always gets F32 regardless of Metal availability
+    fn gpu_dtype_always_f32_for_image_gen() {
+        // Image generation always uses F32 to avoid BF16 precision issues in denoising
         assert_eq!(gpu_dtype(&Device::Cpu), DType::F32);
+    }
+
+    #[test]
+    fn gpu_compute_dtype_f32_for_cpu() {
+        assert_eq!(gpu_compute_dtype(&Device::Cpu), DType::F32);
     }
 
     #[cfg(target_os = "macos")]

@@ -1,5 +1,6 @@
 use crate::agent::gateway_tools::GatewayToolExecutor;
 use crate::memory::git::GitStorage;
+use nexo_spec::model::{LoadedModelInfo, ModelCategory};
 use nexo_ws_schema::{Frame, Role, Scope, ToolEntry, ToolSpecEntry};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -37,8 +38,8 @@ pub struct GatewayState {
     pub pending_requests: HashMap<String, oneshot::Sender<Frame>>,
     pub event_tx: broadcast::Sender<Frame>,
     pub started_at: chrono::DateTime<chrono::Utc>,
-    /// Model currently loaded in VRAM per node (None = no model loaded).
-    pub loaded_models: HashMap<PeerId, Option<String>>,
+    /// Models currently loaded in VRAM per node with their categories.
+    pub loaded_models: HashMap<PeerId, Vec<LoadedModelInfo>>,
     /// Model IDs available on disk per node (declared at connect time).
     pub available_models: HashMap<PeerId, Vec<String>>,
     /// Notified whenever a node's loaded model changes (used to wake the queue drain watcher).
@@ -96,46 +97,39 @@ impl GatewayState {
         self.available_models.insert(peer_id.to_string(), models);
     }
 
-    /// Update the currently loaded model for a node. Notifies queue drain waiters.
-    pub fn set_loaded_model(&mut self, peer_id: &str, model_id: Option<String>) {
-        self.loaded_models.insert(peer_id.to_string(), model_id);
+    /// Update the loaded models for a node. Notifies queue drain waiters.
+    pub fn set_loaded_models(&mut self, peer_id: &str, models: Vec<LoadedModelInfo>) {
+        self.loaded_models.insert(peer_id.to_string(), models);
         self.model_ready_notify.notify_waiters();
     }
 
-    /// Find the first LLM node that has `model_id` loaded in VRAM.
-    /// Returns (peer_id, sender) if found.
+    /// Find the first node that has `model_id` loaded in VRAM.
     pub fn find_loaded_llm_peer(&self, model_id: &str) -> Option<(PeerId, mpsc::Sender<Frame>)> {
         for (peer_id, peer) in &self.peers {
             if peer.role != Role::Node {
                 continue;
             }
-            if !peer.capabilities.iter().any(|c| c == "llm" || c == "inference") {
-                continue;
-            }
-            if self.loaded_models.get(peer_id).and_then(|m| m.as_deref()) == Some(model_id) {
-                if let Some(sender) = self.peer_senders.get(peer_id) {
-                    return Some((peer_id.clone(), sender.clone()));
+            if let Some(models) = self.loaded_models.get(peer_id) {
+                if models.iter().any(|m| m.model_id == model_id) {
+                    if let Some(sender) = self.peer_senders.get(peer_id) {
+                        return Some((peer_id.clone(), sender.clone()));
+                    }
                 }
             }
         }
         None
     }
 
-    /// Find the first LLM node that has `model_id` available on disk (but not necessarily loaded).
-    /// Returns (peer_id, sender) if found.
+    /// Find the first node that has `model_id` available on disk (not necessarily loaded).
     pub fn find_capable_peer_for_model(&self, model_id: &str) -> Option<(PeerId, mpsc::Sender<Frame>)> {
         for (peer_id, peer) in &self.peers {
             if peer.role != Role::Node {
                 continue;
             }
-            if !peer.capabilities.iter().any(|c| c == "llm" || c == "inference") {
-                continue;
-            }
             let has_model = self
                 .available_models
                 .get(peer_id)
-                .map(|models| models.iter().any(|m| m == model_id))
-                .unwrap_or(false);
+                .is_some_and(|models| models.iter().any(|m| m == model_id));
             if has_model {
                 if let Some(sender) = self.peer_senders.get(peer_id) {
                     return Some((peer_id.clone(), sender.clone()));
@@ -145,46 +139,55 @@ impl GatewayState {
         None
     }
 
-    /// Find the first connected node whose capabilities satisfy `pred`.
-    fn find_node_with_capability(
+    /// Find the first node that has a loaded model matching the given category predicate.
+    fn find_node_with_loaded_category(
         &self,
-        pred: impl Fn(&str) -> bool,
+        pred: impl Fn(&ModelCategory) -> bool,
     ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
         for (peer_id, peer) in &self.peers {
             if peer.role != Role::Node {
                 continue;
             }
-            if peer.capabilities.iter().any(|c| pred(c)) {
-                if let Some(sender) = self.peer_senders.get(peer_id) {
-                    return Some((peer_id.clone(), sender.clone()));
+            if let Some(models) = self.loaded_models.get(peer_id) {
+                if models.iter().any(|m| m.categories.iter().any(&pred)) {
+                    if let Some(sender) = self.peer_senders.get(peer_id) {
+                        return Some((peer_id.clone(), sender.clone()));
+                    }
                 }
             }
         }
         None
     }
 
-    /// Find any connected LLM-capable node (existing behaviour, used when no model_id is specified).
+    /// Find any connected node with a Chat or Tool model loaded.
     pub fn find_any_llm_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_with_capability(|c| c == "llm" || c == "inference")
+        self.find_node_with_loaded_category(is_llm_category)
     }
 
-    /// Find any connected node with the "vision" capability (image analysis).
+    /// Find any connected node with an Image model loaded.
     pub fn find_image_analyze_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_with_capability(|c| c == "vision")
+        self.find_node_with_loaded_category(|c| matches!(c, ModelCategory::Image))
     }
 
-    /// Returns true if any LLM-capable node is connected.
+    /// Returns true if any node has a Chat or Tool model loaded.
     pub fn has_llm_peer(&self) -> bool {
         self.find_any_llm_peer().is_some()
     }
 
-    /// Returns the set of peer_ids of connected LLM nodes.
+    /// Returns the set of peer_ids of nodes with Chat or Tool models loaded.
     pub fn llm_peer_ids(&self) -> HashSet<PeerId> {
         self.peers
             .values()
             .filter(|p| {
                 p.role == Role::Node
-                    && p.capabilities.iter().any(|c| c == "llm" || c == "inference")
+                    && self
+                        .loaded_models
+                        .get(&p.id)
+                        .is_some_and(|models| {
+                            models.iter().any(|m| {
+                                m.categories.iter().any(is_llm_category)
+                            })
+                        })
             })
             .map(|p| p.id.clone())
             .collect()
@@ -283,6 +286,10 @@ impl GatewayState {
 }
 
 pub type SharedState = Arc<RwLock<GatewayState>>;
+
+fn is_llm_category(c: &ModelCategory) -> bool {
+    matches!(c, ModelCategory::Chat | ModelCategory::Tool)
+}
 
 #[cfg(test)]
 pub(crate) fn dummy_sender() -> mpsc::Sender<Frame> {

@@ -2,9 +2,8 @@ mod cli;
 mod config;
 mod connect;
 mod download;
-mod inference_clients;
+mod kv_cache;
 mod registry;
-mod services;
 
 use clap::Parser;
 use cli::base::Cli;

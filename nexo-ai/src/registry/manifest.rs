@@ -49,99 +49,7 @@ pub struct AiModelManifest {
     pub categories: Vec<ModelCategory>,
 }
 
-// ── Registry ────────────────────────────────────────────────────────────────
-
-fn parler_mini_manifest() -> AiModelManifest {
-    let repo = "parler-tts/parler-tts-mini-v1.1".to_string();
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "parler-mini".to_string(),
-            family: "parler".to_string(),
-            description: "Parler-TTS Mini v1.1 — fast TTS (~3.5 GB)".to_string(),
-            size_gb: 3.5,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::Model,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model.safetensors".to_string(),
-                    size_bytes: 3_751_321_772,
-                    gated: false,
-                    sha256: Some(
-                        "f85ed0a4953b28f0bd9d3cec9f0e035df2936ba97646f315f54b42bf6ba6d0f9",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: repo.clone(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 10_272_460,
-                    gated: false,
-                    sha256: None,
-                },
-                ModelFile {
-                    component: AiComponent::Config,
-                    hf_repo: repo,
-                    hf_filename: "config.json".to_string(),
-                    size_bytes: 7_311,
-                    gated: false,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![ModelCategory::Talk],
-    }
-}
-
-fn parler_large_manifest() -> AiModelManifest {
-    let repo = "parler-tts/parler-tts-large-v1".to_string();
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "parler-large".to_string(),
-            family: "parler".to_string(),
-            description: "Parler-TTS Large v1 — high quality TTS (~8.7 GB)".to_string(),
-            size_gb: 8.7,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00001-of-00002.safetensors".to_string(),
-                    size_bytes: 4_984_365_952,
-                    gated: false,
-                    sha256: Some(
-                        "c30d2151a8a9c3343b6998eeec019b46db9d17b84ef234d98ea6723941c2851c",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00002-of-00002.safetensors".to_string(),
-                    size_bytes: 4_347_810_672,
-                    gated: false,
-                    sha256: Some(
-                        "413db5baa97486c7447a4060bb2ced9235d1785d51ac981e0880eff2cb044ca5",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: repo.clone(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 2_422_234,
-                    gated: false,
-                    sha256: None,
-                },
-                ModelFile {
-                    component: AiComponent::Config,
-                    hf_repo: repo,
-                    hf_filename: "config.json".to_string(),
-                    size_bytes: 7_722,
-                    gated: false,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![ModelCategory::Talk],
-    }
-}
+// ── Whisper ────────────────────────────────────────────────────────────────
 
 fn whisper_large_v3_manifest() -> AiModelManifest {
     let repo = "openai/whisper-large-v3".to_string();
@@ -268,6 +176,8 @@ fn distil_large_v3_manifest() -> AiModelManifest {
     }
 }
 
+// ── Flux.2 ─────────────────────────────────────────────────────────────────
+
 fn flux_2_klein_4b_manifest() -> AiModelManifest {
     let repo = "black-forest-labs/FLUX.2-klein-4b".to_string();
     AiModelManifest {
@@ -320,7 +230,7 @@ fn flux_2_klein_4b_manifest() -> AiModelManifest {
                 ModelFile {
                     component: AiComponent::Tokenizer,
                     hf_repo: repo,
-                    hf_filename: "tokenizer/tokenizer.json".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
                     size_bytes: 11_422_654,
                     gated: false,
                     sha256: None,
@@ -337,9 +247,9 @@ fn flux_2_klein_9b_manifest() -> AiModelManifest {
         manifest: ModelManifest {
             name: "flux-2-klein-9b".to_string(),
             family: "flux".to_string(),
-            description: "Flux.2 Klein 9B — high quality 4-step image generation (~49 GB)"
+            description: "Flux.2 Klein 9B — high quality 4-step image generation (~35 GB)"
                 .to_string(),
-            size_gb: 20.0,
+            size_gb: 34.7,
             files: vec![
                 ModelFile {
                     component: AiComponent::ModelShard,
@@ -416,7 +326,7 @@ fn flux_2_klein_9b_manifest() -> AiModelManifest {
                 ModelFile {
                     component: AiComponent::Tokenizer,
                     hf_repo: repo,
-                    hf_filename: "tokenizer/tokenizer.json".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
                     size_bytes: 11_422_654,
                     gated: true,
                     sha256: None,
@@ -626,7 +536,7 @@ fn flux_2_dev_manifest() -> AiModelManifest {
                 ModelFile {
                     component: AiComponent::Tokenizer,
                     hf_repo: repo,
-                    hf_filename: "tokenizer/tokenizer.json".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
                     size_bytes: 11_422_654,
                     gated: true,
                     sha256: None,
@@ -637,474 +547,7 @@ fn flux_2_dev_manifest() -> AiModelManifest {
     }
 }
 
-fn gemma_3_4b_it_manifest() -> AiModelManifest {
-    let repo = "google/gemma-3-4b-it".to_string();
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "gemma-3-4b-it".to_string(),
-            family: "gemma3".to_string(),
-            description: "Gemma 3 4B IT — fast multimodal chat, tool & vision (~8 GB)".to_string(),
-            size_gb: 8.0,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00001-of-00002.safetensors".to_string(),
-                    size_bytes: 4_961_251_752,
-                    gated: true,
-                    sha256: Some(
-                        "eb5fd5e97ddd07b56778733e9653c07312529cb00980a318fc3e1c4e3b5a8f1f",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00002-of-00002.safetensors".to_string(),
-                    size_bytes: 3_639_026_128,
-                    gated: true,
-                    sha256: Some(
-                        "fdde0e5aa5ced0fa203b3d50f4ab78168b7e3a3e08c6349f5cc9326666e1bb13",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: repo.clone(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 33_384_568,
-                    gated: true,
-                    sha256: None,
-                },
-                ModelFile {
-                    component: AiComponent::Config,
-                    hf_repo: repo,
-                    hf_filename: "config.json".to_string(),
-                    size_bytes: 855,
-                    gated: true,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![
-            ModelCategory::Chat,
-            ModelCategory::Tool,
-            ModelCategory::Image,
-        ],
-    }
-}
-
-fn gemma_3_12b_it_manifest() -> AiModelManifest {
-    let repo = "google/gemma-3-12b-it".to_string();
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "gemma-3-12b-it".to_string(),
-            family: "gemma3".to_string(),
-            description: "Gemma 3 12B IT — multimodal chat, tool & vision (~22.7 GB)".to_string(),
-            size_gb: 22.7,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00001-of-00005.safetensors".to_string(),
-                    size_bytes: 4_979_902_192,
-                    gated: true,
-                    sha256: Some(
-                        "4847447e92599833e8dbaa3067cd201c3bb5c052efa91f11ba891e43234f7832",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00002-of-00005.safetensors".to_string(),
-                    size_bytes: 4_931_296_592,
-                    gated: true,
-                    sha256: Some(
-                        "891bd54eed03cba9ee1e705533a02a8217fcc29f356e4a1f53e5fd0d178883ad",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00003-of-00005.safetensors".to_string(),
-                    size_bytes: 4_931_296_656,
-                    gated: true,
-                    sha256: Some(
-                        "7cee411d9d57324e50ce064a192cc5a858276d508611b12fc599e0c9767112e0",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00004-of-00005.safetensors".to_string(),
-                    size_bytes: 4_931_296_656,
-                    gated: true,
-                    sha256: Some(
-                        "8bc75a29a730c9e743cad013feda3b0991a913fafe787c58a1c6e20afad97723",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00005-of-00005.safetensors".to_string(),
-                    size_bytes: 4_601_000_928,
-                    gated: true,
-                    sha256: Some(
-                        "ed14bd4908c98fed9f61e8cd410167e0846de9abd78e0452ab092072e5d9252d",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: repo.clone(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 33_384_568,
-                    gated: true,
-                    sha256: None,
-                },
-                ModelFile {
-                    component: AiComponent::Config,
-                    hf_repo: repo,
-                    hf_filename: "config.json".to_string(),
-                    size_bytes: 916,
-                    gated: true,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![
-            ModelCategory::Chat,
-            ModelCategory::Tool,
-            ModelCategory::Image,
-        ],
-    }
-}
-
-fn gemma_3_27b_it_manifest() -> AiModelManifest {
-    let repo = "google/gemma-3-27b-it".to_string();
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "gemma-3-27b-it".to_string(),
-            family: "gemma3".to_string(),
-            description: "Gemma 3 27B IT — high quality multimodal chat, tool & vision (~51.1 GB)"
-                .to_string(),
-            size_gb: 51.1,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00001-of-00012.safetensors".to_string(),
-                    size_bytes: 4_854_573_696,
-                    gated: true,
-                    sha256: Some(
-                        "4da0290139f018bdea488b556c136d0f0ca4506fe5f5555cd97c0f6f2e886add",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00002-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_792_944,
-                    gated: true,
-                    sha256: Some(
-                        "bf17dbadf9c7cd696e4768639601c3300ea659e49f018000956078cefd475cdf",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00003-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_792_976,
-                    gated: true,
-                    sha256: Some(
-                        "c12b9d629d07b4583e19a467713f92b5c1ae8c9d7ef11faf1bdb91c4c7b59efc",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00004-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_793_016,
-                    gated: true,
-                    sha256: Some(
-                        "7171ed512e46c90cb579a58f66851bad09b028220422ceb1ae85080ab4ffb958",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00005-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_793_016,
-                    gated: true,
-                    sha256: Some(
-                        "9fb9667695749e55d808f407d78f18f80bd8ff999175c2c480cad7075ff5b2cf",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00006-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_793_016,
-                    gated: true,
-                    sha256: Some(
-                        "91ae339063266e0c12da89af8aa0cfdb3f9dc9bb1b4b2678863793a28026dbe7",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00007-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_793_016,
-                    gated: true,
-                    sha256: Some(
-                        "0497dda2b32df5d583caaffae35a96f3524a1e4305b850f4b1ce2e60fc354fe4",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00008-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_793_016,
-                    gated: true,
-                    sha256: Some(
-                        "9061b71b9cc82e187bd72c8f4594c5c1d900b0bc98c416d72902209514cf8ac4",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00009-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_793_016,
-                    gated: true,
-                    sha256: Some(
-                        "ebf2e19c3385d4b342e1517639293fe093ad793f41895862713e38603635c769",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00010-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_793_016,
-                    gated: true,
-                    sha256: Some(
-                        "d651ceb24678d80796a36f9a026f7178631b44e9d86f6f87e52093d915f702ad",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00011-of-00012.safetensors".to_string(),
-                    size_bytes: 4_954_793_016,
-                    gated: true,
-                    sha256: Some(
-                        "4a2de7fa772158381c7569a5699cadb9da3b06d92b802f54ac1c09f4a2c2e594",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::ModelShard,
-                    hf_repo: repo.clone(),
-                    hf_filename: "model-00012-of-00012.safetensors".to_string(),
-                    size_bytes: 462_476_696,
-                    gated: true,
-                    sha256: Some(
-                        "61f4d0c537a889d474396c6fb21ebb90946a64d70345403d47627ecb559e8e91",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: repo.clone(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 33_384_568,
-                    gated: true,
-                    sha256: None,
-                },
-                ModelFile {
-                    component: AiComponent::Config,
-                    hf_repo: repo,
-                    hf_filename: "config.json".to_string(),
-                    size_bytes: 972,
-                    gated: true,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![
-            ModelCategory::Chat,
-            ModelCategory::Tool,
-            ModelCategory::Image,
-        ],
-    }
-}
-
-fn qwen3_4b_q5km_manifest() -> AiModelManifest {
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "qwen3-4b-q5km".to_string(),
-            family: "qwen3".to_string(),
-            description: "Qwen3 4B Q5_K_M — fast quantized chat & tool calling (~2.9 GB)"
-                .to_string(),
-            size_gb: 2.9,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::Model,
-                    hf_repo: "Qwen/Qwen3-4B-GGUF".to_string(),
-                    hf_filename: "Qwen3-4B-Q5_K_M.gguf".to_string(),
-                    size_bytes: 2_889_513_184,
-                    gated: false,
-                    sha256: Some(
-                        "aca596860e8cb40af6539e3f2ea40df305f42515deac56d49c08d39a02e6533f",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: "Qwen/Qwen3-4B".to_string(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 11_422_654,
-                    gated: false,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![ModelCategory::Chat, ModelCategory::Tool],
-    }
-}
-
-fn qwen3_30b_a3b_q4km_manifest() -> AiModelManifest {
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "qwen3-30b-a3b-q4km".to_string(),
-            family: "qwen3".to_string(),
-            description: "Qwen3 30B-A3B Q4_K_M — MoE quantized chat & tool calling (~18.6 GB)"
-                .to_string(),
-            size_gb: 18.6,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::Model,
-                    hf_repo: "Qwen/Qwen3-30B-A3B-GGUF".to_string(),
-                    hf_filename: "Qwen3-30B-A3B-Q4_K_M.gguf".to_string(),
-                    size_bytes: 18_556_685_824,
-                    gated: false,
-                    sha256: Some(
-                        "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: "Qwen/Qwen3-30B-A3B".to_string(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 11_422_654,
-                    gated: false,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![ModelCategory::Chat, ModelCategory::Tool],
-    }
-}
-
-fn qwen3_8b_q5km_manifest() -> AiModelManifest {
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "qwen3-8b-q5km".to_string(),
-            family: "qwen3".to_string(),
-            description: "Qwen3 8B Q5_K_M — quantized chat & tool calling (~5.5 GB)".to_string(),
-            size_gb: 5.5,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::Model,
-                    hf_repo: "Qwen/Qwen3-8B-GGUF".to_string(),
-                    hf_filename: "Qwen3-8B-Q5_K_M.gguf".to_string(),
-                    size_bytes: 5_851_112_224,
-                    gated: false,
-                    sha256: None,
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: "Qwen/Qwen3-8B".to_string(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 11_422_654,
-                    gated: false,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![ModelCategory::Chat, ModelCategory::Tool],
-    }
-}
-
-fn qwen3_vl_4b_manifest() -> AiModelManifest {
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "qwen3-vl-4b".to_string(),
-            family: "qwen3".to_string(),
-            description: "Qwen3-VL 4B — quantized multimodal chat, tool & vision (~3.0 GB)"
-                .to_string(),
-            size_gb: 3.0,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::Model,
-                    hf_repo: "Qwen/Qwen3-VL-4B-Instruct-GGUF".to_string(),
-                    hf_filename: "Qwen3VL-4B-Instruct-Q4_K_M.gguf".to_string(),
-                    size_bytes: 2_497_281_664,
-                    gated: false,
-                    sha256: Some(
-                        "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::VisionProjector,
-                    hf_repo: "Qwen/Qwen3-VL-4B-Instruct-GGUF".to_string(),
-                    hf_filename: "mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf".to_string(),
-                    size_bytes: 453_974_304,
-                    gated: false,
-                    sha256: Some(
-                        "30ba2c7dd3127a4561b6cba9d13d0f711c91bdb38742e2f56d73c8cb596bd06d",
-                    ),
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: "Qwen/Qwen3-VL-4B-Instruct".to_string(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 7_032_403,
-                    gated: false,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![
-            ModelCategory::Chat,
-            ModelCategory::Tool,
-            ModelCategory::Image,
-        ],
-    }
-}
-
-fn qwen3_embed_8b_q5km_manifest() -> AiModelManifest {
-    AiModelManifest {
-        manifest: ModelManifest {
-            name: "qwen3-embed-8b-q5km".to_string(),
-            family: "qwen3_embed".to_string(),
-            description: "Qwen3 Embedding 8B Q5_K_M — text embeddings (~5.1 GB)".to_string(),
-            size_gb: 5.1,
-            files: vec![
-                ModelFile {
-                    component: AiComponent::Model,
-                    hf_repo: "Qwen/Qwen3-Embedding-8B-GGUF".to_string(),
-                    hf_filename: "Qwen3-Embedding-8B-Q5_K_M.gguf".to_string(),
-                    size_bytes: 5_422_342_464,
-                    gated: false,
-                    sha256: None,
-                },
-                ModelFile {
-                    component: AiComponent::Tokenizer,
-                    hf_repo: "Qwen/Qwen3-Embedding-8B".to_string(),
-                    hf_filename: "tokenizer.json".to_string(),
-                    size_bytes: 11_422_947,
-                    gated: false,
-                    sha256: None,
-                },
-            ],
-        },
-        categories: vec![ModelCategory::Embed],
-    }
-}
+// ── Z-Image ────────────────────────────────────────────────────────────────
 
 fn z_image_turbo_manifest() -> AiModelManifest {
     let orig_repo = "Tongyi-MAI/Z-Image-Turbo".to_string();
@@ -1114,9 +557,9 @@ fn z_image_turbo_manifest() -> AiModelManifest {
             name: "z-image-turbo".to_string(),
             family: "z_image".to_string(),
             description:
-                "Z-Image Turbo — 6B text-to-image, Q4_K_M quantized for Apple Silicon (~4 GB)"
+                "Z-Image Turbo — 6B text-to-image, Q4_K_M quantized for Apple Silicon (~12 GB)"
                     .to_string(),
-            size_gb: 3.86,
+            size_gb: 11.9,
             files: vec![
                 ModelFile {
                     component: AiComponent::Model,
@@ -1127,9 +570,41 @@ fn z_image_turbo_manifest() -> AiModelManifest {
                     sha256: None,
                 },
                 ModelFile {
+                    component: AiComponent::Vae,
+                    hf_repo: orig_repo.clone(),
+                    hf_filename: "vae/diffusion_pytorch_model.safetensors".to_string(),
+                    size_bytes: 167_666_902,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::TextEncoder,
+                    hf_repo: orig_repo.clone(),
+                    hf_filename: "text_encoder/model-00001-of-00003.safetensors".to_string(),
+                    size_bytes: 3_957_900_840,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::TextEncoder,
+                    hf_repo: orig_repo.clone(),
+                    hf_filename: "text_encoder/model-00002-of-00003.safetensors".to_string(),
+                    size_bytes: 3_987_450_520,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::TextEncoder,
+                    hf_repo: orig_repo.clone(),
+                    hf_filename: "text_encoder/model-00003-of-00003.safetensors".to_string(),
+                    size_bytes: 99_630_640,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
                     component: AiComponent::Tokenizer,
                     hf_repo: orig_repo,
-                    hf_filename: "tokenizer/tokenizer.json".to_string(),
+                    hf_filename: "tokenizer.json".to_string(),
                     size_bytes: 11_422_654,
                     gated: false,
                     sha256: Some(
@@ -1142,25 +617,480 @@ fn z_image_turbo_manifest() -> AiModelManifest {
     }
 }
 
+// ── Qwen-Image ─────────────────────────────────────────────────────────────
+
+/// Shared VAE + text encoder + tokenizer files for all Qwen-Image variants.
+fn qwen_image_shared_files() -> Vec<ModelFile<AiComponent>> {
+    let qwen_repo = "Qwen/Qwen-Image-2512".to_string();
+    vec![
+        ModelFile {
+            component: AiComponent::Vae,
+            hf_repo: qwen_repo.clone(),
+            hf_filename: "vae/diffusion_pytorch_model.safetensors".to_string(),
+            size_bytes: 253_806_966,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::TextEncoder,
+            hf_repo: qwen_repo.clone(),
+            hf_filename: "text_encoder/model-00001-of-00004.safetensors".to_string(),
+            size_bytes: 4_968_243_304,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::TextEncoder,
+            hf_repo: qwen_repo.clone(),
+            hf_filename: "text_encoder/model-00002-of-00004.safetensors".to_string(),
+            size_bytes: 4_991_495_816,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::TextEncoder,
+            hf_repo: qwen_repo.clone(),
+            hf_filename: "text_encoder/model-00003-of-00004.safetensors".to_string(),
+            size_bytes: 4_932_751_040,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::TextEncoder,
+            hf_repo: qwen_repo,
+            hf_filename: "text_encoder/model-00004-of-00004.safetensors".to_string(),
+            size_bytes: 1_691_924_384,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::Tokenizer,
+            hf_repo: "Qwen/Qwen2.5-7B".to_string(),
+            hf_filename: "tokenizer.json".to_string(),
+            size_bytes: 7_031_645,
+            gated: false,
+            sha256: None,
+        },
+    ]
+}
+
+fn qwen_image_bf16_manifest() -> AiModelManifest {
+    let repo = "Qwen/Qwen-Image-2512".to_string();
+    let mut files = vec![
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.clone(),
+            hf_filename: "transformer/diffusion_pytorch_model-00001-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 4_989_364_312,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.clone(),
+            hf_filename: "transformer/diffusion_pytorch_model-00002-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 4_984_214_160,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.clone(),
+            hf_filename: "transformer/diffusion_pytorch_model-00003-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 4_946_470_000,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.clone(),
+            hf_filename: "transformer/diffusion_pytorch_model-00004-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 4_984_213_736,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.clone(),
+            hf_filename: "transformer/diffusion_pytorch_model-00005-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 4_946_471_896,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.clone(),
+            hf_filename: "transformer/diffusion_pytorch_model-00006-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 4_946_451_560,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.clone(),
+            hf_filename: "transformer/diffusion_pytorch_model-00007-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 4_908_690_520,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.clone(),
+            hf_filename: "transformer/diffusion_pytorch_model-00008-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 4_984_232_856,
+            gated: false,
+            sha256: None,
+        },
+        ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo,
+            hf_filename: "transformer/diffusion_pytorch_model-00009-of-00009.safetensors"
+                .to_string(),
+            size_bytes: 1_170_918_840,
+            gated: false,
+            sha256: None,
+        },
+    ];
+    files.extend(qwen_image_shared_files());
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen-image-bf16".to_string(),
+            family: "qwen_image".to_string(),
+            description: "Qwen-Image BF16 — full precision text-to-image (~54 GB)".to_string(),
+            size_gb: 53.7,
+            files,
+        },
+        categories: vec![ModelCategory::Imagine],
+    }
+}
+
+fn qwen_image_q8_manifest() -> AiModelManifest {
+    let mut files = vec![ModelFile {
+        component: AiComponent::Model,
+        hf_repo: "city96/Qwen-Image-gguf".to_string(),
+        hf_filename: "qwen-image-Q8_0.gguf".to_string(),
+        size_bytes: 21_761_817_120,
+        gated: false,
+        sha256: None,
+    }];
+    files.extend(qwen_image_shared_files());
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen-image-q8".to_string(),
+            family: "qwen_image".to_string(),
+            description: "Qwen-Image Q8_0 — high quality quantized text-to-image (~38 GB)"
+                .to_string(),
+            size_gb: 36.0,
+            files,
+        },
+        categories: vec![ModelCategory::Imagine],
+    }
+}
+
+fn qwen_image_q6_manifest() -> AiModelManifest {
+    let mut files = vec![ModelFile {
+        component: AiComponent::Model,
+        hf_repo: "city96/Qwen-Image-gguf".to_string(),
+        hf_filename: "qwen-image-Q6_K.gguf".to_string(),
+        size_bytes: 16_824_990_240,
+        gated: false,
+        sha256: None,
+    }];
+    files.extend(qwen_image_shared_files());
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen-image-q6".to_string(),
+            family: "qwen_image".to_string(),
+            description: "Qwen-Image Q6_K — balanced quantized text-to-image (~33 GB)".to_string(),
+            size_gb: 31.3,
+            files,
+        },
+        categories: vec![ModelCategory::Imagine],
+    }
+}
+
+fn qwen_image_q4_manifest() -> AiModelManifest {
+    let mut files = vec![ModelFile {
+        component: AiComponent::Model,
+        hf_repo: "city96/Qwen-Image-gguf".to_string(),
+        hf_filename: "qwen-image-Q4_K_S.gguf".to_string(),
+        size_bytes: 12_140_608_032,
+        gated: false,
+        sha256: None,
+    }];
+    files.extend(qwen_image_shared_files());
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "qwen-image-q4".to_string(),
+            family: "qwen_image".to_string(),
+            description: "Qwen-Image Q4_K_S — fast quantized text-to-image (~29 GB)".to_string(),
+            size_gb: 27.0,
+            files,
+        },
+        categories: vec![ModelCategory::Imagine],
+    }
+}
+
+// ── Gemma 4 ────────────────────────────────────────────────────────────────
+
+fn gemma4_manifest(
+    name: &str,
+    repo: &str,
+    description: &str,
+    size_gb: f32,
+    model_files: Vec<ModelFile<AiComponent>>,
+) -> AiModelManifest {
+    let mut files = model_files;
+    files.push(ModelFile {
+        component: AiComponent::Tokenizer,
+        hf_repo: repo.to_string(),
+        hf_filename: "tokenizer.json".to_string(),
+        size_bytes: 32_169_626,
+        gated: false,
+        sha256: None,
+    });
+    files.push(ModelFile {
+        component: AiComponent::Config,
+        hf_repo: repo.to_string(),
+        hf_filename: "config.json".to_string(),
+        size_bytes: 4_954,
+        gated: false,
+        sha256: None,
+    });
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: name.to_string(),
+            family: "gemma4".to_string(),
+            description: description.to_string(),
+            size_gb,
+            files,
+        },
+        categories: vec![
+            ModelCategory::Chat,
+            ModelCategory::Tool,
+            ModelCategory::Image,
+        ],
+    }
+}
+
+fn gemma_4_e2b_manifest() -> AiModelManifest {
+    let repo = "google/gemma-4-E2B";
+    gemma4_manifest(
+        "gemma-4-e2b",
+        repo,
+        "Gemma 4 E2B — compact multimodal base model (~9.5 GB)",
+        9.5,
+        vec![ModelFile {
+            component: AiComponent::Model,
+            hf_repo: repo.to_string(),
+            hf_filename: "model.safetensors".to_string(),
+            size_bytes: 10_246_621_918,
+            gated: false,
+            sha256: None,
+        }],
+    )
+}
+
+fn gemma_4_e2b_it_manifest() -> AiModelManifest {
+    let repo = "google/gemma-4-E2B-it";
+    gemma4_manifest(
+        "gemma-4-e2b-it",
+        repo,
+        "Gemma 4 E2B IT — compact multimodal chat, tool & vision (~9.5 GB)",
+        9.5,
+        vec![ModelFile {
+            component: AiComponent::Model,
+            hf_repo: repo.to_string(),
+            hf_filename: "model.safetensors".to_string(),
+            size_bytes: 10_246_621_918,
+            gated: false,
+            sha256: None,
+        }],
+    )
+}
+
+fn gemma_4_e4b_manifest() -> AiModelManifest {
+    let repo = "google/gemma-4-E4B";
+    gemma4_manifest(
+        "gemma-4-e4b",
+        repo,
+        "Gemma 4 E4B — mid-size multimodal base model (~14.9 GB)",
+        14.9,
+        vec![ModelFile {
+            component: AiComponent::Model,
+            hf_repo: repo.to_string(),
+            hf_filename: "model.safetensors".to_string(),
+            size_bytes: 15_992_595_884,
+            gated: false,
+            sha256: None,
+        }],
+    )
+}
+
+fn gemma_4_e4b_it_manifest() -> AiModelManifest {
+    let repo = "google/gemma-4-E4B-it";
+    gemma4_manifest(
+        "gemma-4-e4b-it",
+        repo,
+        "Gemma 4 E4B IT — mid-size multimodal chat, tool & vision (~14.9 GB)",
+        14.9,
+        vec![ModelFile {
+            component: AiComponent::Model,
+            hf_repo: repo.to_string(),
+            hf_filename: "model.safetensors".to_string(),
+            size_bytes: 15_992_595_884,
+            gated: false,
+            sha256: None,
+        }],
+    )
+}
+
+fn gemma_4_26b_a4b_manifest() -> AiModelManifest {
+    let repo = "google/gemma-4-26b-a4b";
+    gemma4_manifest(
+        "gemma-4-26b-a4b",
+        repo,
+        "Gemma 4 26B-A4B — MoE multimodal base model (~48 GB)",
+        48.1,
+        vec![
+            ModelFile {
+                component: AiComponent::ModelShard,
+                hf_repo: repo.to_string(),
+                hf_filename: "model-00001-of-00002.safetensors".to_string(),
+                size_bytes: 49_907_246_508,
+                gated: false,
+                sha256: None,
+            },
+            ModelFile {
+                component: AiComponent::ModelShard,
+                hf_repo: repo.to_string(),
+                hf_filename: "model-00002-of-00002.safetensors".to_string(),
+                size_bytes: 1_704_763_408,
+                gated: false,
+                sha256: None,
+            },
+        ],
+    )
+}
+
+fn gemma_4_26b_a4b_it_manifest() -> AiModelManifest {
+    let repo = "google/gemma-4-26b-a4b-it";
+    gemma4_manifest(
+        "gemma-4-26b-a4b-it",
+        repo,
+        "Gemma 4 26B-A4B IT — MoE multimodal chat, tool & vision (~48 GB)",
+        48.1,
+        vec![
+            ModelFile {
+                component: AiComponent::ModelShard,
+                hf_repo: repo.to_string(),
+                hf_filename: "model-00001-of-00002.safetensors".to_string(),
+                size_bytes: 49_907_246_508,
+                gated: false,
+                sha256: None,
+            },
+            ModelFile {
+                component: AiComponent::ModelShard,
+                hf_repo: repo.to_string(),
+                hf_filename: "model-00002-of-00002.safetensors".to_string(),
+                size_bytes: 1_704_763_408,
+                gated: false,
+                sha256: None,
+            },
+        ],
+    )
+}
+
+fn gemma_4_31b_manifest() -> AiModelManifest {
+    let repo = "google/gemma-4-31b";
+    gemma4_manifest(
+        "gemma-4-31b",
+        repo,
+        "Gemma 4 31B — large multimodal base model (~58 GB)",
+        58.3,
+        vec![
+            ModelFile {
+                component: AiComponent::ModelShard,
+                hf_repo: repo.to_string(),
+                hf_filename: "model-00001-of-00002.safetensors".to_string(),
+                size_bytes: 49_784_788_364,
+                gated: false,
+                sha256: None,
+            },
+            ModelFile {
+                component: AiComponent::ModelShard,
+                hf_repo: repo.to_string(),
+                hf_filename: "model-00002-of-00002.safetensors".to_string(),
+                size_bytes: 12_761_549_884,
+                gated: false,
+                sha256: None,
+            },
+        ],
+    )
+}
+
+fn gemma_4_31b_it_manifest() -> AiModelManifest {
+    let repo = "google/gemma-4-31b-it";
+    gemma4_manifest(
+        "gemma-4-31b-it",
+        repo,
+        "Gemma 4 31B IT — large multimodal chat, tool & vision (~58 GB)",
+        58.3,
+        vec![
+            ModelFile {
+                component: AiComponent::ModelShard,
+                hf_repo: repo.to_string(),
+                hf_filename: "model-00001-of-00002.safetensors".to_string(),
+                size_bytes: 49_784_788_364,
+                gated: false,
+                sha256: None,
+            },
+            ModelFile {
+                component: AiComponent::ModelShard,
+                hf_repo: repo.to_string(),
+                hf_filename: "model-00002-of-00002.safetensors".to_string(),
+                size_bytes: 12_761_549_884,
+                gated: false,
+                sha256: None,
+            },
+        ],
+    )
+}
+
+// ── Registry ───────────────────────────────────────────────────────────────
+
 fn build_all_manifests() -> Vec<AiModelManifest> {
     vec![
-        parler_mini_manifest(),
-        parler_large_manifest(),
+        // Listen
         whisper_large_v3_manifest(),
         whisper_large_v3_turbo_manifest(),
         distil_large_v3_manifest(),
+        // Imagine
         flux_2_klein_4b_manifest(),
         flux_2_klein_9b_manifest(),
         flux_2_dev_manifest(),
         z_image_turbo_manifest(),
-        gemma_3_4b_it_manifest(),
-        gemma_3_12b_it_manifest(),
-        gemma_3_27b_it_manifest(),
-        qwen3_4b_q5km_manifest(),
-        qwen3_8b_q5km_manifest(),
-        qwen3_30b_a3b_q4km_manifest(),
-        qwen3_vl_4b_manifest(),
-        qwen3_embed_8b_q5km_manifest(),
+        qwen_image_bf16_manifest(),
+        qwen_image_q8_manifest(),
+        qwen_image_q6_manifest(),
+        qwen_image_q4_manifest(),
+        // Chat + Tool + Image
+        gemma_4_e2b_manifest(),
+        gemma_4_e2b_it_manifest(),
+        gemma_4_e4b_manifest(),
+        gemma_4_e4b_it_manifest(),
+        gemma_4_26b_a4b_manifest(),
+        gemma_4_26b_a4b_it_manifest(),
+        gemma_4_31b_manifest(),
+        gemma_4_31b_it_manifest(),
     ]
 }
 
@@ -1218,11 +1148,8 @@ mod tests {
     }
 
     #[test]
-    fn known_manifests_contains_parler() {
-        let manifests = known_manifests();
-        assert!(manifests.len() >= 17);
-        assert!(manifests.iter().any(|m| m.manifest.name == "parler-mini"));
-        assert!(manifests.iter().any(|m| m.manifest.name == "parler-large"));
+    fn known_manifests_count() {
+        assert_eq!(known_manifests().len(), 19);
     }
 
     #[test]
@@ -1261,7 +1188,7 @@ mod tests {
     #[test]
     fn manifests_for_listen_contains_whisper() {
         let listen = manifests_for_category(ModelCategory::Listen);
-        assert!(listen.len() >= 3);
+        assert_eq!(listen.len(), 3);
         assert!(
             listen
                 .iter()
@@ -1272,72 +1199,6 @@ mod tests {
     #[test]
     fn find_manifest_returns_none_for_unknown() {
         assert!(find_manifest("nonexistent-model").is_none());
-    }
-
-    #[test]
-    fn find_manifest_returns_parler_mini() {
-        let m = find_manifest("parler-mini").unwrap();
-        assert_eq!(m.manifest.family, "parler");
-        assert!(m.categories.contains(&ModelCategory::Talk));
-    }
-
-    #[test]
-    fn find_manifest_returns_parler_large() {
-        let m = find_manifest("parler-large").unwrap();
-        assert_eq!(m.manifest.family, "parler");
-        assert!(m.categories.contains(&ModelCategory::Talk));
-    }
-
-    #[test]
-    fn manifests_for_talk_contains_parler() {
-        let talk = manifests_for_category(ModelCategory::Talk);
-        assert!(talk.len() >= 2);
-        assert!(talk.iter().any(|m| m.manifest.name == "parler-mini"));
-        assert!(talk.iter().any(|m| m.manifest.name == "parler-large"));
-    }
-
-    #[test]
-    fn manifests_for_chat_contains_gemma3() {
-        let chat = manifests_for_category(ModelCategory::Chat);
-        assert!(chat.len() >= 3);
-        assert!(chat.iter().any(|m| m.manifest.name == "gemma-3-4b-it"));
-        assert!(chat.iter().any(|m| m.manifest.name == "gemma-3-12b-it"));
-        assert!(chat.iter().any(|m| m.manifest.name == "gemma-3-27b-it"));
-    }
-
-    #[test]
-    fn known_manifests_contains_gemma3() {
-        let manifests = known_manifests();
-        assert!(manifests.iter().any(|m| m.manifest.name == "gemma-3-4b-it"));
-        assert!(
-            manifests
-                .iter()
-                .any(|m| m.manifest.name == "gemma-3-12b-it")
-        );
-        assert!(
-            manifests
-                .iter()
-                .any(|m| m.manifest.name == "gemma-3-27b-it")
-        );
-    }
-
-    #[test]
-    fn gemma3_manifests_are_multipurpose() {
-        for name in ["gemma-3-4b-it", "gemma-3-12b-it", "gemma-3-27b-it"] {
-            let m = find_manifest(name).unwrap();
-            assert_eq!(m.manifest.family, "gemma3");
-            assert!(m.categories.contains(&ModelCategory::Chat));
-            assert!(m.categories.contains(&ModelCategory::Tool));
-            assert!(m.categories.contains(&ModelCategory::Image));
-        }
-    }
-
-    #[test]
-    fn gemma3_manifests_are_gated() {
-        for name in ["gemma-3-4b-it", "gemma-3-12b-it", "gemma-3-27b-it"] {
-            let m = find_manifest(name).unwrap();
-            assert!(m.manifest.files.iter().all(|f| f.gated));
-        }
     }
 
     #[test]
@@ -1366,13 +1227,6 @@ mod tests {
     }
 
     #[test]
-    fn manifests_for_imagine_contains_flux() {
-        let imagine = manifests_for_category(ModelCategory::Imagine);
-        assert!(imagine.len() >= 3);
-        assert!(imagine.iter().any(|m| m.manifest.name == "flux-2-klein-4b"));
-    }
-
-    #[test]
     fn flux_klein_4b_is_ungated() {
         let m = find_manifest("flux-2-klein-4b").unwrap();
         assert!(m.manifest.files.iter().all(|f| !f.gated));
@@ -1391,45 +1245,79 @@ mod tests {
     }
 
     #[test]
-    fn known_manifests_contains_qwen3() {
-        let manifests = known_manifests();
-        assert!(manifests.iter().any(|m| m.manifest.name == "qwen3-4b-q5km"));
-        assert!(manifests.iter().any(|m| m.manifest.name == "qwen3-8b-q5km"));
+    fn z_image_turbo_manifest_has_all_components() {
+        let m = find_manifest("z-image-turbo").unwrap();
+        assert_eq!(m.manifest.family, "z_image");
+        assert!(m.categories.contains(&ModelCategory::Imagine));
         assert!(
-            manifests
+            m.manifest
+                .files
                 .iter()
-                .any(|m| m.manifest.name == "qwen3-30b-a3b-q4km")
+                .any(|f| f.component == AiComponent::Model)
         );
-        assert!(manifests.iter().any(|m| m.manifest.name == "qwen3-vl-4b"));
+        assert!(
+            m.manifest
+                .files
+                .iter()
+                .any(|f| f.component == AiComponent::Vae)
+        );
+        assert!(
+            m.manifest
+                .files
+                .iter()
+                .any(|f| f.component == AiComponent::TextEncoder)
+        );
+        assert!(
+            m.manifest
+                .files
+                .iter()
+                .any(|f| f.component == AiComponent::Tokenizer)
+        );
     }
 
     #[test]
-    fn qwen3_text_models_are_chat_and_tool() {
-        for name in ["qwen3-4b-q5km", "qwen3-8b-q5km", "qwen3-30b-a3b-q4km"] {
+    fn manifests_for_imagine_contains_all() {
+        let imagine = manifests_for_category(ModelCategory::Imagine);
+        assert_eq!(imagine.len(), 8); // 3 flux + 1 z_image + 4 qwen_image
+        assert!(imagine.iter().any(|m| m.manifest.name == "flux-2-klein-4b"));
+        assert!(imagine.iter().any(|m| m.manifest.name == "z-image-turbo"));
+        assert!(imagine.iter().any(|m| m.manifest.name == "qwen-image-q4"));
+    }
+
+    #[test]
+    fn known_manifests_contains_qwen_image() {
+        let manifests = known_manifests();
+        assert!(
+            manifests
+                .iter()
+                .any(|m| m.manifest.name == "qwen-image-bf16")
+        );
+        assert!(manifests.iter().any(|m| m.manifest.name == "qwen-image-q8"));
+        assert!(manifests.iter().any(|m| m.manifest.name == "qwen-image-q6"));
+        assert!(manifests.iter().any(|m| m.manifest.name == "qwen-image-q4"));
+    }
+
+    #[test]
+    fn qwen_image_manifests_are_imagine_category() {
+        for name in [
+            "qwen-image-bf16",
+            "qwen-image-q8",
+            "qwen-image-q6",
+            "qwen-image-q4",
+        ] {
             let m = find_manifest(name).unwrap();
-            assert_eq!(m.manifest.family, "qwen3");
-            assert!(m.categories.contains(&ModelCategory::Chat));
-            assert!(m.categories.contains(&ModelCategory::Tool));
-            assert!(!m.categories.contains(&ModelCategory::Image));
+            assert_eq!(m.manifest.family, "qwen_image");
+            assert!(m.categories.contains(&ModelCategory::Imagine));
         }
     }
 
     #[test]
-    fn qwen3_vl_is_multipurpose() {
-        let m = find_manifest("qwen3-vl-4b").unwrap();
-        assert_eq!(m.manifest.family, "qwen3");
-        assert!(m.categories.contains(&ModelCategory::Chat));
-        assert!(m.categories.contains(&ModelCategory::Tool));
-        assert!(m.categories.contains(&ModelCategory::Image));
-    }
-
-    #[test]
-    fn qwen3_models_are_ungated() {
+    fn qwen_image_models_are_ungated() {
         for name in [
-            "qwen3-4b-q5km",
-            "qwen3-8b-q5km",
-            "qwen3-30b-a3b-q4km",
-            "qwen3-vl-4b",
+            "qwen-image-bf16",
+            "qwen-image-q8",
+            "qwen-image-q6",
+            "qwen-image-q4",
         ] {
             let m = find_manifest(name).unwrap();
             assert!(m.manifest.files.iter().all(|f| !f.gated));
@@ -1437,20 +1325,97 @@ mod tests {
     }
 
     #[test]
-    fn qwen3_vl_has_vision_projector() {
-        let m = find_manifest("qwen3-vl-4b").unwrap();
-        assert!(
-            m.manifest
-                .files
-                .iter()
-                .any(|f| f.component == AiComponent::VisionProjector)
-        );
+    fn qwen_image_has_shared_components() {
+        for name in [
+            "qwen-image-bf16",
+            "qwen-image-q8",
+            "qwen-image-q6",
+            "qwen-image-q4",
+        ] {
+            let m = find_manifest(name).unwrap();
+            assert!(
+                m.manifest
+                    .files
+                    .iter()
+                    .any(|f| f.component == AiComponent::Vae)
+            );
+            assert!(
+                m.manifest
+                    .files
+                    .iter()
+                    .any(|f| f.component == AiComponent::TextEncoder)
+            );
+            assert!(
+                m.manifest
+                    .files
+                    .iter()
+                    .any(|f| f.component == AiComponent::Tokenizer)
+            );
+        }
     }
 
     #[test]
-    fn qwen3_embed_is_embed_category() {
-        let m = find_manifest("qwen3-embed-8b-q5km").unwrap();
-        assert_eq!(m.manifest.family, "qwen3_embed");
-        assert_eq!(m.categories, vec![ModelCategory::Embed]);
+    fn known_manifests_contains_gemma4() {
+        let manifests = known_manifests();
+        for name in [
+            "gemma-4-e2b",
+            "gemma-4-e2b-it",
+            "gemma-4-e4b",
+            "gemma-4-e4b-it",
+            "gemma-4-26b-a4b",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b",
+            "gemma-4-31b-it",
+        ] {
+            assert!(
+                manifests.iter().any(|m| m.manifest.name == name),
+                "missing: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn gemma4_manifests_are_multipurpose() {
+        for name in [
+            "gemma-4-e2b",
+            "gemma-4-e2b-it",
+            "gemma-4-e4b",
+            "gemma-4-e4b-it",
+            "gemma-4-26b-a4b",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b",
+            "gemma-4-31b-it",
+        ] {
+            let m = find_manifest(name).unwrap();
+            assert_eq!(m.manifest.family, "gemma4");
+            assert!(m.categories.contains(&ModelCategory::Chat));
+            assert!(m.categories.contains(&ModelCategory::Tool));
+            assert!(m.categories.contains(&ModelCategory::Image));
+        }
+    }
+
+    #[test]
+    fn gemma4_models_are_ungated() {
+        for name in [
+            "gemma-4-e2b",
+            "gemma-4-e2b-it",
+            "gemma-4-e4b",
+            "gemma-4-e4b-it",
+            "gemma-4-26b-a4b",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b",
+            "gemma-4-31b-it",
+        ] {
+            let m = find_manifest(name).unwrap();
+            assert!(m.manifest.files.iter().all(|f| !f.gated));
+        }
+    }
+
+    #[test]
+    fn manifests_for_chat_contains_gemma4() {
+        let chat = manifests_for_category(ModelCategory::Chat);
+        assert_eq!(chat.len(), 8);
+        assert!(chat.iter().any(|m| m.manifest.name == "gemma-4-e2b-it"));
+        assert!(chat.iter().any(|m| m.manifest.name == "gemma-4-31b-it"));
     }
 }

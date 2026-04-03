@@ -1,5 +1,36 @@
 use super::types::*;
 use anyhow::Result;
+use candle_core::{DType, Device};
+
+/// KV cache save/restore for session-aware inference.
+pub trait KvCacheable {
+    /// Current number of cached tokens.
+    fn kv_cache_seq_len(&self) -> usize;
+
+    /// Extract K/V tensors from all layers.
+    fn save_kv_cache(&self) -> Result<Vec<LayerKvSnapshot>>;
+
+    /// Restore K/V cache from saved snapshots.
+    fn restore_kv_cache(&mut self, snapshots: &[LayerKvSnapshot]) -> Result<()>;
+
+    /// Clear all KV cache state.
+    fn clear_kv_cache(&mut self);
+
+    /// Token IDs processed so far in the current session.
+    fn processed_tokens(&self) -> &[u32];
+
+    /// Current session ID tracked by the model.
+    fn current_session_id(&self) -> Option<&str>;
+
+    /// Set session state (session ID + processed tokens).
+    fn set_session_state(&mut self, session_id: Option<String>, tokens: Vec<u32>);
+
+    /// Device the model is running on (needed for disk cache restoration).
+    fn device(&self) -> &Device;
+
+    /// Dtype used by the model (needed for disk cache restoration).
+    fn dtype(&self) -> DType;
+}
 
 /// Common metadata and lifecycle for any model.
 pub trait ModelInfo: Send {
@@ -34,6 +65,7 @@ pub trait ModelInfo: Send {
     fn as_talk(&mut self) -> Option<&mut dyn TalkModel> { None }
     fn as_imagine(&mut self) -> Option<&mut dyn ImagineModel> { None }
     fn as_embed(&mut self) -> Option<&mut dyn EmbedModel> { None }
+    fn as_kv_cacheable(&mut self) -> Option<&mut dyn KvCacheable> { None }
 }
 
 /// Text chat completion.

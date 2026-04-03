@@ -1,74 +1,7 @@
+use candle_core::Tensor;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
 
-// ---------------------------------------------------------------------------
-// ModelCategory
-// ---------------------------------------------------------------------------
-
-/// The category of capability a model provides.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelCategory {
-    Chat,
-    Tool,
-    Image,
-    Listen,
-    Talk,
-    Imagine,
-    Embed,
-}
-
-impl ModelCategory {
-    /// Return the kebab-case string for this category.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Chat => "chat",
-            Self::Tool => "tool",
-            Self::Image => "image",
-            Self::Listen => "listen",
-            Self::Talk => "talk",
-            Self::Imagine => "imagine",
-            Self::Embed => "embed",
-        }
-    }
-
-    /// All variants in declaration order.
-    pub fn all() -> &'static [ModelCategory] {
-        &[
-            Self::Chat,
-            Self::Tool,
-            Self::Image,
-            Self::Listen,
-            Self::Talk,
-            Self::Imagine,
-            Self::Embed,
-        ]
-    }
-}
-
-impl fmt::Display for ModelCategory {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for ModelCategory {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "chat" => Ok(Self::Chat),
-            "tool" => Ok(Self::Tool),
-            "image" => Ok(Self::Image),
-            "listen" => Ok(Self::Listen),
-            "talk" => Ok(Self::Talk),
-            "imagine" => Ok(Self::Imagine),
-            "embed" => Ok(Self::Embed),
-            other => Err(format!("unknown model category: {other}")),
-        }
-    }
-}
+pub use nexo_spec::model::ModelCategory;
 
 // ---------------------------------------------------------------------------
 // Chat
@@ -98,6 +31,8 @@ pub struct ChatRequest {
     pub max_tokens: usize,
     pub temperature: f64,
     pub top_p: f64,
+    pub top_k: Option<u32>,
+    pub session_id: Option<String>,
 }
 
 /// Response from a chat completion.
@@ -116,9 +51,12 @@ pub struct ChatResponse {
 #[derive(Debug, Clone)]
 pub struct ToolCallRequest {
     pub messages: Vec<ChatMessage>,
-    pub tools: Vec<nexo_tool_spec::tool::ToolSpec>,
+    pub tools: Vec<nexo_spec::tool::ToolSpec>,
     pub max_tokens: usize,
     pub temperature: f64,
+    pub top_p: f64,
+    pub top_k: Option<u32>,
+    pub session_id: Option<String>,
 }
 
 /// A single tool invocation produced by the model.
@@ -261,6 +199,21 @@ pub struct EmbedResponse {
 }
 
 // ---------------------------------------------------------------------------
+// KV Cache
+// ---------------------------------------------------------------------------
+
+/// Snapshot of a single layer's K/V cache state, used for save/restore.
+#[derive(Debug, Clone)]
+pub struct LayerKvSnapshot {
+    pub layer_idx: usize,
+    pub is_sliding: bool,
+    pub k_data: Option<Tensor>,
+    pub v_data: Option<Tensor>,
+    pub offset: usize,
+    pub current_seq_len: usize,
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -268,114 +221,6 @@ pub struct EmbedResponse {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-
-    // -- ModelCategory serde roundtrip --
-
-    #[test]
-    fn model_category_serde_roundtrip() {
-        for &cat in ModelCategory::all() {
-            let json = serde_json::to_string(&cat).unwrap();
-            let parsed: ModelCategory = serde_json::from_str(&json).unwrap();
-            assert_eq!(cat, parsed);
-        }
-    }
-
-    #[test]
-    fn model_category_serializes_to_snake_case() {
-        assert_eq!(
-            serde_json::to_string(&ModelCategory::Chat).unwrap(),
-            "\"chat\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ModelCategory::Tool).unwrap(),
-            "\"tool\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ModelCategory::Image).unwrap(),
-            "\"image\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ModelCategory::Listen).unwrap(),
-            "\"listen\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ModelCategory::Talk).unwrap(),
-            "\"talk\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ModelCategory::Imagine).unwrap(),
-            "\"imagine\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ModelCategory::Embed).unwrap(),
-            "\"embed\""
-        );
-    }
-
-    // -- ModelCategory::all() completeness --
-
-    #[test]
-    fn model_category_all_is_complete() {
-        let all = ModelCategory::all();
-        assert_eq!(all.len(), 7);
-        assert!(all.contains(&ModelCategory::Chat));
-        assert!(all.contains(&ModelCategory::Tool));
-        assert!(all.contains(&ModelCategory::Image));
-        assert!(all.contains(&ModelCategory::Listen));
-        assert!(all.contains(&ModelCategory::Talk));
-        assert!(all.contains(&ModelCategory::Imagine));
-        assert!(all.contains(&ModelCategory::Embed));
-    }
-
-    // -- as_str --
-
-    #[test]
-    fn model_category_as_str() {
-        assert_eq!(ModelCategory::Chat.as_str(), "chat");
-        assert_eq!(ModelCategory::Tool.as_str(), "tool");
-        assert_eq!(ModelCategory::Image.as_str(), "image");
-        assert_eq!(ModelCategory::Listen.as_str(), "listen");
-        assert_eq!(ModelCategory::Talk.as_str(), "talk");
-        assert_eq!(ModelCategory::Imagine.as_str(), "imagine");
-        assert_eq!(ModelCategory::Embed.as_str(), "embed");
-    }
-
-    // -- Display --
-
-    #[test]
-    fn model_category_display() {
-        for &cat in ModelCategory::all() {
-            assert_eq!(format!("{cat}"), cat.as_str());
-        }
-    }
-
-    // -- FromStr --
-
-    #[test]
-    fn model_category_from_str_valid() {
-        for &cat in ModelCategory::all() {
-            let parsed: ModelCategory = cat.as_str().parse().unwrap();
-            assert_eq!(cat, parsed);
-        }
-    }
-
-    #[test]
-    fn model_category_from_str_invalid() {
-        let result: Result<ModelCategory, _> = "nonexistent".parse();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown model category"));
-    }
-
-    // -- FromStr and Display consistency --
-
-    #[test]
-    fn model_category_display_from_str_roundtrip() {
-        for &cat in ModelCategory::all() {
-            let display = cat.to_string();
-            let parsed: ModelCategory = display.parse().unwrap();
-            assert_eq!(cat, parsed);
-        }
-    }
 
     // -- ChatRole serde --
 
@@ -513,6 +358,8 @@ mod tests {
             max_tokens: 100,
             temperature: 0.7,
             top_p: 0.9,
+            top_k: None,
+            session_id: None,
         };
         assert_eq!(req.messages.len(), 1);
         assert_eq!(req.max_tokens, 100);

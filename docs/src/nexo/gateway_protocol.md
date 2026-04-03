@@ -222,7 +222,9 @@ Client → Gateway:
     "prompt": "Summarize today's news",
     "idempotencyKey": "key-456",
     "sessionId": "optional-session-id",
-    "context": { "files": ["notes.md"] }
+    "context": { "files": ["notes.md"] },
+    "thinking": true,
+    "modelId": "gemma4-27b"
   }
 }
 ```
@@ -247,9 +249,32 @@ Gateway → Client (streaming events):
 ```json
 { "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
 { "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run" } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary..." } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
 { "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
 ```
+
+### Agent params
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `prompt` | string | yes | The user message |
+| `idempotencyKey` | string | yes | Deduplication key |
+| `sessionId` | string | no | Resume existing session |
+| `context` | object | no | Additional context blob |
+| `thinking` | bool | no | Enable extended thinking mode (default: false) |
+| `modelId` | string | no | Request a specific model |
+
+### Agent event payload
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `runId` | string | The run identifier |
+| `sessionId` | string | The session identifier |
+| `status` | string | Current status (see below) |
+| `content` | string? | Visible reply text (on `streaming`) |
+| `thinkingContent` | string? | Ephemeral thinking text (on `streaming`, when thinking enabled) |
+| `toolName` | string? | Tool being called (on `tool_call`) |
+| `error` | string? | Error message (on `failed`) |
 
 ### Agent status values
 

@@ -1,27 +1,33 @@
 use crate::config::NodeConfig;
-use crate::download::registry::DEFAULT_INFERENCE_MODEL;
-use crate::inference_clients::{
-    ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, InferenceClients, InferenceConfig,
-    ToolCallRequest,
-};
+use crate::kv_cache::manager::SessionCacheManager;
 use crate::registry::ToolRegistry;
 use base64::Engine;
-use nexo_ws_client::{NexoConnection, default_node_connect_params, perform_handshake};
+use nexo_ai::coordinator::Coordinator;
+use nexo_ai::shared::types::{
+    ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, ModelCategory, ToolCallRequest,
+};
+use nexo_ws_client::{
+    NexoConnection, ReadHalf, WriteHalf, default_node_connect_params, perform_handshake,
+};
 use nexo_ws_schema::{
-    ErrorPayload, Frame, ImageAnalyzeParams, Method, ModelLoadResponse, ModelStatusParams,
-    ModelUnloadResponse, ToolsExecuteParams, ToolsExecuteResponse, ToolsRegisterParams,
+    ErrorPayload, Frame, ImageAnalyzeParams, LoadedModelInfo, Method, ModelLoadResponse,
+    ModelStatusParams, ModelUnloadResponse, ToolsExecuteParams, ToolsExecuteResponse,
+    ToolsRegisterParams,
 };
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use utl_helpers::Error;
+
+const MAX_PREFILL_CACHE_ENTRIES: usize = 64;
 
 /// Run the node, connecting to the gateway and reconnecting on disconnect.
 pub async fn run_node(
     config: &NodeConfig,
+    available_models: &[String],
     registry: &ToolRegistry,
-    has_inference: bool,
-    has_vision: bool,
+    coordinator: Arc<Mutex<Coordinator>>,
 ) -> utl_helpers::Result {
-    let inference = InferenceClients::new(InferenceConfig::default());
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -30,7 +36,7 @@ pub async fn run_node(
             config.gateway_url
         );
 
-        match connect_and_run(config, registry, &inference, has_inference, has_vision).await {
+        match connect_and_run(config, available_models, registry, coordinator.clone()).await {
             Ok(()) => {
                 tracing::info!("Node disconnected gracefully");
                 break;
@@ -49,29 +55,21 @@ pub async fn run_node(
 
 async fn connect_and_run(
     config: &NodeConfig,
+    available_models: &[String],
     registry: &ToolRegistry,
-    inference: &InferenceClients,
-    has_inference: bool,
-    has_vision: bool,
+    coordinator: Arc<Mutex<Coordinator>>,
 ) -> utl_helpers::Result {
     // Step 1: Connect to gateway
     let mut conn = NexoConnection::connect(&config.gateway_url, &config.auth_token)
         .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Connection failed: {e}")))?;
+        .map_err(|e| Error::Network(format!("Connection failed: {e}")))?;
 
     tracing::info!("Connected to gateway");
 
     // Step 2: Handshake — declare capabilities and available models
-    let (mut capabilities, commands) = registry.capabilities_and_commands();
-    if has_inference {
-        capabilities.push("llm".to_string());
-    }
-    if has_vision {
-        capabilities.push("vision".to_string());
-    }
-    tracing::debug!(
-        "Handshaking with capabilities={capabilities:?}, commands={commands:?}"
-    );
+    let (capabilities, commands) = registry.capabilities_and_commands();
+
+    tracing::debug!("Handshaking with capabilities={capabilities:?}, commands={commands:?}");
 
     let params = default_node_connect_params(
         &config.node_id,
@@ -80,12 +78,12 @@ async fn connect_and_run(
         &config.device_id,
         capabilities,
         commands,
-        config.available_models.clone(),
+        available_models.to_vec(),
     );
 
     let hello = perform_handshake(&mut conn, params)
         .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Handshake failed: {e}")))?;
+        .map_err(|e| Error::Network(format!("Handshake failed: {e}")))?;
 
     tracing::info!(
         "Handshake complete: protocol v{}, tick interval {}ms",
@@ -98,23 +96,21 @@ async fn connect_and_run(
     let tool_count = specs.len();
     tracing::info!("Registering {tool_count} tool(s) with gateway");
 
-    let register_frame = Frame::request(
-        Method::ToolsRegister,
-        &ToolsRegisterParams { tools: specs },
-    )
-    .map_err(|e| utl_helpers::Error::Other(format!("Failed to build register frame: {e}")))?;
+    let register_frame =
+        Frame::request(Method::ToolsRegister, &ToolsRegisterParams { tools: specs })
+            .map_err(|e| Error::Other(format!("Failed to build register frame: {e}")))?;
 
     conn.send_frame(&register_frame)
         .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Failed to send register: {e}")))?;
+        .map_err(|e| Error::Network(format!("Failed to send register: {e}")))?;
 
     // Wait for register response, skipping any events that arrive first
     loop {
         let frame = conn
             .recv_frame()
             .await
-            .map_err(|e| utl_helpers::Error::Network(format!("Failed to receive register response: {e}")))?
-            .ok_or_else(|| utl_helpers::Error::Network("Connection closed during registration".into()))?;
+            .map_err(|e| Error::Network(format!("Failed to receive register response: {e}")))?
+            .ok_or_else(|| Error::Network("Connection closed during registration".into()))?;
 
         match frame {
             Frame::Response {
@@ -134,9 +130,7 @@ async fn connect_and_run(
                 let msg = error
                     .map(|e| format!("{}: {}", e.code, e.message))
                     .unwrap_or_else(|| "Unknown error".into());
-                return Err(utl_helpers::Error::Network(format!(
-                    "Tool registration rejected: {msg}"
-                )));
+                return Err(Error::Network(format!("Tool registration rejected: {msg}")));
             }
             Frame::Event { .. } => continue,
             other => {
@@ -147,103 +141,172 @@ async fn connect_and_run(
 
     tracing::info!("Node ready, listening for requests");
 
-    // Push initial model status so the gateway knows inference is available.
-    if has_inference {
-        let loaded = Some(DEFAULT_INFERENCE_MODEL.to_string());
-        push_model_status(&mut conn, loaded, &config.available_models).await;
-    }
+    // Split connection for non-blocking inference
+    let (mut writer, mut reader) = conn.into_split();
 
-    // Per-connection state
-    let available_models = config.available_models.clone();
-    let mut prefill_cache: HashMap<String, String> = HashMap::new();
-    let mut currently_loaded: Option<String> = None;
+    // Push initial model status so the gateway knows what's loaded.
+    push_model_status(&mut writer, &coordinator, available_models).await;
+    let mut prefill_cache = std::collections::HashMap::<String, String>::new();
+    let cache_manager = Arc::new(Mutex::new(SessionCacheManager::new(
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".nexo")
+            .join("kv_cache"),
+    )));
 
-    // Step 4: Message loop
+    // Inference result channel: (request_id, result_json_or_error)
+    let (inference_tx, mut inference_rx) =
+        tokio::sync::mpsc::channel::<(String, Result<serde_json::Value, String>)>(1);
+    let mut inference_busy = false;
+
+    // Step 4: Message loop with select!
     loop {
-        let frame = conn
-            .recv_frame()
-            .await
-            .map_err(|e| utl_helpers::Error::Network(format!("Receive error: {e}")))?;
+        tokio::select! {
+            frame = reader.recv_frame() => {
+                let frame = frame
+                    .map_err(|e| Error::Network(format!("Receive error: {e}")))?;
+                match frame {
+                    Some(Frame::Request {
+                        id,
+                        method: Method::ToolsExecute,
+                        params,
+                    }) => {
+                        handle_tool_execute(&mut writer, &id, params, registry).await?;
+                    }
+                    Some(Frame::Request {
+                        id,
+                        method: Method::Agent,
+                        params,
+                    }) => {
+                        if inference_busy {
+                            send_busy_error(&mut writer, &id).await?;
+                        } else {
+                            inference_busy = true;
+                            dispatch_agent_inference(
+                                &id,
+                                params,
+                                &coordinator,
+                                &inference_tx,
+                                &mut prefill_cache,
+                                &mut reader,
+                                &mut writer,
+                                &cache_manager,
+                            ).await?;
+                        }
+                    }
+                    Some(Frame::Request {
+                        id,
+                        method: Method::ImageAnalyze,
+                        params,
+                    }) => {
+                        if inference_busy {
+                            send_busy_error(&mut writer, &id).await?;
+                        } else {
+                            inference_busy = true;
+                            dispatch_image_analyze(
+                                &id,
+                                params,
+                                &coordinator,
+                                &inference_tx,
+                            ).await?;
+                        }
+                    }
+                    Some(Frame::Request {
+                        id,
+                        method: Method::ModelLoad,
+                        params,
+                    }) => {
+                        handle_model_load(&mut writer, &id, params, &coordinator, available_models).await?;
+                    }
+                    Some(Frame::Request {
+                        id,
+                        method: Method::ModelUnload,
+                        params,
+                    }) => {
+                        handle_model_unload(&mut writer, &id, params, &coordinator, available_models, &cache_manager).await?;
+                    }
+                    Some(Frame::Event {
+                        event: nexo_ws_schema::EventKind::Tick,
+                        ..
+                    }) => {
+                        tracing::trace!("Received tick");
+                    }
+                    Some(Frame::Event {
+                        event: nexo_ws_schema::EventKind::Shutdown,
+                        payload,
+                        ..
+                    }) => {
+                        let reason = payload
+                            .get("reason")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        tracing::info!("Received shutdown event: {reason}");
+                        break;
+                    }
+                    Some(Frame::Event { event, .. }) => {
+                        tracing::debug!("Received event: {event:?}");
+                    }
+                    Some(frame) => {
+                        tracing::debug!("Received unexpected frame: {frame:?}");
+                    }
+                    None => {
+                        return Err(Error::Network(
+                            "Connection closed by gateway".into(),
+                        ));
+                    }
+                }
+            }
 
-        match frame {
-            Some(Frame::Request {
-                id,
-                method: Method::ToolsExecute,
-                params,
-            }) => {
-                handle_tool_execute(&mut conn, &id, params, registry).await?;
-            }
-            Some(Frame::Request {
-                id,
-                method: Method::Agent,
-                params,
-            }) => {
-                handle_agent_inference(&mut conn, &id, params, inference, &mut prefill_cache)
-                    .await?;
-            }
-            Some(Frame::Request {
-                id,
-                method: Method::ImageAnalyze,
-                params,
-            }) => {
-                handle_image_analyze(&mut conn, &id, params, inference).await?;
-            }
-            Some(Frame::Request {
-                id,
-                method: Method::ModelLoad,
-                params,
-            }) => {
-                handle_model_load(&mut conn, &id, params, inference, &mut currently_loaded, &available_models).await?;
-            }
-            Some(Frame::Request {
-                id,
-                method: Method::ModelUnload,
-                params,
-            }) => {
-                handle_model_unload(&mut conn, &id, params, inference, &mut currently_loaded, &available_models)
-                    .await?;
-            }
-            Some(Frame::Event {
-                event: nexo_ws_schema::EventKind::Tick,
-                ..
-            }) => {
-                tracing::trace!("Received tick");
-            }
-            Some(Frame::Event {
-                event: nexo_ws_schema::EventKind::Shutdown,
-                payload,
-                ..
-            }) => {
-                let reason = payload
-                    .get("reason")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                tracing::info!("Received shutdown event: {reason}");
-                break;
-            }
-            Some(Frame::Event { event, .. }) => {
-                tracing::debug!("Received event: {event:?}");
-            }
-            Some(frame) => {
-                tracing::debug!("Received unexpected frame: {frame:?}");
-            }
-            None => {
-                return Err(utl_helpers::Error::Network(
-                    "Connection closed by gateway".into(),
-                ));
+            // Inference completion branch
+            Some((request_id, result)) = inference_rx.recv() => {
+                inference_busy = false;
+
+                // Periodically expire old KV caches from disk
+                {
+                    let mut mgr = cache_manager.lock().unwrap();
+                    if let Err(e) = mgr.maybe_expire() {
+                        tracing::warn!("KV cache expiry failed: {e}");
+                    }
+                }
+
+                let response = match result {
+                    Ok(payload) => {
+                        Frame::ok_response(&request_id, &payload).unwrap_or_else(|e| {
+                            Frame::error_response(
+                                &request_id,
+                                ErrorPayload {
+                                    code: "internal_error".into(),
+                                    message: e.to_string(),
+                                },
+                            )
+                        })
+                    }
+                    Err(err_msg) => {
+                        Frame::error_response(
+                            &request_id,
+                            ErrorPayload {
+                                code: "inference_error".into(),
+                                message: err_msg,
+                            },
+                        )
+                    }
+                };
+                send(&mut writer, &response).await?;
             }
         }
     }
 
-    if let Err(e) = conn.close().await {
+    if let Err(e) = writer.close().await {
         tracing::debug!("Close error (non-fatal): {e}");
     }
 
     Ok(())
 }
 
+// ── Tool execution (synchronous, fast) ────────────────────────────────────
+
 async fn handle_tool_execute(
-    conn: &mut NexoConnection,
+    writer: &mut WriteHalf,
     request_id: &str,
     params: serde_json::Value,
     registry: &ToolRegistry,
@@ -258,9 +321,7 @@ async fn handle_tool_execute(
                     message: format!("Invalid tools.execute params: {e}"),
                 },
             );
-            conn.send_frame(&error_response)
-                .await
-                .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+            send(writer, &error_response).await?;
             return Ok(());
         }
     };
@@ -314,19 +375,22 @@ async fn handle_tool_execute(
         }
     };
 
-    conn.send_frame(&response)
-        .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+    send(writer, &response).await?;
 
     Ok(())
 }
 
-async fn handle_agent_inference(
-    conn: &mut NexoConnection,
+// ── Agent inference dispatch (async → spawn_blocking) ─────────────────────
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_agent_inference(
     request_id: &str,
     params: serde_json::Value,
-    inference: &InferenceClients,
+    coordinator: &Arc<Mutex<Coordinator>>,
+    tx: &tokio::sync::mpsc::Sender<(String, Result<serde_json::Value, String>)>,
     prefill_cache: &mut HashMap<String, String>,
+    reader: &mut ReadHalf,
+    writer: &mut WriteHalf,
+    cache_manager: &Arc<Mutex<SessionCacheManager>>,
 ) -> utl_helpers::Result {
     let mut messages: Vec<serde_json::Value> = params
         .get("messages")
@@ -345,13 +409,29 @@ async fn handle_agent_inference(
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    let model_id = params
+        .get("model_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let session_id = params
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     // Resolve prefill by SHA, prepending as system message if present
     if let Some(sha) = &prefill_sha {
-        let content = if let Some(cached) = prefill_cache.get(sha.as_str()) {
+        let content: String = if let Some(cached) = prefill_cache.get(sha.as_str()) {
             cached.clone()
         } else {
-            match fetch_prefill_from_gateway(conn, sha).await {
+            match fetch_prefill_from_gateway(reader, writer, sha).await {
                 Ok(content) => {
+                    if prefill_cache.len() >= MAX_PREFILL_CACHE_ENTRIES {
+                        // Evict an arbitrary entry to stay bounded.
+                        if let Some(key) = prefill_cache.keys().next().cloned() {
+                            prefill_cache.remove(&key);
+                        }
+                    }
                     prefill_cache.insert(sha.clone(), content.clone());
                     content
                 }
@@ -388,49 +468,127 @@ async fn handle_agent_inference(
         })
         .collect();
 
-    // Run inference
-    let response_payload = if tools.is_empty() {
-        let req = ChatRequest {
-            messages: chat_messages,
-            max_tokens: 2048,
-            temperature: 0.7,
-            top_p: 0.9,
-        };
-        match inference.chat(req).await {
-            Ok(resp) => serde_json::json!({ "content": resp.text }),
-            Err(e) => {
-                tracing::error!("Chat inference failed: {e}");
-                let err = Frame::error_response(
-                    request_id,
-                    ErrorPayload {
-                        code: "inference_error".into(),
-                        message: e.to_string(),
-                    },
-                );
-                conn.send_frame(&err)
-                    .await
-                    .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
-                return Ok(());
-            }
-        }
+    // Determine which model to use
+    let coord = coordinator.lock()?;
+    let model_name = if let Some(id) = &model_id {
+        id.clone()
+    } else if !tools.is_empty() {
+        coord
+            .active_model_for(ModelCategory::Tool)
+            .or_else(|| coord.active_model_for(ModelCategory::Chat))
+            .unwrap_or_default()
+            .to_string()
     } else {
-        let req = ToolCallRequest {
-            messages: chat_messages,
-            tools,
-            max_tokens: 2048,
-            temperature: 0.0,
-        };
-        match inference.tool_call(req).await {
-            Ok(resp) => {
+        coord
+            .active_model_for(ModelCategory::Chat)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let settings = coord.config().model_settings(&model_name);
+    drop(coord);
+
+    if model_name.is_empty() {
+        let _ = tx
+            .send((
+                request_id.to_string(),
+                Err("No model loaded for inference".into()),
+            ))
+            .await;
+        return Ok(());
+    }
+
+    // Spawn blocking inference
+    let coord = coordinator.clone();
+    let cache_mgr = cache_manager.clone();
+    let tx = tx.clone();
+    let request_id = request_id.to_string();
+    let has_tools = !tools.is_empty();
+
+    // Gemma 4 recommended defaults
+    let temperature = settings.temperature.unwrap_or(1.0);
+    let top_p = settings.top_p.unwrap_or(0.95);
+    let top_k = settings.top_k.or(Some(64));
+    let max_tokens = settings.max_tokens.unwrap_or(2048);
+
+    tokio::task::spawn_blocking(move || {
+        let result = (|| -> Result<serde_json::Value, String> {
+            let mut coord = coord.lock().unwrap();
+            let model = coord
+                .model_mut(&model_name)
+                .ok_or_else(|| format!("Model '{model_name}' not loaded"))?;
+
+            // Handle KV cache session switching (disk persistence)
+            if let Some(kv) = model.as_kv_cacheable() {
+                let current = kv.current_session_id().map(String::from);
+                let target = session_id.as_deref();
+
+                if current.as_deref() != target && target.is_some() {
+                    let mgr = cache_mgr.lock().unwrap();
+
+                    // Save current session to disk
+                    if current.is_some()
+                        && let Err(e) = mgr.save_current_session(&model_name, kv)
+                    {
+                        tracing::warn!("Failed to save KV cache for session {:?}: {e}", current);
+                    }
+
+                    // Try to load target session from disk
+                    let device = kv.device().clone();
+                    let dtype = kv.dtype();
+                    let loaded = mgr.load_session(target.unwrap(), &model_name, kv, &device, dtype);
+                    match loaded {
+                        Ok(true) => {
+                            tracing::debug!("KV cache: switched to session {:?} from disk", target,);
+                        }
+                        Ok(false) => {
+                            tracing::debug!(
+                                "KV cache: no disk cache for session {:?}, starting fresh",
+                                target,
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to load KV cache for session {:?}: {e}", target,);
+                        }
+                    }
+                }
+            }
+
+            // Re-borrow model after kv_cacheable borrow ends
+            let model = coord
+                .model_mut(&model_name)
+                .ok_or_else(|| format!("Model '{model_name}' not loaded"))?;
+
+            if has_tools {
+                let tool_specs: Vec<nexo_spec::tool::ToolSpec> =
+                    serde_json::from_value(serde_json::Value::Array(tools))
+                        .map_err(|e| format!("Failed to parse tool specs: {e}"))?;
+
+                let req = ToolCallRequest {
+                    messages: chat_messages,
+                    tools: tool_specs,
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    top_k,
+                    session_id,
+                };
+
+                let tool_model = model
+                    .as_tool()
+                    .ok_or_else(|| format!("Model '{model_name}' does not support tool calling"))?;
+                let resp = tool_model.call_tools(&req).map_err(|e| e.to_string())?;
+
+                tracing::debug!("Raw tool call response: {:?}", resp);
+
                 if resp.tool_calls.is_empty() {
-                    serde_json::json!({ "content": resp.reasoning.unwrap_or_default() })
+                    Ok(serde_json::json!({ "content": resp.reasoning.unwrap_or_default() }))
                 } else {
                     let calls: Vec<serde_json::Value> = resp
                         .tool_calls
                         .iter()
                         .map(|tc| {
                             serde_json::json!({
-                                "id": Frame::new_id(),
+                                "id": nexo_ws_schema::Frame::new_id(),
                                 "function": {
                                     "name": tc.name,
                                     "arguments": tc.arguments,
@@ -438,139 +596,115 @@ async fn handle_agent_inference(
                             })
                         })
                         .collect();
-                    serde_json::json!({ "tool_calls": calls })
+                    Ok(serde_json::json!({ "tool_calls": calls }))
                 }
-            }
-            Err(e) => {
-                tracing::error!("Tool-call inference failed: {e}");
-                let err = Frame::error_response(
-                    request_id,
-                    ErrorPayload {
-                        code: "inference_error".into(),
-                        message: e.to_string(),
-                    },
-                );
-                conn.send_frame(&err)
-                    .await
-                    .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
-                return Ok(());
-            }
-        }
-    };
+            } else {
+                let req = ChatRequest {
+                    messages: chat_messages,
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    top_k,
+                    session_id,
+                };
 
-    let response = Frame::ok_response(request_id, &response_payload).unwrap_or_else(|e| {
-        Frame::error_response(
-            request_id,
-            ErrorPayload {
-                code: "internal_error".into(),
-                message: e.to_string(),
-            },
-        )
+                let chat_model = model
+                    .as_chat()
+                    .ok_or_else(|| format!("Model '{model_name}' does not support chat"))?;
+                let resp = chat_model.chat(&req).map_err(|e| e.to_string())?;
+
+                tracing::debug!("Raw chat response: {}", resp.text);
+
+                Ok(serde_json::json!({ "content": resp.text }))
+            }
+        })();
+        let _ = tx.blocking_send((request_id, result));
     });
-
-    conn.send_frame(&response)
-        .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
 
     Ok(())
 }
 
-async fn handle_image_analyze(
-    conn: &mut NexoConnection,
+// ── Image analysis dispatch (async → spawn_blocking) ──────────────────────
+
+async fn dispatch_image_analyze(
     request_id: &str,
     params: serde_json::Value,
-    inference: &InferenceClients,
+    coordinator: &Arc<Mutex<Coordinator>>,
+    tx: &tokio::sync::mpsc::Sender<(String, Result<serde_json::Value, String>)>,
 ) -> utl_helpers::Result {
     let analyze_params: ImageAnalyzeParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
-            let err = Frame::error_response(
-                request_id,
-                ErrorPayload {
-                    code: "invalid_params".into(),
-                    message: format!("Invalid image.analyze params: {e}"),
-                },
-            );
-            conn.send_frame(&err)
-                .await
-                .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+            let _ = tx
+                .send((
+                    request_id.to_string(),
+                    Err(format!("Invalid image.analyze params: {e}")),
+                ))
+                .await;
             return Ok(());
         }
     };
 
-    let image_bytes =
-        match base64::engine::general_purpose::STANDARD.decode(&analyze_params.image_data) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                let err = Frame::error_response(
-                    request_id,
-                    ErrorPayload {
-                        code: "invalid_params".into(),
-                        message: format!("Invalid base64 image data: {e}"),
-                    },
-                );
-                conn.send_frame(&err)
-                    .await
-                    .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
-                return Ok(());
-            }
-        };
+    tracing::info!("Analyzing image (prompt: '{:.80}')", analyze_params.prompt);
 
-    tracing::info!(
-        "Analyzing image ({} bytes, prompt: '{:.80}')",
-        image_bytes.len(),
-        analyze_params.prompt
-    );
+    // Determine model
+    let coord = coordinator.lock()?;
+    let model_name = coord
+        .active_model_for(ModelCategory::Image)
+        .unwrap_or_default()
+        .to_string();
+    drop(coord);
 
-    let req = ImageAnalysisRequest {
-        image_data: image_bytes,
-        prompt: analyze_params.prompt,
-        max_tokens: analyze_params.max_tokens,
-        temperature: analyze_params.temperature,
-    };
+    let coord = coordinator.clone();
+    let tx = tx.clone();
+    let request_id = request_id.to_string();
 
-    let response = match inference.analyze_image(req).await {
-        Ok(resp) => {
-            let payload = serde_json::json!({
+    // Base64 decode + inference both run on the blocking pool
+    tokio::task::spawn_blocking(move || {
+        let result = (|| -> Result<serde_json::Value, String> {
+            let image_bytes = base64::engine::general_purpose::STANDARD
+                .decode(&analyze_params.image_data)
+                .map_err(|e| format!("Invalid base64 image data: {e}"))?;
+
+            let mut coord = coord.lock().unwrap();
+            let model = coord
+                .model_mut(&model_name)
+                .ok_or_else(|| format!("Image model '{model_name}' not loaded"))?;
+
+            let image_model = model
+                .as_image()
+                .ok_or_else(|| format!("Model '{model_name}' does not support image analysis"))?;
+
+            let req = ImageAnalysisRequest {
+                image_data: image_bytes,
+                prompt: analyze_params.prompt,
+                max_tokens: analyze_params.max_tokens,
+                temperature: analyze_params.temperature,
+            };
+
+            let resp = image_model.analyze_image(&req).map_err(|e| e.to_string())?;
+
+            tracing::debug!("Raw image analysis response: {}", resp.text);
+
+            Ok(serde_json::json!({
                 "text": resp.text,
                 "tokensGenerated": resp.tokens_generated,
                 "inferenceTimeMs": resp.inference_time_ms,
-            });
-            Frame::ok_response(request_id, &payload).unwrap_or_else(|e| {
-                Frame::error_response(
-                    request_id,
-                    ErrorPayload {
-                        code: "internal_error".into(),
-                        message: e.to_string(),
-                    },
-                )
-            })
-        }
-        Err(e) => {
-            tracing::error!("Image analysis failed: {e}");
-            Frame::error_response(
-                request_id,
-                ErrorPayload {
-                    code: "inference_error".into(),
-                    message: e.to_string(),
-                },
-            )
-        }
-    };
-
-    conn.send_frame(&response)
-        .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+            }))
+        })();
+        let _ = tx.blocking_send((request_id, result));
+    });
 
     Ok(())
 }
 
+// ── Model load/unload (blocking but fast — weight loading) ────────────────
+
 async fn handle_model_load(
-    conn: &mut NexoConnection,
+    writer: &mut WriteHalf,
     request_id: &str,
     params: serde_json::Value,
-    inference: &InferenceClients,
-    currently_loaded: &mut Option<String>,
+    coordinator: &Arc<Mutex<Coordinator>>,
     available_models: &[String],
 ) -> utl_helpers::Result {
     let model_id = params
@@ -580,16 +714,21 @@ async fn handle_model_load(
         .to_string();
 
     tracing::info!("Loading model '{model_id}'");
-    let (loaded, error) = match inference.load_model(&model_id).await {
-        Ok(()) => {
-            *currently_loaded = Some(model_id.clone());
-            (true, None)
+
+    let coord = coordinator.clone();
+    let model_id_clone = model_id.clone();
+    let (loaded, error) = tokio::task::spawn_blocking(move || {
+        let mut coord = coord.lock().unwrap();
+        match coord.load_model(&model_id_clone) {
+            Ok(()) => (true, None),
+            Err(e) => {
+                tracing::error!("Failed to load model '{model_id_clone}': {e}");
+                (false, Some(e.to_string()))
+            }
         }
-        Err(e) => {
-            tracing::error!("Failed to load model '{model_id}': {e}");
-            (false, Some(e.to_string()))
-        }
-    };
+    })
+    .await
+    .unwrap_or((false, Some("Task panicked".into())));
 
     let response = Frame::ok_response(
         request_id,
@@ -609,25 +748,22 @@ async fn handle_model_load(
         )
     });
 
-    conn.send_frame(&response)
-        .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+    send(writer, &response).await?;
 
-    // Push ModelStatus to gateway so it can update its state
     if loaded {
-        push_model_status(conn, Some(model_id), available_models).await;
+        push_model_status(writer, coordinator, available_models).await;
     }
 
     Ok(())
 }
 
 async fn handle_model_unload(
-    conn: &mut NexoConnection,
+    writer: &mut WriteHalf,
     request_id: &str,
     params: serde_json::Value,
-    inference: &InferenceClients,
-    currently_loaded: &mut Option<String>,
+    coordinator: &Arc<Mutex<Coordinator>>,
     available_models: &[String],
+    cache_manager: &Arc<Mutex<SessionCacheManager>>,
 ) -> utl_helpers::Result {
     let model_id = params
         .get("modelId")
@@ -636,18 +772,33 @@ async fn handle_model_unload(
         .to_string();
 
     tracing::info!("Unloading model '{model_id}'");
-    let unloaded = match inference.unload_model(&model_id).await {
-        Ok(()) => {
-            if currently_loaded.as_deref() == Some(model_id.as_str()) {
-                *currently_loaded = None;
+
+    let coord = coordinator.clone();
+    let cache_mgr = cache_manager.clone();
+    let model_id_clone = model_id.clone();
+    let unloaded = tokio::task::spawn_blocking(move || {
+        let mut coord = coord.lock().unwrap();
+
+        // Save current session's KV cache to disk before unloading
+        if let Some(model) = coord.model_mut(&model_id_clone)
+            && let Some(kv) = model.as_kv_cacheable()
+        {
+            let mgr = cache_mgr.lock().unwrap();
+            if let Err(e) = mgr.on_model_unload(&model_id_clone, kv) {
+                tracing::warn!("Failed to save KV cache before unload: {e}");
             }
-            true
         }
-        Err(e) => {
-            tracing::warn!("Unload of model '{model_id}' failed (non-fatal): {e}");
-            false
+
+        match coord.unload_model(&model_id_clone) {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!("Unload of model '{model_id_clone}' failed (non-fatal): {e}");
+                false
+            }
         }
-    };
+    })
+    .await
+    .unwrap_or(false);
 
     let response = Frame::ok_response(request_id, &ModelUnloadResponse { unloaded })
         .unwrap_or_else(|e| {
@@ -660,35 +811,66 @@ async fn handle_model_unload(
             )
         });
 
-    conn.send_frame(&response)
-        .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Send error: {e}")))?;
+    send(writer, &response).await?;
 
-    push_model_status(conn, None, available_models).await;
+    push_model_status(writer, coordinator, available_models).await;
 
     Ok(())
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+/// Send a frame, mapping the WS error to `Error::Network`.
+async fn send(writer: &mut WriteHalf, frame: &Frame) -> utl_helpers::Result {
+    writer
+        .send_frame(frame)
+        .await
+        .map_err(|e| Error::Network(format!("Send error: {e}")))
+}
+
+/// Send a "node_busy" error response when inference is already in progress.
+async fn send_busy_error(writer: &mut WriteHalf, request_id: &str) -> utl_helpers::Result {
+    let err = Frame::error_response(
+        request_id,
+        ErrorPayload {
+            code: "node_busy".into(),
+            message: "Inference is already in progress".into(),
+        },
+    );
+    send(writer, &err).await
+}
+
 /// Push the node's current loaded model state to the gateway.
 async fn push_model_status(
-    conn: &mut NexoConnection,
-    loaded_model_id: Option<String>,
+    writer: &mut WriteHalf,
+    coordinator: &Arc<Mutex<Coordinator>>,
     available_models: &[String],
 ) {
+    let loaded_models: Vec<LoadedModelInfo> = {
+        let coord = coordinator.lock().unwrap();
+        coord
+            .loaded_models()
+            .iter()
+            .map(|(name, cats)| LoadedModelInfo {
+                model_id: name.to_string(),
+                categories: cats.to_vec(),
+            })
+            .collect()
+    };
     let status = ModelStatusParams {
-        loaded_model_id,
+        loaded_models,
         available_models: available_models.to_vec(),
     };
     if let Ok(frame) = Frame::request(Method::ModelStatus, &status) {
-        let _ = conn.send_frame(&frame).await;
+        let _ = writer.send_frame(&frame).await;
     }
 }
 
 /// Fetch prefill content from the gateway by SHA.
 /// Sends a PrefillFetch request and waits for the response (up to 10s).
-/// Non-matching frames received while waiting are logged and discarded.
 async fn fetch_prefill_from_gateway(
-    conn: &mut NexoConnection,
+    reader: &mut ReadHalf,
+    writer: &mut WriteHalf,
     prefill_sha: &str,
 ) -> anyhow::Result<String> {
     let fetch_id = Frame::new_id();
@@ -697,7 +879,8 @@ async fn fetch_prefill_from_gateway(
         method: Method::PrefillFetch,
         params: serde_json::json!({ "prefillSha": prefill_sha }),
     };
-    conn.send_frame(&fetch_frame)
+    writer
+        .send_frame(&fetch_frame)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to send PrefillFetch: {e}"))?;
 
@@ -709,7 +892,7 @@ async fn fetch_prefill_from_gateway(
             anyhow::bail!("PrefillFetch timed out for '{prefill_sha}'");
         }
 
-        let frame = tokio::time::timeout(remaining, conn.recv_frame())
+        let frame = tokio::time::timeout(remaining, reader.recv_frame())
             .await
             .map_err(|_| anyhow::anyhow!("PrefillFetch timed out for '{prefill_sha}'"))?
             .map_err(|e| anyhow::anyhow!("Connection error during PrefillFetch: {e}"))?
@@ -744,7 +927,9 @@ async fn fetch_prefill_from_gateway(
                 anyhow::bail!("PrefillFetch failed for sha '{prefill_sha}': {msg}");
             }
             other => {
-                tracing::debug!("Discarding non-prefill frame while awaiting PrefillFetch: {other:?}");
+                tracing::debug!(
+                    "Discarding non-prefill frame while awaiting PrefillFetch: {other:?}"
+                );
             }
         }
     }

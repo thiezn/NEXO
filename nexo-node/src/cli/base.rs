@@ -2,7 +2,10 @@ use clap::{Parser, Subcommand};
 use utl_helpers::LogLevel;
 
 #[derive(Parser)]
-#[command(name = "nexo-node", about = "NEXO Node - Tool capability host and inference service manager")]
+#[command(
+    name = "nexo-node",
+    about = "NEXO Node - Tool capability host and inference service manager"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -26,7 +29,7 @@ pub enum Command {
         url: Option<String>,
     },
 
-    /// Manage local GGUF models
+    /// Manage local models
     Models {
         #[command(subcommand)]
         action: ModelsCommand,

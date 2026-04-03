@@ -37,6 +37,9 @@ pub struct AgentEventPayload {
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Ephemeral thinking/reasoning content (not persisted in conversation history).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_content: Option<String>,
 }
 
 /// Payload for `presence` events.
@@ -129,6 +132,7 @@ mod tests {
             tool_name: None,
             tool_call_id: None,
             error: None,
+            thinking_content: None,
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert!(json.get("content").is_none());
@@ -148,6 +152,7 @@ mod tests {
             tool_name: Some("echo.run".into()),
             tool_call_id: Some("tc-1".into()),
             error: None,
+            thinking_content: None,
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["status"], "tool_call");
@@ -165,6 +170,7 @@ mod tests {
             tool_name: None,
             tool_call_id: None,
             error: None,
+            thinking_content: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         let decoded: AgentEventPayload = serde_json::from_str(&json).unwrap();

@@ -49,10 +49,10 @@ pub(super) async fn handle_model_status(
             Ok(p) => p,
             Err(f) => return f,
         };
-    let model_became_available = status_params.loaded_model_id.is_some();
+    let model_became_available = !status_params.loaded_models.is_empty();
     {
         let mut sw = state.write().await;
-        sw.set_loaded_model(peer_id, status_params.loaded_model_id);
+        sw.set_loaded_models(peer_id, status_params.loaded_models);
         sw.set_available_models(peer_id, status_params.available_models);
     }
     if model_became_available

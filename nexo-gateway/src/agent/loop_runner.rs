@@ -11,6 +11,12 @@ const MAX_ITERATIONS: usize = 20;
 /// Timeout for model load operations (models can be large).
 const MODEL_LOAD_TIMEOUT_SECS: u64 = 300;
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
+/// Token prepended to system prompt to enable Gemma 4 extended thinking.
+const THINK_TOKEN: &str = "<|think|>";
+/// Opening delimiter for thinking content blocks in model output.
+const THINKING_BLOCK_OPEN: &str = "<|channel>thought\n";
+/// Closing delimiter for thinking content blocks in model output.
+const THINKING_BLOCK_CLOSE: &str = "<channel|>";
 
 /// Run one complete agent loop for a given run.
 #[allow(clippy::too_many_arguments)]
@@ -25,6 +31,7 @@ pub async fn run(
     event_tx: &broadcast::Sender<Frame>,
     model_id: Option<&str>,
     prefill_collection_id: Option<&str>,
+    thinking: bool,
 ) {
     // 1. Persist user message
     if let Err(e) =
@@ -126,31 +133,41 @@ pub async fn run(
             prefill_content.as_deref(),
             state,
             event_tx,
+            thinking,
+            session_id,
         )
         .await;
 
         match inference_result {
-            InferenceOutcome::Reply(text) => {
-                // Persist assistant message
+            InferenceOutcome::Reply(raw_text) => {
+                // Strip thinking content if present — only visible text is persisted.
+                let (visible_text, thinking_content) = if thinking {
+                    strip_thinking_content(&raw_text)
+                } else {
+                    (raw_text, None)
+                };
+
+                // Persist assistant message (visible text only)
                 let _ = super::session::insert_message(
                     db,
                     session_id,
                     Some(run_id),
                     "assistant",
-                    &text,
+                    &visible_text,
                     None,
                     None,
                 )
                 .await;
 
-                // Stream content event
-                emit_event(
+                // Stream content event (includes ephemeral thinking content)
+                emit_event_with_thinking(
                     event_tx,
                     run_id,
                     session_id,
                     AgentStatus::Streaming,
-                    Some(&text),
+                    Some(&visible_text),
                     None,
+                    thinking_content.as_deref(),
                 );
 
                 // Mark completed
@@ -162,7 +179,7 @@ pub async fn run(
                     None,
                     None,
                 );
-                let _ = super::session::finish_run(db, run_id, AgentStatus::Completed, Some(&text))
+                let _ = super::session::finish_run(db, run_id, AgentStatus::Completed, Some(&visible_text))
                     .await;
                 super::locks::release_all_for_run(db, run_id).await.ok();
                 return;
@@ -304,15 +321,22 @@ async fn ensure_model_loaded(
         }
     };
 
-    // Step 3: Check if the node has a different model loaded — if so, unload it first
-    let currently_loaded = state
+    // Step 3: Check if the node has other models loaded — if so, unload them first
+    let models_to_unload: Vec<String> = state
         .read()
         .await
         .loaded_models
         .get(&peer_id)
-        .and_then(|m| m.clone());
+        .map(|models| {
+            models
+                .iter()
+                .filter(|m| m.model_id != model_id)
+                .map(|m| m.model_id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
 
-    if let Some(old_model) = currently_loaded {
+    for old_model in &models_to_unload {
         tracing::info!(
             "Unloading model '{old_model}' from node {peer_id} before loading '{model_id}'"
         );
@@ -336,7 +360,9 @@ async fn ensure_model_loaded(
         } else {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await;
         }
-        state.write().await.set_loaded_model(&peer_id, None);
+    }
+    if !models_to_unload.is_empty() {
+        state.write().await.set_loaded_models(&peer_id, vec![]);
     }
 
     // Step 4: Send ModelLoad to the node
@@ -382,10 +408,17 @@ async fn ensure_model_loaded(
                 .unwrap_or(true);
 
             if loaded {
-                state
-                    .write()
-                    .await
-                    .set_loaded_model(&peer_id, Some(model_id.to_string()));
+                // Mark model as loaded with empty categories so that
+                // find_loaded_llm_peer (which matches by model_id, not
+                // category) finds it for subsequent requests. The node
+                // pushes a full ModelStatus with real categories shortly after.
+                state.write().await.set_loaded_models(
+                    &peer_id,
+                    vec![nexo_spec::model::LoadedModelInfo {
+                        model_id: model_id.to_string(),
+                        categories: vec![],
+                    }],
+                );
                 tracing::info!("Model '{model_id}' loaded on node {peer_id}");
                 Ok(node_sender)
             } else {
@@ -430,9 +463,17 @@ async fn run_inference(
     prefill_content: Option<&str>,
     state: &SharedState,
     _event_tx: &broadcast::Sender<Frame>,
+    thinking: bool,
+    session_id: &str,
 ) -> InferenceOutcome {
     // Build system prompt from SOUL.md, prefill, and tool descriptions
     let mut system_parts = Vec::new();
+
+    // Inject thinking token at the very start of the system prompt
+    if thinking {
+        system_parts.push(THINK_TOKEN.to_string());
+    }
+
     if !soul_content.is_empty() {
         system_parts.push(soul_content.to_string());
     }
@@ -496,6 +537,7 @@ async fn run_inference(
     if let Some(mid) = model_id {
         inference_payload["model_id"] = serde_json::Value::String(mid.to_string());
     }
+    inference_payload["session_id"] = serde_json::Value::String(session_id.to_string());
 
     // Find an LLM-capable node (with model loading if model_id is specified)
     let node_sender = match model_id {
@@ -732,20 +774,15 @@ async fn queue_run(
 
 /// Emit a 'queued' event to inform the client their request is pending.
 fn emit_queued_event(event_tx: &broadcast::Sender<Frame>, run_id: &str, session_id: &str) {
-    let payload = AgentEventPayload {
-        run_id: run_id.to_string(),
-        session_id: session_id.to_string(),
-        status: AgentStatus::Queued,
-        content: Some(
-            "No inference node is currently available. Your request has been queued and will be processed as soon as a node becomes available.".to_string()
-        ),
-        tool_name: None,
-        tool_call_id: None,
-        error: None,
-    };
-    if let Ok(frame) = Frame::event(EventKind::Agent, &payload) {
-        let _ = event_tx.send(frame);
-    }
+    emit_event_with_thinking(
+        event_tx,
+        run_id,
+        session_id,
+        AgentStatus::Queued,
+        Some("No inference node is currently available. Your request has been queued and will be processed as soon as a node becomes available."),
+        None,
+        None,
+    );
 }
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -763,6 +800,18 @@ fn emit_event(
     content: Option<&str>,
     tool_name: Option<&str>,
 ) {
+    emit_event_with_thinking(event_tx, run_id, session_id, status, content, tool_name, None);
+}
+
+fn emit_event_with_thinking(
+    event_tx: &broadcast::Sender<Frame>,
+    run_id: &str,
+    session_id: &str,
+    status: AgentStatus,
+    content: Option<&str>,
+    tool_name: Option<&str>,
+    thinking_content: Option<&str>,
+) {
     let payload = AgentEventPayload {
         run_id: run_id.to_string(),
         session_id: session_id.to_string(),
@@ -771,10 +820,46 @@ fn emit_event(
         tool_name: tool_name.map(String::from),
         tool_call_id: None,
         error: None,
+        thinking_content: thinking_content.map(String::from),
     };
     if let Ok(frame) = Frame::event(EventKind::Agent, &payload) {
         let _ = event_tx.send(frame);
     }
+}
+
+/// Strip thinking blocks from model output.
+///
+/// Gemma 4 emits thinking content between `<|channel>thought\n` and `<channel|>` markers.
+/// Returns `(visible_text, Option<thinking_content>)`.
+fn strip_thinking_content(raw: &str) -> (String, Option<String>) {
+
+    let mut visible = String::new();
+    let mut thinking = String::new();
+    let mut rest = raw;
+
+    while let Some(start) = rest.find(THINKING_BLOCK_OPEN) {
+        visible.push_str(&rest[..start]);
+
+        let after_open = &rest[start + THINKING_BLOCK_OPEN.len()..];
+        if let Some(end) = after_open.find(THINKING_BLOCK_CLOSE) {
+            thinking.push_str(after_open[..end].trim());
+            rest = &after_open[end + THINKING_BLOCK_CLOSE.len()..];
+        } else {
+            // Unclosed thinking block — treat everything after the marker as thinking
+            thinking.push_str(after_open.trim());
+            rest = "";
+            break;
+        }
+    }
+    visible.push_str(rest);
+
+    let visible = visible.trim().to_string();
+    let thinking = if thinking.is_empty() {
+        None
+    } else {
+        Some(thinking)
+    };
+    (visible, thinking)
 }
 
 async fn fail(
@@ -793,6 +878,7 @@ async fn fail(
         tool_name: None,
         tool_call_id: None,
         error: Some(error.to_string()),
+        thinking_content: None,
     };
     if let Ok(frame) = Frame::event(EventKind::Agent, &payload) {
         let _ = event_tx.send(frame);

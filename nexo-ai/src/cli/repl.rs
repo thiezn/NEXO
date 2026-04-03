@@ -1215,6 +1215,8 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str, conversation: &mut Con
         max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
         temperature: settings.temperature.unwrap_or(DEFAULT_CHAT_TEMPERATURE),
         top_p: settings.top_p.unwrap_or(DEFAULT_CHAT_TOP_P),
+        top_k: settings.top_k,
+        session_id: None,
     };
 
     println!("  [chat via {model_name}] thinking...");
@@ -1270,6 +1272,9 @@ fn handle_tool(coordinator: &mut Coordinator, text: &str) {
         tools: vec![],
         max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
         temperature: settings.temperature.unwrap_or(0.3),
+        top_p: settings.top_p.unwrap_or(DEFAULT_CHAT_TOP_P),
+        top_k: settings.top_k,
+        session_id: None,
     };
 
     println!("  [tool via {model_name}] thinking...");

@@ -55,7 +55,7 @@ utl-helpers = { path = "../shared/utl-helpers", features = [
     "config",
     "output",
 ] }
-nexo-tool-spec = { path = "../shared/nexo-tool-spec" }
+nexo-spec = { path = "../shared/nexo-spec", features = ["tool"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0"
@@ -70,7 +70,7 @@ rustyline = { version = "15", optional = true }
 ctrlc = { version = "3", optional = true }
 
 # Download-only
-hf-hub = { version = "0", default-features = false, features = [
+hf-hub = { version = "0.4", default-features = false, features = [
     "tokio",
     "ureq",
     "rustls-tls",
