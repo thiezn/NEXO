@@ -13,7 +13,7 @@
 //! - Embedders: `time_in`, `img_in`, `txt_in`, modulations, `final_layer`
 
 use anyhow::Result;
-use candle_core::{DType, Device, IndexOp, Tensor, D};
+use candle_core::{D, DType, Device, IndexOp, Tensor};
 use candle_nn::{LayerNorm, Linear, RmsNorm};
 use candle_transformers::quantized_var_builder::VarBuilder;
 

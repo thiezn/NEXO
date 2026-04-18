@@ -47,6 +47,8 @@ impl Component for AiComponent {
 pub struct AiModelManifest {
     pub manifest: ModelManifest<AiComponent>,
     pub categories: Vec<ModelCategory>,
+    /// HuggingFace repo identifier for remote-served models (e.g. MLX).
+    pub hf_repo: Option<String>,
 }
 
 // ── Whisper ────────────────────────────────────────────────────────────────
@@ -89,6 +91,7 @@ fn whisper_large_v3_manifest() -> AiModelManifest {
             ],
         },
         categories: vec![ModelCategory::Listen],
+        hf_repo: None,
     }
 }
 
@@ -131,6 +134,7 @@ fn whisper_large_v3_turbo_manifest() -> AiModelManifest {
             ],
         },
         categories: vec![ModelCategory::Listen],
+        hf_repo: None,
     }
 }
 
@@ -173,6 +177,7 @@ fn distil_large_v3_manifest() -> AiModelManifest {
             ],
         },
         categories: vec![ModelCategory::Listen],
+        hf_repo: None,
     }
 }
 
@@ -238,6 +243,7 @@ fn flux_2_klein_4b_manifest() -> AiModelManifest {
             ],
         },
         categories: vec![ModelCategory::Imagine],
+        hf_repo: None,
     }
 }
 
@@ -334,6 +340,7 @@ fn flux_2_klein_9b_manifest() -> AiModelManifest {
             ],
         },
         categories: vec![ModelCategory::Imagine],
+        hf_repo: None,
     }
 }
 
@@ -544,6 +551,7 @@ fn flux_2_dev_manifest() -> AiModelManifest {
             ],
         },
         categories: vec![ModelCategory::Imagine],
+        hf_repo: None,
     }
 }
 
@@ -614,6 +622,7 @@ fn z_image_turbo_manifest() -> AiModelManifest {
             ],
         },
         categories: vec![ModelCategory::Imagine],
+        hf_repo: None,
     }
 }
 
@@ -769,6 +778,7 @@ fn qwen_image_bf16_manifest() -> AiModelManifest {
             files,
         },
         categories: vec![ModelCategory::Imagine],
+        hf_repo: None,
     }
 }
 
@@ -792,6 +802,7 @@ fn qwen_image_q8_manifest() -> AiModelManifest {
             files,
         },
         categories: vec![ModelCategory::Imagine],
+        hf_repo: None,
     }
 }
 
@@ -814,6 +825,7 @@ fn qwen_image_q6_manifest() -> AiModelManifest {
             files,
         },
         categories: vec![ModelCategory::Imagine],
+        hf_repo: None,
     }
 }
 
@@ -836,6 +848,7 @@ fn qwen_image_q4_manifest() -> AiModelManifest {
             files,
         },
         categories: vec![ModelCategory::Imagine],
+        hf_repo: None,
     }
 }
 
@@ -878,6 +891,7 @@ fn gemma4_manifest(
             ModelCategory::Tool,
             ModelCategory::Image,
         ],
+        hf_repo: None,
     }
 }
 
@@ -1065,10 +1079,261 @@ fn gemma_4_31b_it_manifest() -> AiModelManifest {
     )
 }
 
+// ── Gemma 4 GGUF ──────────────────────────────────────────────────────────
+
+fn gemma_4_e2b_it_q5_manifest() -> AiModelManifest {
+    let gguf_repo = "unsloth/gemma-4-e2b-it-GGUF".to_string();
+    let orig_repo = "google/gemma-4-E2B-it".to_string();
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "gemma-4-e2b-it-q5".to_string(),
+            family: "gemma4".to_string(),
+            description:
+                "Gemma 4 E2B IT Q5_K_M — quantized multimodal chat, tool & vision (~4.1 GB)"
+                    .to_string(),
+            size_gb: 4.1,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: gguf_repo.clone(),
+                    hf_filename: "gemma-4-E2B-it-Q5_K_M.gguf".to_string(),
+                    size_bytes: 3_356_030_336,
+                    gated: false,
+                    sha256: None,
+                },
+                // Multimodal projector (vision/audio towers) in GGUF F16 format
+                ModelFile {
+                    component: AiComponent::VisionProjector,
+                    hf_repo: gguf_repo,
+                    hf_filename: "mmproj-F16.gguf".to_string(),
+                    size_bytes: 985_654_208,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: orig_repo.clone(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 32_169_626,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: orig_repo,
+                    hf_filename: "config.json".to_string(),
+                    size_bytes: 4_954,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![
+            ModelCategory::Chat,
+            ModelCategory::Tool,
+            ModelCategory::Image,
+            ModelCategory::Listen,
+        ],
+        hf_repo: None,
+    }
+}
+
+fn gemma_4_26b_a4b_it_q4_manifest() -> AiModelManifest {
+    let gguf_repo = "unsloth/gemma-4-26b-a4b-it-GGUF".to_string();
+    let orig_repo = "google/gemma-4-26b-a4b-it".to_string();
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "gemma-4-26b-a4b-it-q4".to_string(),
+            family: "gemma4".to_string(),
+            description:
+                "Gemma 4 26B-A4B IT UD-Q4_K_M — quantized MoE multimodal chat, tool & vision (~17.0 GB)"
+                    .to_string(),
+            size_gb: 17.0,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: gguf_repo.clone(),
+                    hf_filename: "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf".to_string(),
+                    size_bytes: 16_868_236_288,
+                    gated: false,
+                    sha256: None,
+                },
+                // Multimodal projector (vision tower) in GGUF F16 format
+                ModelFile {
+                    component: AiComponent::VisionProjector,
+                    hf_repo: gguf_repo,
+                    hf_filename: "mmproj-F16.gguf".to_string(),
+                    size_bytes: 1_193_058_912,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: orig_repo.clone(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 32_169_626,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: orig_repo,
+                    hf_filename: "config.json".to_string(),
+                    size_bytes: 4_954,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        categories: vec![
+            ModelCategory::Chat,
+            ModelCategory::Tool,
+            ModelCategory::Image,
+        ],
+        hf_repo: None,
+    }
+}
+
+// ── MLX (mlx_vlm server) ─────────────────────────────────────────────────
+
+#[cfg(feature = "mlx")]
+fn mlx_manifest(
+    name: &str,
+    repo: &str,
+    description: &str,
+    size_gb: f32,
+    shard_sizes: &[u64],
+    config_sizes: MlxConfigSizes,
+) -> AiModelManifest {
+    let num_shards = shard_sizes.len();
+    let mut files: Vec<ModelFile<AiComponent>> = shard_sizes
+        .iter()
+        .enumerate()
+        .map(|(i, &size)| ModelFile {
+            component: AiComponent::ModelShard,
+            hf_repo: repo.to_string(),
+            hf_filename: format!("model-{:05}-of-{:05}.safetensors", i + 1, num_shards),
+            size_bytes: size,
+            gated: false,
+            sha256: None,
+        })
+        .collect();
+
+    for (filename, size) in [
+        ("config.json", config_sizes.config),
+        ("model.safetensors.index.json", config_sizes.index),
+        ("processor_config.json", config_sizes.processor),
+        ("tokenizer_config.json", config_sizes.tokenizer_config),
+        ("generation_config.json", config_sizes.generation),
+    ] {
+        files.push(ModelFile {
+            component: AiComponent::Config,
+            hf_repo: repo.to_string(),
+            hf_filename: filename.to_string(),
+            size_bytes: size,
+            gated: false,
+            sha256: None,
+        });
+    }
+
+    files.push(ModelFile {
+        component: AiComponent::Tokenizer,
+        hf_repo: repo.to_string(),
+        hf_filename: "tokenizer.json".to_string(),
+        size_bytes: config_sizes.tokenizer,
+        gated: false,
+        sha256: None,
+    });
+
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: name.to_string(),
+            family: "mlx".to_string(),
+            description: description.to_string(),
+            size_gb,
+            files,
+        },
+        categories: vec![
+            ModelCategory::Chat,
+            ModelCategory::Tool,
+            ModelCategory::Image,
+        ],
+        hf_repo: Some(repo.to_string()),
+    }
+}
+
+#[cfg(feature = "mlx")]
+struct MlxConfigSizes {
+    config: u64,
+    index: u64,
+    processor: u64,
+    tokenizer_config: u64,
+    generation: u64,
+    tokenizer: u64,
+}
+
+#[cfg(feature = "mlx")]
+fn mlx_gemma_4_e2b_it_8bit_manifest() -> AiModelManifest {
+    mlx_manifest(
+        "mlx-gemma-4-e2b-it-8bit",
+        "mlx-community/gemma-4-E2B-it-8bit",
+        "Gemma 4 E2B IT 8-bit via MLX — multimodal chat, tool & vision (~5.5 GB)",
+        5.5,
+        &[5_367_135_201, 532_432_577],
+        MlxConfigSizes {
+            config: 5_996,
+            index: 270_064,
+            processor: 902,
+            tokenizer_config: 2_685,
+            generation: 208,
+            tokenizer: 32_169_626,
+        },
+    )
+}
+
+#[cfg(feature = "mlx")]
+fn mlx_gemma_4_26b_a4b_4bit_manifest() -> AiModelManifest {
+    mlx_manifest(
+        "mlx-gemma-4-26b-a4b-4bit",
+        "mlx-community/gemma-4-26b-a4b-4bit",
+        "Gemma 4 26B-A4B 4-bit via MLX — MoE multimodal chat, tool & vision (~15.6 GB)",
+        15.6,
+        &[5_275_612_587, 5_296_718_232, 5_036_507_755],
+        MlxConfigSizes {
+            config: 33_340,
+            index: 176_940,
+            processor: 627,
+            tokenizer_config: 1_498,
+            generation: 181,
+            tokenizer: 32_170_070,
+        },
+    )
+}
+
+#[cfg(feature = "mlx")]
+fn mlx_gemma_4_31b_it_4bit_manifest() -> AiModelManifest {
+    mlx_manifest(
+        "mlx-gemma-4-31b-it-4bit",
+        "mlx-community/gemma-4-31b-it-4bit",
+        "Gemma 4 31B IT 4-bit via MLX — large multimodal chat, tool & vision (~18.4 GB)",
+        18.4,
+        &[5_366_617_542, 5_361_642_569, 5_367_276_098, 2_316_480_623],
+        MlxConfigSizes {
+            config: 5_647,
+            index: 205_370,
+            processor: 627,
+            tokenizer_config: 2_685,
+            generation: 208,
+            tokenizer: 32_169_626,
+        },
+    )
+}
+
 // ── Registry ───────────────────────────────────────────────────────────────
 
 fn build_all_manifests() -> Vec<AiModelManifest> {
-    vec![
+    #[allow(unused_mut)]
+    let mut all = vec![
         // Listen
         whisper_large_v3_manifest(),
         whisper_large_v3_turbo_manifest(),
@@ -1082,7 +1347,7 @@ fn build_all_manifests() -> Vec<AiModelManifest> {
         qwen_image_q8_manifest(),
         qwen_image_q6_manifest(),
         qwen_image_q4_manifest(),
-        // Chat + Tool + Image
+        // Chat + Tool + Image (safetensors)
         gemma_4_e2b_manifest(),
         gemma_4_e2b_it_manifest(),
         gemma_4_e4b_manifest(),
@@ -1091,7 +1356,20 @@ fn build_all_manifests() -> Vec<AiModelManifest> {
         gemma_4_26b_a4b_it_manifest(),
         gemma_4_31b_manifest(),
         gemma_4_31b_it_manifest(),
-    ]
+        // Chat + Tool (GGUF quantized)
+        gemma_4_e2b_it_q5_manifest(),
+        gemma_4_26b_a4b_it_q4_manifest(),
+    ];
+
+    // MLX models (served via mlx_vlm server)
+    #[cfg(feature = "mlx")]
+    {
+        all.push(mlx_gemma_4_e2b_it_8bit_manifest());
+        all.push(mlx_gemma_4_26b_a4b_4bit_manifest());
+        all.push(mlx_gemma_4_31b_it_4bit_manifest());
+    }
+
+    all
 }
 
 static ALL_MANIFESTS: LazyLock<Vec<AiModelManifest>> = LazyLock::new(build_all_manifests);
@@ -1149,7 +1427,8 @@ mod tests {
 
     #[test]
     fn known_manifests_count() {
-        assert_eq!(known_manifests().len(), 19);
+        let expected = if cfg!(feature = "mlx") { 24 } else { 21 };
+        assert_eq!(known_manifests().len(), expected);
     }
 
     #[test]
@@ -1188,11 +1467,16 @@ mod tests {
     #[test]
     fn manifests_for_listen_contains_whisper() {
         let listen = manifests_for_category(ModelCategory::Listen);
-        assert_eq!(listen.len(), 3);
+        assert_eq!(listen.len(), 4); // 3 whisper + 1 gemma-4-e2b-it-q5
         assert!(
             listen
                 .iter()
                 .any(|m| m.manifest.name == "whisper-large-v3-turbo")
+        );
+        assert!(
+            listen
+                .iter()
+                .any(|m| m.manifest.name == "gemma-4-e2b-it-q5")
         );
     }
 
@@ -1395,6 +1679,57 @@ mod tests {
     }
 
     #[test]
+    fn known_manifests_contains_gemma4_gguf() {
+        let manifests = known_manifests();
+        for name in ["gemma-4-e2b-it-q5", "gemma-4-26b-a4b-it-q4"] {
+            assert!(
+                manifests.iter().any(|m| m.manifest.name == name),
+                "missing: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn gemma4_gguf_manifests_have_multimodal_categories() {
+        // E2B GGUF: Chat + Tool + Image + Listen
+        let e2b = find_manifest("gemma-4-e2b-it-q5").unwrap();
+        assert_eq!(e2b.manifest.family, "gemma4");
+        assert!(e2b.categories.contains(&ModelCategory::Chat));
+        assert!(e2b.categories.contains(&ModelCategory::Tool));
+        assert!(e2b.categories.contains(&ModelCategory::Image));
+        assert!(e2b.categories.contains(&ModelCategory::Listen));
+
+        // 26B GGUF: Chat + Tool + Image (no audio)
+        let big = find_manifest("gemma-4-26b-a4b-it-q4").unwrap();
+        assert_eq!(big.manifest.family, "gemma4");
+        assert!(big.categories.contains(&ModelCategory::Chat));
+        assert!(big.categories.contains(&ModelCategory::Tool));
+        assert!(big.categories.contains(&ModelCategory::Image));
+        assert!(!big.categories.contains(&ModelCategory::Listen));
+    }
+
+    #[test]
+    fn gemma4_gguf_has_mmproj_and_config() {
+        for name in ["gemma-4-e2b-it-q5", "gemma-4-26b-a4b-it-q4"] {
+            let m = find_manifest(name).unwrap();
+            assert!(
+                m.manifest
+                    .files
+                    .iter()
+                    .any(|f| f.component == AiComponent::Config),
+                "{name} should include config.json for multimodal"
+            );
+            assert!(
+                m.manifest
+                    .files
+                    .iter()
+                    .any(|f| f.component == AiComponent::VisionProjector),
+                "{name} should include mmproj GGUF for vision/audio towers"
+            );
+        }
+    }
+
+    #[test]
     fn gemma4_models_are_ungated() {
         for name in [
             "gemma-4-e2b",
@@ -1414,8 +1749,14 @@ mod tests {
     #[test]
     fn manifests_for_chat_contains_gemma4() {
         let chat = manifests_for_category(ModelCategory::Chat);
-        assert_eq!(chat.len(), 8);
+        let expected = if cfg!(feature = "mlx") { 13 } else { 10 };
+        assert_eq!(chat.len(), expected);
         assert!(chat.iter().any(|m| m.manifest.name == "gemma-4-e2b-it"));
         assert!(chat.iter().any(|m| m.manifest.name == "gemma-4-31b-it"));
+        assert!(chat.iter().any(|m| m.manifest.name == "gemma-4-e2b-it-q5"));
+        assert!(
+            chat.iter()
+                .any(|m| m.manifest.name == "gemma-4-26b-a4b-it-q4")
+        );
     }
 }

@@ -62,7 +62,7 @@ impl super::Coordinator {
         self.load_active_models(&categories)
     }
 
-    fn create_model_slot(&self, model_name: &str) -> Result<super::ModelSlot> {
+    fn create_model_slot(&mut self, model_name: &str) -> Result<super::ModelSlot> {
         let manifest = find_manifest(model_name)
             .ok_or_else(|| anyhow::anyhow!("unknown model '{model_name}'"))?;
 
@@ -72,37 +72,74 @@ impl super::Coordinator {
 
         let model: Box<dyn crate::shared::model_traits::ModelInfo> =
             match manifest.manifest.family.as_str() {
+                #[cfg(feature = "candle")]
                 "whisper" => Box::new(crate::models::whisper::WhisperModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
                 )),
+                #[cfg(feature = "candle")]
                 "flux" => Box::new(crate::models::flux2::FluxModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
                 )),
+                #[cfg(feature = "candle")]
                 "gemma4" => {
                     let settings = self.config.model_settings(model_name);
+                    let is_gguf = manifest
+                        .manifest
+                        .files
+                        .iter()
+                        .any(|f| f.hf_filename.ends_with(".gguf"));
                     Box::new(
                         crate::models::gemma4::Gemma4Model::new(
                             model_name.to_string(),
                             memory_bytes,
                             model_dir,
                         )
+                        .with_gguf(is_gguf)
                         .with_max_context_tokens(settings.max_context_tokens),
                     )
                 }
+                #[cfg(feature = "candle")]
                 "z_image" => Box::new(crate::models::z_image::ZImageModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
                 )),
+                #[cfg(feature = "candle")]
                 "qwen_image" => Box::new(crate::models::qwen_image::QwenImageModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
                 )),
+                #[cfg(feature = "mlx")]
+                "mlx" => {
+                    let hf_repo = manifest.hf_repo.clone().ok_or_else(|| {
+                        anyhow::anyhow!("MLX model '{model_name}' missing hf_repo")
+                    })?;
+                    let (host, port) = self.config.mlx_server_addr();
+                    let venv = self.config.mlx_venv_path.clone();
+                    let server = self
+                        .mlx_server
+                        .get_or_insert_with(|| {
+                            std::sync::Arc::new(tokio::sync::Mutex::new(
+                                crate::remote_models::mlx_server::MlxServer::new(&host, port, venv),
+                            ))
+                        })
+                        .clone();
+                    let base_url = format!("http://{host}:{port}");
+                    Box::new(crate::remote_models::mlx_model::MlxModel::new(
+                        model_name,
+                        &hf_repo,
+                        model_dir,
+                        memory_bytes,
+                        categories.clone(),
+                        server,
+                        &base_url,
+                    ))
+                }
                 other => anyhow::bail!("unsupported model family '{other}'"),
             };
 

@@ -48,15 +48,17 @@ impl WhisperTokens {
     ///
     /// Format: `[sot, language_id, transcribe, no_timestamps]`
     /// If no language is specified, defaults to English.
-    pub fn initial_tokens(&self, tokenizer: &tokenizers::Tokenizer, language: Option<&str>) -> Vec<u32> {
+    pub fn initial_tokens(
+        &self,
+        tokenizer: &tokenizers::Tokenizer,
+        language: Option<&str>,
+    ) -> Vec<u32> {
         let lang_token = language
             .and_then(|lang| {
                 let token_str = format!("<|{lang}|>");
                 tokenizer.token_to_id(&token_str)
             })
-            .unwrap_or_else(|| {
-                tokenizer.token_to_id("<|en|>").unwrap_or(self.sot + 1)
-            });
+            .unwrap_or_else(|| tokenizer.token_to_id("<|en|>").unwrap_or(self.sot + 1));
 
         vec![self.sot, lang_token, self.transcribe, self.no_timestamps]
     }
@@ -100,9 +102,7 @@ pub fn decode_with_timestamps(
             if let Some(start) = current_start_ms {
                 // This is the end timestamp — flush segment
                 if !current_tokens.is_empty() {
-                    let text = tokenizer
-                        .decode(&current_tokens, true)
-                        .unwrap_or_default();
+                    let text = tokenizer.decode(&current_tokens, true).unwrap_or_default();
                     let trimmed = text.trim().to_string();
                     if !trimmed.is_empty() {
                         full_text.push_str(&trimmed);
@@ -127,9 +127,7 @@ pub fn decode_with_timestamps(
 
     // Flush any remaining tokens without a closing timestamp
     if !current_tokens.is_empty() {
-        let text = tokenizer
-            .decode(&current_tokens, true)
-            .unwrap_or_default();
+        let text = tokenizer.decode(&current_tokens, true).unwrap_or_default();
         let trimmed = text.trim().to_string();
         if !trimmed.is_empty() {
             full_text.push_str(&trimmed);

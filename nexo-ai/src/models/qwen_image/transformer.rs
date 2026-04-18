@@ -13,10 +13,10 @@
 //! Reuses Z-Image's building blocks (apply_rotary_emb, FeedForward) from
 //! candle_transformers since the core components are identical.
 
-use candle_core::{DType, Device, Module, Tensor, D};
-use candle_nn::{linear, linear_no_bias, VarBuilder};
+use candle_core::{D, DType, Device, Module, Tensor};
+use candle_nn::{VarBuilder, linear, linear_no_bias};
 use candle_transformers::models::with_tracing::RmsNorm;
-use candle_transformers::models::z_image::transformer::{apply_rotary_emb, FeedForward};
+use candle_transformers::models::z_image::transformer::{FeedForward, apply_rotary_emb};
 
 use super::quantized_transformer::QwenRopeEmbedder;
 

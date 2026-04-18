@@ -6,6 +6,8 @@ use crate::shared::model_traits::ModelInfo;
 use crate::shared::types::ModelCategory;
 use crate::statistics::StatsCollector;
 use std::collections::HashMap;
+#[cfg(feature = "mlx")]
+use std::sync::Arc;
 
 pub struct ModelSlot {
     model: Box<dyn ModelInfo>,
@@ -38,6 +40,8 @@ pub struct Coordinator {
     slots: HashMap<String, ModelSlot>,
     active_models: HashMap<ModelCategory, String>,
     stats: StatsCollector,
+    #[cfg(feature = "mlx")]
+    mlx_server: Option<Arc<tokio::sync::Mutex<crate::remote_models::mlx_server::MlxServer>>>,
 }
 
 impl Coordinator {
@@ -58,6 +62,8 @@ impl Coordinator {
             slots: HashMap::new(),
             active_models,
             stats: StatsCollector::new(),
+            #[cfg(feature = "mlx")]
+            mlx_server: None,
         }
     }
 
@@ -131,6 +137,7 @@ impl Coordinator {
 }
 
 #[cfg(test)]
+#[cfg(feature = "candle")]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;

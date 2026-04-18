@@ -25,10 +25,7 @@ pub fn find_safetensor_files(model_dir: &Path) -> Result<Vec<PathBuf>> {
         .collect();
 
     if shards.is_empty() {
-        anyhow::bail!(
-            "no safetensor files found in {}",
-            model_dir.display()
-        );
+        anyhow::bail!("no safetensor files found in {}", model_dir.display());
     }
 
     shards.sort();
@@ -41,18 +38,20 @@ pub fn find_safetensor_files(model_dir: &Path) -> Result<Vec<PathBuf>> {
 /// For example, `"Q5_K_M"` matches `"Qwen3-4B-Q5_K_M.gguf"`.
 ///
 /// Files whose name starts with any entry in `exclude_prefixes` are skipped.
-pub fn find_gguf_file(model_dir: &Path, pattern: &str, exclude_prefixes: &[&str]) -> Result<PathBuf> {
+pub fn find_gguf_file(
+    model_dir: &Path,
+    pattern: &str,
+    exclude_prefixes: &[&str],
+) -> Result<PathBuf> {
     let mut matches: Vec<PathBuf> = std::fs::read_dir(model_dir)?
         .filter_map(|entry| entry.ok())
         .map(|e| e.path())
         .filter(|p| {
             p.extension().is_some_and(|ext| ext == "gguf")
-                && p.file_name()
-                    .and_then(|f| f.to_str())
-                    .is_some_and(|name| {
-                        name.contains(pattern)
-                            && !exclude_prefixes.iter().any(|pfx| name.starts_with(pfx))
-                    })
+                && p.file_name().and_then(|f| f.to_str()).is_some_and(|name| {
+                    name.contains(pattern)
+                        && !exclude_prefixes.iter().any(|pfx| name.starts_with(pfx))
+                })
         })
         .collect();
 

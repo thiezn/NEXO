@@ -18,6 +18,15 @@ pub struct AiConfig {
     pub startup_categories: Vec<String>,
     /// Per-model overrides keyed by model name.
     pub models: HashMap<String, ModelSettings>,
+    /// MLX server host (default: "127.0.0.1").
+    #[serde(default)]
+    pub mlx_host: Option<String>,
+    /// MLX server port (default: 8080).
+    #[serde(default)]
+    pub mlx_port: Option<u16>,
+    /// Path to Python venv containing mlx_vlm (e.g. "/path/to/.venv").
+    #[serde(default)]
+    pub mlx_venv_path: Option<String>,
 }
 
 impl Default for AiConfig {
@@ -26,6 +35,9 @@ impl Default for AiConfig {
             active_models: HashMap::new(),
             startup_categories: vec!["chat".to_string(), "talk".to_string()],
             models: HashMap::new(),
+            mlx_host: None,
+            mlx_port: None,
+            mlx_venv_path: None,
         }
     }
 }
@@ -51,7 +63,9 @@ impl AiConfig {
 
     /// Look up the active model name for a given category.
     pub fn active_model_for(&self, category: ModelCategory) -> Option<&str> {
-        self.active_models.get(category.as_str()).map(String::as_str)
+        self.active_models
+            .get(category.as_str())
+            .map(String::as_str)
     }
 
     /// Set the active model name for a given category.
@@ -110,12 +124,20 @@ pub struct CoordinatorConfig {
     pub startup_categories: Vec<String>,
     /// Per-model overrides keyed by model name.
     pub models: HashMap<String, ModelSettings>,
+    /// MLX server host (default: "127.0.0.1").
+    pub mlx_host: Option<String>,
+    /// MLX server port (default: 8080).
+    pub mlx_port: Option<u16>,
+    /// Path to Python venv containing mlx_vlm (e.g. "/path/to/.venv").
+    pub mlx_venv_path: Option<String>,
 }
 
 impl CoordinatorConfig {
     /// Look up the active model name for a given category.
     pub fn active_model_for(&self, category: ModelCategory) -> Option<&str> {
-        self.active_models.get(category.as_str()).map(String::as_str)
+        self.active_models
+            .get(category.as_str())
+            .map(String::as_str)
     }
 
     /// Set the active model name for a given category.
@@ -138,6 +160,16 @@ impl CoordinatorConfig {
     pub fn model_settings(&self, name: &str) -> ModelSettings {
         self.models.get(name).cloned().unwrap_or_default()
     }
+
+    /// MLX server address (host, port) with defaults.
+    pub fn mlx_server_addr(&self) -> (String, u16) {
+        (
+            self.mlx_host
+                .clone()
+                .unwrap_or_else(|| "127.0.0.1".to_string()),
+            self.mlx_port.unwrap_or(8080),
+        )
+    }
 }
 
 impl From<AiConfig> for CoordinatorConfig {
@@ -146,6 +178,9 @@ impl From<AiConfig> for CoordinatorConfig {
             active_models: ai.active_models,
             startup_categories: ai.startup_categories,
             models: ai.models,
+            mlx_host: ai.mlx_host,
+            mlx_port: ai.mlx_port,
+            mlx_venv_path: ai.mlx_venv_path,
         }
     }
 }
@@ -197,10 +232,7 @@ mod tests {
         let mut cfg = AiConfig::default();
         cfg.set_active_model(ModelCategory::Chat, "old-model".to_string());
         cfg.set_active_model(ModelCategory::Chat, "new-model".to_string());
-        assert_eq!(
-            cfg.active_model_for(ModelCategory::Chat),
-            Some("new-model")
-        );
+        assert_eq!(cfg.active_model_for(ModelCategory::Chat), Some("new-model"));
     }
 
     #[test]
@@ -298,7 +330,10 @@ mod tests {
         let toml_str = "";
         let parsed: AiConfig = toml::from_str(toml_str).unwrap();
         // Should fall back to defaults
-        assert_eq!(parsed.startup_categories, vec!["chat".to_string(), "talk".to_string()]);
+        assert_eq!(
+            parsed.startup_categories,
+            vec!["chat".to_string(), "talk".to_string()]
+        );
         assert!(parsed.active_models.is_empty());
     }
 
@@ -352,7 +387,10 @@ mod tests {
         );
 
         let coord: CoordinatorConfig = ai.into();
-        assert_eq!(coord.active_model_for(ModelCategory::Chat), Some("test-model"));
+        assert_eq!(
+            coord.active_model_for(ModelCategory::Chat),
+            Some("test-model")
+        );
         assert_eq!(coord.model_settings("test-model").temperature, Some(0.8));
         assert_eq!(
             coord.startup_categories,

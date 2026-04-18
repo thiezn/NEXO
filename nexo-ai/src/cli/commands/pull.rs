@@ -1,8 +1,8 @@
-use anyhow::Result;
-use crate::shared::types::ModelCategory;
-use crate::registry::{find_manifest, manifests_for_category, known_manifests};
-use crate::download::pull_model;
 use crate::config::AiConfig;
+use crate::download::pull_model;
+use crate::registry::{find_manifest, known_manifests, manifests_for_category};
+use crate::shared::types::ModelCategory;
+use anyhow::Result;
 
 pub async fn run(model: &str, force: bool) -> Result<()> {
     // If model is "all", pull all known manifests.
@@ -11,7 +11,10 @@ pub async fn run(model: &str, force: bool) -> Result<()> {
     let manifests_to_pull: Vec<_> = if model == "all" {
         known_manifests().iter().map(|m| &m.manifest).collect()
     } else if let Ok(category) = model.parse::<ModelCategory>() {
-        manifests_for_category(category).iter().map(|m| &m.manifest).collect()
+        manifests_for_category(category)
+            .iter()
+            .map(|m| &m.manifest)
+            .collect()
     } else if let Some(m) = find_manifest(model) {
         vec![&m.manifest]
     } else {
@@ -29,7 +32,11 @@ pub async fn run(model: &str, force: bool) -> Result<()> {
     for manifest in manifests_to_pull {
         println!("pulling {} ({:.1} GB)...", manifest.name, manifest.size_gb);
         let downloads = pull_model(manifest, force).await?;
-        println!("  downloaded {} files for {}", downloads.len(), manifest.name);
+        println!(
+            "  downloaded {} files for {}",
+            downloads.len(),
+            manifest.name
+        );
     }
 
     // Persist config (ensures config file exists for future runs).

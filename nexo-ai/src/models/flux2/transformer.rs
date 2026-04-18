@@ -11,7 +11,7 @@
 //!
 //! Loads from HuggingFace diffusers `Flux2Transformer2DModel` safetensors format.
 
-use candle_core::{DType, IndexOp, Result, Tensor, D};
+use candle_core::{D, DType, IndexOp, Result, Tensor};
 use candle_nn::{LayerNorm, Linear, RmsNorm, VarBuilder};
 
 use super::config::Flux2Config;
@@ -25,11 +25,7 @@ fn layer_norm(dim: usize, vb: &VarBuilder) -> Result<LayerNorm> {
     Ok(LayerNorm::new_no_bias(ws, 1e-6))
 }
 
-pub(crate) fn scaled_dot_product_attention(
-    q: &Tensor,
-    k: &Tensor,
-    v: &Tensor,
-) -> Result<Tensor> {
+pub(crate) fn scaled_dot_product_attention(q: &Tensor, k: &Tensor, v: &Tensor) -> Result<Tensor> {
     let dim = q.dim(D::Minus1)?;
     let scale_factor = 1.0 / (dim as f64).sqrt();
     let mut batch_dims = q.dims().to_vec();

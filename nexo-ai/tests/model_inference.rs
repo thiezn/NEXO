@@ -7,100 +7,16 @@
 //! Run one:  `cargo test -p nexo-ai --test model_inference -- --ignored test_whisper_large_v3_turbo`
 #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
 use std::path::Path;
-use std::sync::Once;
 
 use ntest::timeout;
 use serial_test::serial;
 
-use nexo_ai::download::manifest::storage_path;
-use nexo_ai::download::paths::{default_models_dir, model_storage_dir};
-use nexo_ai::registry::manifest::find_manifest;
+use common::resolve_model;
 use nexo_ai::shared::model_traits::ModelInfo;
 use nexo_ai::shared::types::*;
-
-// ── Tracing ─────────────────────────────────────────────────────────────────
-
-static INIT_TRACING: Once = Once::new();
-
-/// Initialize tracing for integration tests. Debug level for nexo_ai, info for everything else.
-/// Call at the start of each test; `Once` ensures it only runs once per test binary.
-fn init_tracing() {
-    INIT_TRACING.call_once(|| {
-        use tracing_subscriber::EnvFilter;
-        let filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("info,nexo_ai=debug"));
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_test_writer()
-            .init();
-    });
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Resolve model directory and memory estimate from the manifest registry.
-/// Panics with a clear download instruction if the model is not downloaded.
-fn resolve_model(model_name: &str) -> (std::path::PathBuf, u64) {
-    init_tracing();
-
-    let manifest = find_manifest(model_name)
-        .unwrap_or_else(|| panic!("unknown model '{model_name}' in manifest registry"));
-
-    let dir = model_storage_dir(model_name);
-    if !dir.exists() {
-        panic!(
-            "\n\n╔══════════════════════════════════════════════════════════════╗\n\
-             ║  MODEL NOT DOWNLOADED: {:<37} ║\n\
-             ╠══════════════════════════════════════════════════════════════╣\n\
-             ║  Expected directory:                                        ║\n\
-             ║    {}\n\
-             ║                                                              ║\n\
-             ║  Download with:                                              ║\n\
-             ║    cargo run -p nexo-ai --features cli -- pull {}\n\
-             ╚══════════════════════════════════════════════════════════════╝\n",
-            model_name,
-            dir.display(),
-            model_name,
-        );
-    }
-
-    // Verify all expected files from the manifest are present
-    let models_dir = default_models_dir();
-    let missing: Vec<_> = manifest
-        .manifest
-        .files
-        .iter()
-        .filter(|f| {
-            let path = models_dir.join(storage_path(&manifest.manifest, f));
-            !path.exists()
-        })
-        .map(|f| f.hf_filename.as_str())
-        .collect();
-
-    if !missing.is_empty() {
-        panic!(
-            "\n\n╔══════════════════════════════════════════════════════════════╗\n\
-             ║  MODEL INCOMPLETE: {:<40} ║\n\
-             ╠══════════════════════════════════════════════════════════════╣\n\
-             ║  Missing files:                                              ║\n\
-             {}\
-             ║                                                              ║\n\
-             ║  Re-download with:                                           ║\n\
-             ║    cargo run -p nexo-ai --features cli -- pull {} --force\n\
-             ╚══════════════════════════════════════════════════════════════╝\n",
-            model_name,
-            missing
-                .iter()
-                .map(|f| format!("║    - {f}\n"))
-                .collect::<String>(),
-            model_name,
-        );
-    }
-
-    let memory_bytes = (manifest.manifest.size_gb * 1_000_000_000.0) as u64;
-    (dir, memory_bytes)
-}
 
 /// Load the test speech WAV file and return PCM samples + sample rate.
 fn load_test_audio() -> (Vec<f32>, u32) {
@@ -592,18 +508,177 @@ tool_test!(
     nexo_ai::models::gemma4::Gemma4Model
 );
 
+// ── Gemma 4 GGUF (Chat) ───────────────────────────────────────────────────
+
+macro_rules! gguf_chat_test {
+    ($name:ident, $model_name:expr) => {
+        gguf_chat_test!($name, $model_name, 32);
+    };
+    ($name:ident, $model_name:expr, $max_tokens:expr) => {
+        #[test]
+        #[ignore]
+        #[serial]
+        #[timeout(600_000)]
+        fn $name() {
+            let (model_dir, memory_bytes) = resolve_model($model_name);
+            let mut model = nexo_ai::models::gemma4::Gemma4Model::new(
+                $model_name.into(),
+                memory_bytes,
+                model_dir,
+            )
+            .with_gguf(true);
+
+            model.load().expect("failed to load model");
+            assert!(model.is_loaded());
+
+            let chat = model.as_chat().expect("should be a chat model");
+            let request = ChatRequest {
+                messages: vec![ChatMessage {
+                    role: ChatRole::User,
+                    content: "What is 2+2? Answer with just the number.".into(),
+                }],
+                max_tokens: $max_tokens,
+                temperature: 0.1,
+                top_p: 0.9,
+                top_k: None,
+                session_id: None,
+            };
+            let response = chat.chat(&request).expect("chat failed");
+
+            eprintln!("response: {:?}", response.text);
+            assert!(!response.text.is_empty(), "chat returned empty text");
+            assert!(response.tokens_generated > 0);
+
+            model.unload();
+            assert!(!model.is_loaded());
+        }
+    };
+}
+
+gguf_chat_test!(test_gemma_4_e2b_it_q5_chat, "gemma-4-e2b-it-q5");
+
+// ── Gemma 4 GGUF (Image) ──────────────────────────────────────────────────
+
+/// Load a test image from the datasets directory.
+fn load_test_image_file(filename: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("datasets/images")
+        .join(filename);
+    assert!(path.exists(), "test image not found at {}", path.display());
+    std::fs::read(&path).expect("failed to read test image")
+}
+
+macro_rules! gguf_image_test {
+    ($name:ident, $model_name:expr, $image_file:expr, $prompt:expr) => {
+        gguf_image_test!($name, $model_name, $image_file, $prompt, 128);
+    };
+    ($name:ident, $model_name:expr, $image_file:expr, $prompt:expr, $max_tokens:expr) => {
+        #[test]
+        #[ignore]
+        #[serial]
+        #[timeout(600_000)]
+        fn $name() {
+            let (model_dir, memory_bytes) = resolve_model($model_name);
+            let mut model = nexo_ai::models::gemma4::Gemma4Model::new(
+                $model_name.into(),
+                memory_bytes,
+                model_dir,
+            )
+            .with_gguf(true);
+
+            model.load().expect("failed to load model");
+            assert!(model.is_loaded());
+
+            let image_model = model.as_image().expect("should be an image model");
+            let request = ImageAnalysisRequest {
+                image_data: load_test_image_file($image_file),
+                prompt: $prompt.into(),
+                max_tokens: $max_tokens,
+                temperature: 0.1,
+            };
+            let response = image_model
+                .analyze_image(&request)
+                .expect("image analysis failed");
+
+            eprintln!("GGUF image response: {:?}", response.text);
+            assert!(
+                !response.text.is_empty(),
+                "GGUF image analysis returned empty text"
+            );
+            assert!(response.tokens_generated > 0);
+
+            model.unload();
+            assert!(!model.is_loaded());
+        }
+    };
+}
+
+gguf_image_test!(
+    test_gemma_4_e2b_it_q5_image,
+    "gemma-4-e2b-it-q5",
+    "mk2_pants_down.png",
+    "What do you see in this image? Describe it briefly."
+);
+
+// ── Gemma 4 GGUF (Audio) ──────────────────────────────────────────────────
+
+macro_rules! gguf_audio_test {
+    ($name:ident, $model_name:expr) => {
+        gguf_audio_test!($name, $model_name, 128);
+    };
+    ($name:ident, $model_name:expr, $max_tokens:expr) => {
+        #[test]
+        #[ignore]
+        #[serial]
+        #[timeout(600_000)]
+        fn $name() {
+            let (model_dir, memory_bytes) = resolve_model($model_name);
+            let mut model = nexo_ai::models::gemma4::Gemma4Model::new(
+                $model_name.into(),
+                memory_bytes,
+                model_dir,
+            )
+            .with_gguf(true);
+
+            model.load().expect("failed to load model");
+            assert!(model.is_loaded());
+
+            let audio_model = model
+                .as_audio_analysis()
+                .expect("should be an audio analysis model");
+            let (samples, sample_rate) = load_test_audio();
+            let request = AudioAnalysisRequest {
+                pcm_samples: samples,
+                sample_rate,
+                prompt: "What is being said in this audio?".into(),
+                max_tokens: $max_tokens,
+                temperature: 0.1,
+            };
+            let response = audio_model
+                .analyze_audio(&request)
+                .expect("audio analysis failed");
+
+            eprintln!("GGUF audio response: {:?}", response.text);
+            assert!(
+                !response.text.is_empty(),
+                "GGUF audio analysis returned empty text"
+            );
+            assert!(response.tokens_generated > 0);
+
+            model.unload();
+            assert!(!model.is_loaded());
+        }
+    };
+}
+
+gguf_audio_test!(test_gemma_4_e2b_it_q5_audio, "gemma-4-e2b-it-q5");
+
 // ── Gemma 4 (Image) ──────────────────────────────────────────────────────
 
-/// Create a small test image (solid red 64x64 PNG) in memory.
 fn create_test_image() -> Vec<u8> {
-    let mut buf = Vec::new();
-    let img = image::RgbImage::from_fn(64, 64, |_, _| image::Rgb([255u8, 0, 0]));
-    let dyn_img = image::DynamicImage::ImageRgb8(img);
-    let mut cursor = std::io::Cursor::new(&mut buf);
-    dyn_img
-        .write_to(&mut cursor, image::ImageFormat::Png)
-        .expect("failed to write test image");
-    buf
+    common::create_test_png()
 }
 
 macro_rules! image_test {

@@ -47,10 +47,24 @@ fn find_tokenizer(model_dir: &Path) -> Result<PathBuf> {
     if p.exists() {
         return Ok(p);
     }
+    // Try tokenizer subdirectory
+    let p = model_dir.join("tokenizer").join("tokenizer.json");
+    if p.exists() {
+        return Ok(p);
+    }
     // Try text_encoder subdirectory
     let p = model_dir.join("text_encoder").join("tokenizer.json");
     if p.exists() {
         return Ok(p);
+    }
+    // Try shared flux2 directory
+    let shared = crate::download::paths::default_models_dir()
+        .join("shared")
+        .join("flux2")
+        .join("tokenizer")
+        .join("tokenizer.json");
+    if shared.exists() {
+        return Ok(shared);
     }
     bail!("tokenizer.json not found in {}", model_dir.display())
 }

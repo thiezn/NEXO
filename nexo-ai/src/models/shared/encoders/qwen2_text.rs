@@ -10,7 +10,7 @@
 //! hidden_size=3584, 18944 intermediate, RoPE theta=1e6, RMSNorm eps=1e-6.
 
 use anyhow::Result;
-use candle_core::{DType, Device, IndexOp, Module, Tensor, D};
+use candle_core::{D, DType, Device, IndexOp, Module, Tensor};
 use candle_nn::VarBuilder;
 use std::path::Path;
 use std::sync::Arc;
@@ -114,8 +114,7 @@ impl Mlp {
         let intermediate_sz = cfg.intermediate_size;
         let gate_proj = candle_nn::linear_no_bias(hidden_sz, intermediate_sz, vb.pp("gate_proj"))?;
         let up_proj = candle_nn::linear_no_bias(hidden_sz, intermediate_sz, vb.pp("up_proj"))?;
-        let down_proj =
-            candle_nn::linear_no_bias(intermediate_sz, hidden_sz, vb.pp("down_proj"))?;
+        let down_proj = candle_nn::linear_no_bias(intermediate_sz, hidden_sz, vb.pp("down_proj"))?;
         Ok(Self {
             gate_proj,
             up_proj,
@@ -126,7 +125,9 @@ impl Mlp {
 
 impl Module for Mlp {
     fn forward(&self, xs: &Tensor) -> candle_core::Result<Tensor> {
-        let lhs = xs.apply(&self.gate_proj)?.apply(&candle_nn::Activation::Silu)?;
+        let lhs = xs
+            .apply(&self.gate_proj)?
+            .apply(&candle_nn::Activation::Silu)?;
         let rhs = xs.apply(&self.up_proj)?;
         (lhs * rhs)?.apply(&self.down_proj)
     }
@@ -204,9 +205,8 @@ impl Attention {
 
         let key_states =
             candle_transformers::utils::repeat_kv(key_states, self.num_kv_groups)?.contiguous()?;
-        let value_states =
-            candle_transformers::utils::repeat_kv(value_states, self.num_kv_groups)?
-                .contiguous()?;
+        let value_states = candle_transformers::utils::repeat_kv(value_states, self.num_kv_groups)?
+            .contiguous()?;
 
         let scale = 1f64 / f64::sqrt(self.head_dim as f64);
         let attn_weights = (query_states.matmul(&key_states.transpose(2, 3)?)? * scale)?;
@@ -267,9 +267,7 @@ impl DecoderLayer {
         let xs = self.self_attn.forward(&xs, attention_mask, seqlen_offset)?;
         let xs = (xs + residual)?;
         let residual = &xs;
-        let xs = xs
-            .apply(&self.post_attention_layernorm)?
-            .apply(&self.mlp)?;
+        let xs = xs.apply(&self.post_attention_layernorm)?.apply(&self.mlp)?;
         (residual + xs).map_err(Into::into)
     }
 }
@@ -457,14 +455,12 @@ impl Qwen2TextEncoder {
         let (tokens, valid_len) = self.encode_ids(prompt)?;
         let drop_idx = tokens.len() - TEXT_WINDOW;
 
-        let input_ids =
-            Tensor::from_vec(tokens, (1, TEXT_WINDOW + drop_idx), &self.model.device)?;
+        let input_ids = Tensor::from_vec(tokens, (1, TEXT_WINDOW + drop_idx), &self.model.device)?;
         let mut mask = vec![0u8; TEXT_WINDOW + drop_idx];
         for value in &mut mask[..drop_idx + valid_len] {
             *value = 1;
         }
-        let attn_mask =
-            Tensor::from_vec(mask, (1, TEXT_WINDOW + drop_idx), &self.model.device)?;
+        let attn_mask = Tensor::from_vec(mask, (1, TEXT_WINDOW + drop_idx), &self.model.device)?;
 
         let emb = self
             .model

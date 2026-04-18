@@ -1,6 +1,6 @@
-use anyhow::Result;
-use crate::shared::types::*;
 use crate::shared::model_traits::*;
+use crate::shared::types::*;
+use anyhow::Result;
 
 pub struct StubModel {
     name: String,
@@ -10,19 +10,40 @@ pub struct StubModel {
 
 impl StubModel {
     pub fn new(name: &str, memory_bytes: u64) -> Self {
-        Self { name: name.to_string(), loaded: false, memory_bytes }
+        Self {
+            name: name.to_string(),
+            loaded: false,
+            memory_bytes,
+        }
     }
 }
 
 impl ModelInfo for StubModel {
-    fn name(&self) -> &str { &self.name }
-    fn family(&self) -> &str { "stub" }
-    fn categories(&self) -> &[ModelCategory] { &[ModelCategory::Chat] }
-    fn memory_estimate_bytes(&self) -> u64 { self.memory_bytes }
-    fn is_loaded(&self) -> bool { self.loaded }
-    fn load(&mut self) -> Result<()> { self.loaded = true; Ok(()) }
-    fn unload(&mut self) { self.loaded = false; }
-    fn as_chat(&mut self) -> Option<&mut dyn ChatModel> { Some(self) }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn family(&self) -> &str {
+        "stub"
+    }
+    fn categories(&self) -> &[ModelCategory] {
+        &[ModelCategory::Chat]
+    }
+    fn memory_estimate_bytes(&self) -> u64 {
+        self.memory_bytes
+    }
+    fn is_loaded(&self) -> bool {
+        self.loaded
+    }
+    fn load(&mut self) -> Result<()> {
+        self.loaded = true;
+        Ok(())
+    }
+    fn unload(&mut self) {
+        self.loaded = false;
+    }
+    fn as_chat(&mut self) -> Option<&mut dyn ChatModel> {
+        Some(self)
+    }
 }
 
 impl ChatModel for StubModel {

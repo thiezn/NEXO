@@ -6,13 +6,13 @@
 //! each matmul so only one exists at a time.
 
 use candle_core::quantized::QTensor;
-use candle_core::{DType, Device, Module, Result, Tensor, D};
+use candle_core::{D, DType, Device, Module, Result, Tensor};
 use candle_nn::RmsNorm;
 use candle_transformers::models::z_image::transformer::apply_rotary_emb;
 use candle_transformers::quantized_var_builder::VarBuilder;
 use std::sync::Arc;
 
-use super::transformer::{QwenImageConfig, MAX_PERIOD};
+use super::transformer::{MAX_PERIOD, QwenImageConfig};
 
 const FREQUENCY_EMBEDDING_SIZE: usize = 256;
 pub(crate) const ROPE_CACHE_LEN: usize = 4096;

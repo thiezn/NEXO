@@ -1399,7 +1399,7 @@ fn handle_listen(coordinator: &mut Coordinator, file: Option<&str>) {
             match crate::audio::load_file(std::path::Path::new(path)) {
                 Ok(buf) => buf.to_mono(),
                 Err(e) => {
-                    println!("  error loading audio file: {e}");
+                    println!("  error loading audio file from {path}: {e}");
                     return;
                 }
             }
@@ -1409,7 +1409,7 @@ fn handle_listen(coordinator: &mut Coordinator, file: Option<&str>) {
             match crate::audio::record_microphone(&crate::audio::RecordConfig::default()) {
                 Ok(buf) => buf,
                 Err(e) => {
-                    println!("  error recording: {e}");
+                    println!("  error recording from microphone: {e}");
                     return;
                 }
             }

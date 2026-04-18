@@ -8,8 +8,8 @@
 //!
 //! Loads from HuggingFace diffusers format (e.g. `decoder.mid_block.resnets.0`).
 
-use candle_core::{Result, Tensor, D};
-use candle_nn::{conv2d, group_norm, Conv2d, Conv2dConfig, GroupNorm, Linear, Module, VarBuilder};
+use candle_core::{D, Result, Tensor};
+use candle_nn::{Conv2d, Conv2dConfig, GroupNorm, Linear, Module, VarBuilder, conv2d, group_norm};
 
 use super::config::Flux2VaeConfig;
 

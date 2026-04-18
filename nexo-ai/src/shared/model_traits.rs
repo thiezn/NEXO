@@ -1,8 +1,8 @@
 use super::types::*;
 use anyhow::Result;
-use candle_core::{DType, Device};
 
 /// KV cache save/restore for session-aware inference.
+#[cfg(feature = "candle")]
 pub trait KvCacheable {
     /// Current number of cached tokens.
     fn kv_cache_seq_len(&self) -> usize;
@@ -26,10 +26,10 @@ pub trait KvCacheable {
     fn set_session_state(&mut self, session_id: Option<String>, tokens: Vec<u32>);
 
     /// Device the model is running on (needed for disk cache restoration).
-    fn device(&self) -> &Device;
+    fn device(&self) -> &candle_core::Device;
 
     /// Dtype used by the model (needed for disk cache restoration).
-    fn dtype(&self) -> DType;
+    fn dtype(&self) -> candle_core::DType;
 }
 
 /// Common metadata and lifecycle for any model.
@@ -58,15 +58,37 @@ pub trait ModelInfo: Send {
     // ── Category downcasts ─────────────────────────────────────────
     // Override when the model supports a category. Default returns None.
 
-    fn as_chat(&mut self) -> Option<&mut dyn ChatModel> { None }
-    fn as_tool(&mut self) -> Option<&mut dyn ToolModel> { None }
-    fn as_image(&mut self) -> Option<&mut dyn ImageModel> { None }
-    fn as_listen(&mut self) -> Option<&mut dyn ListenModel> { None }
-    fn as_audio_analysis(&mut self) -> Option<&mut dyn AudioAnalysisModel> { None }
-    fn as_talk(&mut self) -> Option<&mut dyn TalkModel> { None }
-    fn as_imagine(&mut self) -> Option<&mut dyn ImagineModel> { None }
-    fn as_embed(&mut self) -> Option<&mut dyn EmbedModel> { None }
-    fn as_kv_cacheable(&mut self) -> Option<&mut dyn KvCacheable> { None }
+    fn as_chat(&mut self) -> Option<&mut dyn ChatModel> {
+        None
+    }
+    fn as_tool(&mut self) -> Option<&mut dyn ToolModel> {
+        None
+    }
+    fn as_image(&mut self) -> Option<&mut dyn ImageModel> {
+        None
+    }
+    fn as_listen(&mut self) -> Option<&mut dyn ListenModel> {
+        None
+    }
+    fn as_audio_analysis(&mut self) -> Option<&mut dyn AudioAnalysisModel> {
+        None
+    }
+    fn as_talk(&mut self) -> Option<&mut dyn TalkModel> {
+        None
+    }
+    fn as_imagine(&mut self) -> Option<&mut dyn ImagineModel> {
+        None
+    }
+    fn as_embed(&mut self) -> Option<&mut dyn EmbedModel> {
+        None
+    }
+    fn as_multimodal(&mut self) -> Option<&mut dyn MultiModalModel> {
+        None
+    }
+    #[cfg(feature = "candle")]
+    fn as_kv_cacheable(&mut self) -> Option<&mut dyn KvCacheable> {
+        None
+    }
 }
 
 /// Text chat completion.
@@ -107,4 +129,9 @@ pub trait ImagineModel: ModelInfo {
 /// Text embedding.
 pub trait EmbedModel: ModelInfo {
     fn embed(&mut self, request: &EmbedRequest) -> Result<EmbedResponse>;
+}
+
+/// Combined text + image + audio inference.
+pub trait MultiModalModel: ModelInfo {
+    fn multimodal(&mut self, request: &MultiModalRequest) -> Result<MultiModalResponse>;
 }

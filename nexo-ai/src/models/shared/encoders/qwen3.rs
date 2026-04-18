@@ -9,7 +9,7 @@
 //! per-head RMSNorm on Q/K, RoPE with `theta=1_000_000`.
 
 use anyhow::Result;
-use candle_core::{DType, Device, Module, Result as CResult, Tensor, D};
+use candle_core::{D, DType, Device, Module, Result as CResult, Tensor};
 use candle_nn::{Activation, VarBuilder};
 use candle_transformers::utils::repeat_kv;
 use std::path::Path;
@@ -164,12 +164,28 @@ impl Attention {
         let k = x.apply(&self.k_proj)?;
         let v = x.apply(&self.v_proj)?;
 
-        let q = q.reshape((b, l, self.num_heads, self.head_dim))?.transpose(1, 2)?;
-        let k = k.reshape((b, l, self.num_kv_heads, self.head_dim))?.transpose(1, 2)?;
-        let v = v.reshape((b, l, self.num_kv_heads, self.head_dim))?.transpose(1, 2)?;
+        let q = q
+            .reshape((b, l, self.num_heads, self.head_dim))?
+            .transpose(1, 2)?;
+        let k = k
+            .reshape((b, l, self.num_kv_heads, self.head_dim))?
+            .transpose(1, 2)?;
+        let v = v
+            .reshape((b, l, self.num_kv_heads, self.head_dim))?
+            .transpose(1, 2)?;
 
-        let q = self.q_norm.forward(&q.flatten(0, 2)?)?.reshape((b, self.num_heads, l, self.head_dim))?;
-        let k = self.k_norm.forward(&k.flatten(0, 2)?)?.reshape((b, self.num_kv_heads, l, self.head_dim))?;
+        let q = self.q_norm.forward(&q.flatten(0, 2)?)?.reshape((
+            b,
+            self.num_heads,
+            l,
+            self.head_dim,
+        ))?;
+        let k = self.k_norm.forward(&k.flatten(0, 2)?)?.reshape((
+            b,
+            self.num_kv_heads,
+            l,
+            self.head_dim,
+        ))?;
 
         let (q, k) = self.rotary.apply(&q, &k)?;
 
@@ -205,8 +221,16 @@ impl DecoderLayer {
         Ok(Self {
             self_attn: Attention::new(cfg, rotary, vb.pp("self_attn"))?,
             mlp: Mlp::new(cfg, vb.pp("mlp"))?,
-            input_layernorm: candle_nn::rms_norm(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?,
-            post_attention_layernorm: candle_nn::rms_norm(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("post_attention_layernorm"))?,
+            input_layernorm: candle_nn::rms_norm(
+                cfg.hidden_size,
+                cfg.rms_norm_eps,
+                vb.pp("input_layernorm"),
+            )?,
+            post_attention_layernorm: candle_nn::rms_norm(
+                cfg.hidden_size,
+                cfg.rms_norm_eps,
+                vb.pp("post_attention_layernorm"),
+            )?,
         })
     }
 
@@ -266,7 +290,11 @@ impl Qwen3TextEncoder {
         let (b, l) = input_ids.dims2()?;
         let mut hidden = self.embed_tokens.forward(input_ids)?;
 
-        let mask = if l == 1 { None } else { Some(self.causal_mask(b, l)?) };
+        let mask = if l == 1 {
+            None
+        } else {
+            Some(self.causal_mask(b, l)?)
+        };
 
         for layer in &self.layers {
             hidden = layer.forward(&hidden, mask.as_ref())?;
@@ -286,7 +314,11 @@ impl Qwen3TextEncoder {
         let (b, l) = input_ids.dims2()?;
         let mut hidden = self.embed_tokens.forward(input_ids)?;
 
-        let mask = if l == 1 { None } else { Some(self.causal_mask(b, l)?) };
+        let mask = if l == 1 {
+            None
+        } else {
+            Some(self.causal_mask(b, l)?)
+        };
 
         let max_layer = layer_indices.iter().copied().max().unwrap_or(0);
         let mut captured: Vec<Tensor> = Vec::with_capacity(layer_indices.len());
@@ -355,12 +387,7 @@ impl Qwen3Encoder {
     ///
     /// Returns `(hidden_states, token_count)` where `hidden_states` has shape
     /// `(1, seq_len, 2560)`. Used by Z-Image which expects single-layer 2560-dim features.
-    pub fn encode(
-        &self,
-        prompt: &str,
-        device: &Device,
-        dtype: DType,
-    ) -> Result<(Tensor, usize)> {
+    pub fn encode(&self, prompt: &str, device: &Device, dtype: DType) -> Result<(Tensor, usize)> {
         let formatted = format_prompt_for_qwen3(prompt);
         let tokens = self
             .tokenizer

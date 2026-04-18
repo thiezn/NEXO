@@ -2,6 +2,9 @@
 
 Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, vervolgens zit ik openclaw na te bouwen, image generation pipelines te bouwen, scummvm assets extraction, vision OS game aan het maken in rust en swift en epub image generator te fixen...).
 
+- YouTube Downloader - store audio, transcribe, put in knowledge base, Podcast rss feed, download transcribe, knowledge base, YouTube download store as audio, Alle thimbleweed park podcast transcriptions downloaden
+- Naast rob gilbert podcast downloads, maak ook knowledge base voor performance van jeff dean https://abseil.io/fast/hints.html
+- Qwen3.5 support is geland in deze: https://github.com/EricLBuehler/candle-vllm ze gebruiken Candle!! ik heb candle-vllm gecloned hier.
 - Make sure our gateway uses the system, user, assistant message structure. Google Gemma 4 supports this now. We'll need to look at the SOUL.md approach we had for this. Native System Prompt Support – Gemma 4 introduces native support for the system role, enabling more structured and controllable conversations. Check this for recommendation on the gemma 4 best practices: https://ai.google.dev/gemma/docs/core/model_card_4#best_practices it will have hints for for to structure my chats.
 - Add option to convert bf16 to FP16. This COULD potentially break things in the model as the precission is different. However, M1 does not have hardware acceleration for BF16 so will get a big hit compared to my M4. It should be possible to cast the downloaded bf16 to fp16, then store them on disk. Then it needs to cast in dtype to fp16 and it SHOULD work. Something to test.
 - Add after_help clap messages that show some common examples. This should be a pattern we use for all our CLIs, like mrpf and nexo-client and dune. This will help models learn common help patterns and provide the right context. Review https://x.com/ericzakariasson/status/2036762680401223946?s=43 and also add this to the cli-tool-builder skill.

@@ -155,20 +155,14 @@ pub fn mel_spectrogram(pcm: &[f32], config: &MelConfig) -> (Vec<f32>, usize) {
         }
 
         // Zero-pad to FFT length
-        let mut fft_buf: Vec<Complex<f32>> = frame
-            .iter()
-            .map(|&s| Complex::new(s, 0.0))
-            .collect();
+        let mut fft_buf: Vec<Complex<f32>> = frame.iter().map(|&s| Complex::new(s, 0.0)).collect();
         fft_buf.resize(config.n_fft, Complex::new(0.0, 0.0));
 
         // FFT
         fft.process(&mut fft_buf);
 
         // Power spectrum (magnitude squared)
-        let power: Vec<f32> = fft_buf[..n_freqs]
-            .iter()
-            .map(|c| c.norm_sqr())
-            .collect();
+        let power: Vec<f32> = fft_buf[..n_freqs].iter().map(|c| c.norm_sqr()).collect();
 
         // Apply mel filterbank
         for m in 0..config.n_mels {

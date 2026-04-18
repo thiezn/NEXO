@@ -53,7 +53,9 @@ impl InferenceDetail {
         }
 
         match self {
-            Self::TextGeneration { tokens_generated, .. } => *tokens_generated as f64 / secs,
+            Self::TextGeneration {
+                tokens_generated, ..
+            } => *tokens_generated as f64 / secs,
             Self::Transcription { audio_duration_ms } => {
                 if *audio_duration_ms == 0 {
                     return 0.0;

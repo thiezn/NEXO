@@ -36,7 +36,7 @@ const MAX_SHIFT: f64 = 1.15;
 pub struct LoadedState {
     device: Device,
     dtype: DType,
-    model_dir: PathBuf,
+    files: ModelFiles,
 }
 
 /// Discover model file layout inside the model directory.
@@ -58,6 +58,10 @@ struct ModelFiles {
 }
 
 fn discover_files(model_dir: &Path) -> Result<ModelFiles> {
+    let shared_dir = crate::download::paths::default_models_dir()
+        .join("shared")
+        .join("z_image");
+
     // Transformer
     let xformer_dir = model_dir.join("transformer");
     if !xformer_dir.exists() {
@@ -70,23 +74,58 @@ fn discover_files(model_dir: &Path) -> Result<ModelFiles> {
         (find_safetensor_files(&xformer_dir)?, false)
     };
 
-    // VAE
+    // VAE — check model dir first, then shared dir
     let vae_dir = model_dir.join("vae");
+    let vae_dir = if vae_dir.is_dir() {
+        vae_dir
+    } else {
+        let shared_vae = shared_dir.join("vae");
+        if shared_vae.is_dir() {
+            shared_vae
+        } else {
+            bail!(
+                "vae directory not found in {} or {}",
+                model_dir.display(),
+                shared_dir.display()
+            );
+        }
+    };
     let vae_files = find_safetensor_files(&vae_dir)?;
     let vae_path = vae_files
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("no VAE safetensors in {}", vae_dir.display()))?;
 
-    // Qwen3 text encoder
+    // Qwen3 text encoder — check model dir first, then shared dir
     let encoder_dir = model_dir.join("text_encoder");
+    let encoder_dir = if encoder_dir.is_dir() {
+        encoder_dir
+    } else {
+        let shared_enc = shared_dir.join("text_encoder");
+        if shared_enc.is_dir() {
+            shared_enc
+        } else {
+            bail!(
+                "text_encoder directory not found in {} or {}",
+                model_dir.display(),
+                shared_dir.display()
+            );
+        }
+    };
     let encoder_paths = find_safetensor_files(&encoder_dir)?;
 
-    // Tokenizer
+    // Tokenizer — check subdirectory first, then flat
     let tokenizer_path = model_dir.join("tokenizer").join("tokenizer.json");
-    if !tokenizer_path.exists() {
-        bail!("tokenizer.json not found: {}", tokenizer_path.display());
-    }
+    let tokenizer_path = if tokenizer_path.exists() {
+        tokenizer_path
+    } else {
+        let flat = model_dir.join("tokenizer.json");
+        if flat.exists() {
+            flat
+        } else {
+            bail!("tokenizer.json not found in {}", model_dir.display());
+        }
+    };
 
     Ok(ModelFiles {
         transformer_paths,
@@ -101,8 +140,7 @@ fn discover_files(model_dir: &Path) -> Result<ModelFiles> {
 pub fn load(model_dir: &Path) -> Result<LoadedState> {
     let start = Instant::now();
 
-    // Validate files exist
-    let _files = discover_files(model_dir)?;
+    let files = discover_files(model_dir)?;
     tracing::info!(
         "Z-Image model files validated in {:.1}s",
         start.elapsed().as_secs_f64()
@@ -114,14 +152,14 @@ pub fn load(model_dir: &Path) -> Result<LoadedState> {
     Ok(LoadedState {
         device,
         dtype,
-        model_dir: model_dir.to_path_buf(),
+        files,
     })
 }
 
 /// Generate an image using sequential loading.
 pub fn imagine(state: &mut LoadedState, request: &ImagineRequest) -> Result<ImagineResponse> {
     let start = Instant::now();
-    let files = discover_files(&state.model_dir)?;
+    let files = &state.files;
     let device = &state.device;
     let dtype = state.dtype;
 

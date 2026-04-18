@@ -1,3 +1,4 @@
+#[cfg(feature = "candle")]
 use candle_core::Tensor;
 use serde::{Deserialize, Serialize};
 
@@ -221,10 +222,50 @@ pub struct EmbedResponse {
 }
 
 // ---------------------------------------------------------------------------
+// MultiModal
+// ---------------------------------------------------------------------------
+
+/// Raw image bytes with MIME type for multimodal requests.
+#[derive(Debug, Clone)]
+pub struct ImageInput {
+    pub data: Vec<u8>,
+    pub mime_type: String,
+}
+
+/// Raw PCM audio for multimodal requests.
+#[derive(Debug, Clone)]
+pub struct AudioInput {
+    pub pcm_samples: Vec<f32>,
+    pub sample_rate: u32,
+}
+
+/// Unified multimodal request — text + optional images + optional audio.
+#[derive(Debug, Clone)]
+pub struct MultiModalRequest {
+    pub messages: Vec<ChatMessage>,
+    pub images: Vec<ImageInput>,
+    pub audio: Option<AudioInput>,
+    pub max_tokens: usize,
+    pub temperature: f64,
+    pub top_p: f64,
+    pub top_k: Option<u32>,
+    pub session_id: Option<String>,
+}
+
+/// Response from a multimodal completion.
+#[derive(Debug, Clone, Serialize)]
+pub struct MultiModalResponse {
+    pub text: String,
+    pub tokens_generated: usize,
+    pub inference_time_ms: u64,
+}
+
+// ---------------------------------------------------------------------------
 // KV Cache
 // ---------------------------------------------------------------------------
 
 /// Snapshot of a single layer's K/V cache state, used for save/restore.
+#[cfg(feature = "candle")]
 #[derive(Debug, Clone)]
 pub struct LayerKvSnapshot {
     pub layer_idx: usize,

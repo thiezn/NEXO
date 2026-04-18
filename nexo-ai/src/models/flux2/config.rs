@@ -142,14 +142,26 @@ mod tests {
     #[test]
     fn variant_from_name_klein_4b() {
         assert_eq!(FluxVariant::from_name("flux2-klein"), FluxVariant::Klein4B);
-        assert_eq!(FluxVariant::from_name("flux2-klein-4b"), FluxVariant::Klein4B);
-        assert_eq!(FluxVariant::from_name("flux2-klein:q8"), FluxVariant::Klein4B);
+        assert_eq!(
+            FluxVariant::from_name("flux2-klein-4b"),
+            FluxVariant::Klein4B
+        );
+        assert_eq!(
+            FluxVariant::from_name("flux2-klein:q8"),
+            FluxVariant::Klein4B
+        );
     }
 
     #[test]
     fn variant_from_name_klein_9b() {
-        assert_eq!(FluxVariant::from_name("flux2-klein-9b"), FluxVariant::Klein9B);
-        assert_eq!(FluxVariant::from_name("flux2-klein-9B"), FluxVariant::Klein9B);
+        assert_eq!(
+            FluxVariant::from_name("flux2-klein-9b"),
+            FluxVariant::Klein9B
+        );
+        assert_eq!(
+            FluxVariant::from_name("flux2-klein-9B"),
+            FluxVariant::Klein9B
+        );
         assert_eq!(FluxVariant::from_name("flux2-9b:q8"), FluxVariant::Klein9B);
     }
 
@@ -195,7 +207,7 @@ mod tests {
         let mlp_sz = (h_sz as f64 * cfg.mlp_ratio) as usize;
         assert_eq!(mlp_sz, 9216);
         assert_eq!(h_sz * 3 + mlp_sz * 2, 27648); // single fused projection
-        assert_eq!(h_sz + mlp_sz, 12288);          // single output projection
+        assert_eq!(h_sz + mlp_sz, 12288); // single output projection
     }
 
     #[test]

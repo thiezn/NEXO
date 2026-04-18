@@ -33,13 +33,10 @@ impl Module for RmsNorm {
     }
 }
 
-/// Pure RMS normalization without learned weight (used for V norm).
-fn v_norm(v: &Tensor, eps: f64) -> Result<Tensor> {
-    let original_dtype = v.dtype();
-    let v_f32 = v.to_dtype(DType::F32)?;
-    let mean_sq = v_f32.sqr()?.mean_keepdim(D::Minus1)?;
-    let rms = (mean_sq + eps)?.sqrt()?;
-    v_f32.broadcast_div(&rms)?.to_dtype(original_dtype)
+/// Pre-allocated ones weight for V-norm (RMS norm without learned scale).
+/// Using candle's Metal-accelerated kernel avoids per-token F32 round-trips.
+fn make_v_norm_weight(dim: usize, dtype: DType, device: &Device) -> Result<Tensor> {
+    Tensor::ones(dim, dtype, device)
 }
 
 // ── RotaryEmbedding (standard, for sliding layers) ──────────────────────────
@@ -86,6 +83,13 @@ impl RotaryEmbedding {
         let q_embed = candle_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)?;
         let k_embed = candle_nn::rotary_emb::rope(&k.contiguous()?, &cos, &sin)?;
         Ok((q_embed, k_embed))
+    }
+
+    fn apply_rotary_emb_q(&self, q: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
+        let (_b_sz, _h, seq_len, _n_embd) = q.dims4()?;
+        let cos = self.cos.narrow(0, seqlen_offset, seq_len)?;
+        let sin = self.sin.narrow(0, seqlen_offset, seq_len)?;
+        candle_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)
     }
 }
 
@@ -141,6 +145,13 @@ impl ProportionalRotaryEmbedding {
         let q_embed = candle_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)?;
         let k_embed = candle_nn::rotary_emb::rope(&k.contiguous()?, &cos, &sin)?;
         Ok((q_embed, k_embed))
+    }
+
+    fn apply_rotary_emb_q(&self, q: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
+        let (_b_sz, _h, seq_len, _n_embd) = q.dims4()?;
+        let cos = self.cos.narrow(0, seqlen_offset, seq_len)?;
+        let sin = self.sin.narrow(0, seqlen_offset, seq_len)?;
+        candle_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)
     }
 }
 
@@ -265,16 +276,20 @@ pub use crate::shared::types::LayerKvSnapshot;
 #[derive(Debug, Clone)]
 struct Attention {
     q_proj: Linear,
-    k_proj: Linear,
-    v_proj: Linear,
+    /// K/V projections and norms — only used by non-shared layers.
+    /// Shared layers read K/V from their donor's cache, skipping these entirely.
+    k_proj: Option<Linear>,
+    v_proj: Option<Linear>,
     o_proj: Linear,
     q_norm: RmsNorm,
-    k_norm: RmsNorm,
+    k_norm: Option<RmsNorm>,
+    /// Pre-allocated ones weight for V-norm (unweighted RMS via Metal kernel).
+    v_norm_weight: Option<Tensor>,
+    v_norm_eps: f32,
     num_heads: usize,
     num_kv_heads: usize,
     num_kv_groups: usize,
     head_dim: usize,
-    rms_norm_eps: f64,
     is_sliding: bool,
     rotary_emb_global: Arc<ProportionalRotaryEmbedding>,
     rotary_emb_local: Arc<RotaryEmbedding>,
@@ -306,15 +321,24 @@ impl Attention {
             (cfg.global_head_dim, global_kv)
         };
 
+        let kv_shared_layer_index = cfg.kv_shared_layer_index(layer_idx);
+        let is_shared = kv_shared_layer_index.is_some();
+
         let num_kv_groups = num_heads / num_kv_heads;
         let q_proj = linear_bias(hidden_sz, num_heads * head_dim, bias, vb.pp("q_proj"))?;
-        let k_proj = linear_bias(hidden_sz, num_kv_heads * head_dim, bias, vb.pp("k_proj"))?;
-        let v_proj = linear_bias(hidden_sz, num_kv_heads * head_dim, bias, vb.pp("v_proj"))?;
         let o_proj = linear_bias(num_heads * head_dim, hidden_sz, bias, vb.pp("o_proj"))?;
         let q_norm = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("q_norm"))?;
-        let k_norm = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("k_norm"))?;
 
-        let kv_shared_layer_index = cfg.kv_shared_layer_index(layer_idx);
+        // Shared layers skip K/V computation entirely — only load weights for non-shared.
+        let (k_proj, v_proj, k_norm, v_norm_weight) = if is_shared {
+            (None, None, None, None)
+        } else {
+            let kp = linear_bias(hidden_sz, num_kv_heads * head_dim, bias, vb.pp("k_proj"))?;
+            let vp = linear_bias(hidden_sz, num_kv_heads * head_dim, bias, vb.pp("v_proj"))?;
+            let kn = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("k_norm"))?;
+            let vw = make_v_norm_weight(head_dim, vb.dtype(), vb.device())?;
+            (Some(kp), Some(vp), Some(kn), Some(vw))
+        };
 
         Ok(Self {
             q_proj,
@@ -323,11 +347,12 @@ impl Attention {
             o_proj,
             q_norm,
             k_norm,
+            v_norm_weight,
+            v_norm_eps: cfg.rms_norm_eps as f32,
             num_heads,
             num_kv_heads,
             num_kv_groups,
             head_dim,
-            rms_norm_eps: cfg.rms_norm_eps,
             is_sliding,
             rotary_emb_global,
             rotary_emb_local,
@@ -346,72 +371,72 @@ impl Attention {
     ) -> Result<Tensor> {
         let (b_sz, q_len, _) = xs.dims3()?;
 
-        let mut q = self.q_proj.forward(xs)?;
-        let mut k = self.k_proj.forward(xs)?;
-        let v = self.v_proj.forward(xs)?;
-
-        q = q
+        // Q projection + norm (always needed)
+        let q = self
+            .q_proj
+            .forward(xs)?
             .reshape((b_sz, q_len, self.num_heads, self.head_dim))?
             .transpose(1, 2)?;
-        k = k
-            .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
-            .transpose(1, 2)?;
-        let v = v
-            .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
-            .transpose(1, 2)?;
+        let q = self.q_norm.forward(&q)?;
 
-        tracing::trace!(
-            "layer {} attn: Q={:?} K={:?} V={:?} ({})",
-            self.layer_idx,
-            q.shape(),
-            k.shape(),
-            v.shape(),
-            if self.is_sliding { "sliding" } else { "global" },
-        );
-
-        // Q/K norms
-        q = self.q_norm.forward(&q)?;
-        k = self.k_norm.forward(&k)?;
-        // V norm (RMS without learned weight)
-        let v = v_norm(&v, self.rms_norm_eps)?;
-
-        // Apply RoPE
-        let (q, k) = if self.is_sliding {
-            self.rotary_emb_local
-                .apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
-        } else {
-            self.rotary_emb_global
-                .apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
-        };
-
-        // KV cache: shared layers read from donor, non-shared append to own cache
-        let (k, v) = if let Some(donor_idx) = self.kv_shared_layer_index {
+        // Branch: shared layers skip K/V entirely, non-shared compute + cache.
+        let (q, k, v) = if let Some(donor_idx) = self.kv_shared_layer_index {
+            // Q RoPE only
+            let q = if self.is_sliding {
+                self.rotary_emb_local.apply_rotary_emb_q(&q, seqlen_offset)?
+            } else {
+                self.rotary_emb_global
+                    .apply_rotary_emb_q(&q, seqlen_offset)?
+            };
             let donor = &kv_caches[donor_idx];
-            let dk = donor
-                .k()?
-                .ok_or_else(|| candle_core::Error::Msg(format!("donor layer {} K cache empty", donor_idx)))?;
-            let dv = donor
-                .v()?
-                .ok_or_else(|| candle_core::Error::Msg(format!("donor layer {} V cache empty", donor_idx)))?;
+            let dk = donor.k()?.ok_or_else(|| {
+                candle_core::Error::Msg(format!("donor layer {} K cache empty", donor_idx))
+            })?;
+            let dv = donor.v()?.ok_or_else(|| {
+                candle_core::Error::Msg(format!("donor layer {} V cache empty", donor_idx))
+            })?;
             tracing::trace!(
-                "layer {} attn: shared, reading KV from donor layer {} (kv_len={})",
+                "layer {} attn: shared from donor {} (kv_len={})",
                 self.layer_idx,
                 donor_idx,
                 dk.dim(2)?,
             );
-            (dk, dv)
+            (q, dk, dv)
         } else {
+            // Full K/V: project, norm, RoPE, cache
+            let k_proj = self.k_proj.as_ref().unwrap();
+            let v_proj = self.v_proj.as_ref().unwrap();
+            let k_norm = self.k_norm.as_ref().unwrap();
+            let v_norm_w = self.v_norm_weight.as_ref().unwrap();
+
+            let k = k_proj
+                .forward(xs)?
+                .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
+                .transpose(1, 2)?;
+            let v = v_proj
+                .forward(xs)?
+                .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
+                .transpose(1, 2)?;
+
+            let k = k_norm.forward(&k)?;
+            let v = candle_nn::ops::rms_norm(&v.contiguous()?, v_norm_w, self.v_norm_eps)?;
+
+            let (q, k) = if self.is_sliding {
+                self.rotary_emb_local
+                    .apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
+            } else {
+                self.rotary_emb_global
+                    .apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
+            };
+
             let (k, v) = kv_caches[self.layer_idx].append(&k, &v)?;
             tracing::trace!(
-                "layer {} attn: appended to own cache (kv_len={})",
+                "layer {} attn: cached (kv_len={})",
                 self.layer_idx,
                 k.dim(2)?,
             );
-            (k, v)
+            (q, k, v)
         };
-
-        let k = candle_transformers::utils::repeat_kv(k, self.num_kv_groups)?.contiguous()?;
-        let v = candle_transformers::utils::repeat_kv(v, self.num_kv_groups)?.contiguous()?;
 
         let mask = if self.is_sliding {
             sliding_attention_mask
@@ -433,20 +458,17 @@ impl Attention {
             })
             .transpose()?;
 
-        tracing::trace!(
-            "layer {} attn: kv_seq_len={}, mask={:?}",
-            self.layer_idx,
-            kv_seq_len,
-            mask.as_ref().map(|m| format!("{:?}", m.shape())),
-        );
-
-        // Gemma 4 uses QK-norm; attention scaling is 1.0 (not 1/sqrt(head_dim)).
-        let scale = 1.0f32;
+        // Gemma 4 uses QKV-norm; attention scaling is 1.0.
+        // Metal SDPA handles GQA natively (avoids repeat_kv + contiguous).
         let attn_output = if q.device().is_metal() && mask.is_none() {
-            // Metal-accelerated SDPA (no mask path — single-token decode)
-            candle_nn::ops::sdpa(&q, &k, &v, None, false, scale, 1.0)?
+            candle_nn::ops::sdpa(&q, &k, &v, None, false, 1.0, 1.0)?
         } else {
-            let attn_weights = (q.matmul(&k.transpose(2, 3)?)? * scale as f64)?;
+            // Prefill path: expand KV heads for manual matmul.
+            let k = candle_transformers::utils::repeat_kv(k, self.num_kv_groups)?
+                .contiguous()?;
+            let v = candle_transformers::utils::repeat_kv(v, self.num_kv_groups)?
+                .contiguous()?;
+            let attn_weights = q.matmul(&k.transpose(2, 3)?)?;
             let attn_weights = match &mask {
                 None => attn_weights,
                 Some(mask) => attn_weights.broadcast_add(mask)?,
@@ -934,9 +956,9 @@ impl TextModel {
                 Ok(logits)
             }
             Some(sc) => {
-                let orig_dtype = logits.dtype();
+                // Keep in F32 — pipeline samples in F32 anyway, avoids round-trip.
                 let logits = logits.to_dtype(DType::F32)?;
-                let logits = ((logits / sc)?.tanh()? * sc)?.to_dtype(orig_dtype)?;
+                let logits = ((logits / sc)?.tanh()? * sc)?;
                 if tracing::enabled!(tracing::Level::TRACE) {
                     trace_top_k_logits(&logits, "top-5 logits (softcapped)")?;
                 }

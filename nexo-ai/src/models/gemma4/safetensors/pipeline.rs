@@ -6,20 +6,19 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 
-use super::model::{
-    Model,
-    config::{Gemma4Config, Gemma4TextConfig, Gemma4VisionConfig},
-    text::{LayerKvSnapshot, TextModel},
-};
+use super::multimodal::Model;
+use super::text::{LayerKvSnapshot, TextModel};
+use crate::models::gemma4::config::{Gemma4Config, Gemma4TextConfig, Gemma4VisionConfig};
 
 use crate::models::shared::weights::find_safetensor_files;
 use crate::shared::templates::{ChatTemplate, ReasoningMode};
 use crate::shared::types::{
-    AudioAnalysisRequest, AudioAnalysisResponse, ChatRequest, ChatResponse,
-    ImageAnalysisRequest, ImageAnalysisResponse, ToolCallRequest, ToolCallResponse,
+    AudioAnalysisRequest, AudioAnalysisResponse, ChatRequest, ChatResponse, ImageAnalysisRequest,
+    ImageAnalysisResponse, ToolCallRequest, ToolCallResponse,
 };
 
-use super::template::Gemma4Template;
+use crate::models::gemma4::generation::{self, TextForward};
+use crate::models::gemma4::template::Gemma4Template;
 
 // ── Loaded state ───────────────────────────────────────────────────────────
 
@@ -143,19 +142,14 @@ pub fn load(model_dir: &Path, max_context_tokens: Option<usize>) -> Result<Loade
     let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
         .map_err(|e| anyhow::anyhow!("failed to load tokenizer: {e}"))?;
 
-    // Stop tokens: config eos_token_id + <end_of_turn> for chat
+    // Stop tokens from config + Gemma 4 special tokens
     let config_eos = raw
         .get("text_config")
         .and_then(|tc| tc.get("eos_token_id"))
         .or_else(|| raw.get("eos_token_id"))
         .and_then(|v| v.as_u64())
-        .unwrap_or(1) as u32;
-    let mut stop_token_ids = vec![config_eos];
-    if let Some(eot_id) = tokenizer.token_to_id("<end_of_turn>") {
-        if !stop_token_ids.contains(&eot_id) {
-            stop_token_ids.push(eot_id);
-        }
-    }
+        .unwrap_or(106) as u32;
+    let stop_token_ids = generation::build_stop_token_ids(config_eos, &tokenizer);
 
     let max_ctx = max_context_tokens.unwrap_or(text_config.max_position_embeddings);
 
@@ -180,189 +174,25 @@ pub fn load(model_dir: &Path, max_context_tokens: Option<usize>) -> Result<Loade
     })
 }
 
-// ── Generation core ────────────────────────────────────────────────────────
+// ── TextForward impl ──────────────────────────────────────────────────────
 
-/// Compute how many leading tokens are identical between two sequences.
-fn compute_prefix_len(old_tokens: &[u32], new_tokens: &[u32]) -> usize {
-    old_tokens
-        .iter()
-        .zip(new_tokens)
-        .take_while(|(a, b)| a == b)
-        .count()
-}
+/// Wrapper that delegates TextForward to whichever ModelKind variant is active.
+struct ModelForward<'a>(&'a mut ModelKind);
 
-fn generate(
-    state: &mut LoadedState,
-    mut tokens: Vec<u32>,
-    max_tokens: usize,
-    temperature: f64,
-    top_p: f64,
-    top_k: Option<u32>,
-    prefix_len: usize,
-) -> Result<(String, usize, u64)> {
-    let start = Instant::now();
-
-    tracing::trace!(
-        "generate: {} input tokens, max_tokens={}, prefix_len={}, temp={}, top_p={}, top_k={:?}",
-        tokens.len(),
-        max_tokens,
-        prefix_len,
-        temperature,
-        top_p,
-        top_k,
-    );
-
-    // Truncate to max context
-    if tokens.len() > state.max_context_tokens {
-        let excess = tokens.len() - state.max_context_tokens;
-        tokens.drain(..excess);
-        tracing::trace!("truncated {} tokens to fit context window", excess);
+impl TextForward for ModelForward<'_> {
+    fn forward(&mut self, input_ids: &Tensor, seqlen_offset: usize) -> candle_core::Result<Tensor> {
+        match self.0 {
+            ModelKind::TextOnly(m) => m.forward(input_ids, seqlen_offset),
+            ModelKind::Multimodal(m) => m.forward(input_ids, seqlen_offset),
+        }
     }
 
-    let sampling = if temperature <= 0.0 {
-        Sampling::ArgMax
-    } else if let Some(k) = top_k {
-        Sampling::TopKThenTopP {
-            k: k as usize,
-            p: top_p,
-            temperature,
-        }
-    } else {
-        Sampling::TopP {
-            p: top_p,
-            temperature,
-        }
-    };
-    let mut logits_processor = LogitsProcessor::from_sampling(42, sampling);
-
-    // Only clear KV cache when there's no prefix to reuse
-    if prefix_len == 0 {
-        tracing::trace!("clearing KV cache (no prefix reuse)");
-        match &mut state.model {
+    fn clear_kv_cache(&mut self) {
+        match self.0 {
             ModelKind::TextOnly(m) => m.clear_kv_cache(),
             ModelKind::Multimodal(m) => m.clear_kv_cache(),
         }
     }
-
-    let mut generated_tokens = 0usize;
-    let mut output_tokens: Vec<u32> = Vec::new();
-
-    for index in 0..max_tokens {
-        let context_size = if index > 0 {
-            1
-        } else {
-            tokens.len() - prefix_len
-        };
-        let start_pos = tokens.len().saturating_sub(context_size);
-        let ctxt = &tokens[start_pos..];
-        let input = Tensor::new(ctxt, &state.device)?.unsqueeze(0)?;
-
-        if index == 0 {
-            tracing::trace!(
-                "prefill: {} tokens at start_pos={} (prefix_len={})",
-                ctxt.len(),
-                start_pos,
-                prefix_len,
-            );
-        }
-
-        let fwd_start = Instant::now();
-        let logits = match &mut state.model {
-            ModelKind::TextOnly(m) => m.forward(&input, start_pos)?,
-            ModelKind::Multimodal(m) => m.forward(&input, start_pos)?,
-        };
-        let fwd_ms = fwd_start.elapsed().as_millis();
-
-        if index == 0 {
-            tracing::trace!("prefill forward pass took {}ms", fwd_ms);
-        }
-
-        let logits = logits.squeeze(0)?.squeeze(0)?.to_dtype(DType::F32)?;
-
-        // Apply repeat penalty
-        let logits = if !tokens.is_empty() {
-            let penalty_start = tokens.len().saturating_sub(64);
-            candle_transformers::utils::apply_repeat_penalty(
-                &logits,
-                1.1,
-                &tokens[penalty_start..],
-            )?
-        } else {
-            logits
-        };
-
-        let next_token = logits_processor.sample(&logits)?;
-        tokens.push(next_token);
-        generated_tokens += 1;
-
-        if index < 3 {
-            tracing::trace!("token[{}] = {} (fwd={}ms)", index, next_token, fwd_ms);
-        }
-
-        if state.stop_token_ids.contains(&next_token) {
-            tracing::trace!("EOS at token {}", index);
-            break;
-        }
-
-        output_tokens.push(next_token);
-    }
-
-    let text = state
-        .tokenizer
-        .decode(&output_tokens, true)
-        .map_err(|e| anyhow::anyhow!("tokenizer decode error: {e}"))?;
-
-    let inference_time_ms = start.elapsed().as_millis() as u64;
-    tracing::info!(
-        "generated {} tokens in {}ms ({:.1} tok/s)",
-        generated_tokens,
-        inference_time_ms,
-        generated_tokens as f64 / (inference_time_ms as f64 / 1000.0),
-    );
-
-    Ok((text, generated_tokens, inference_time_ms))
-}
-
-/// Tokenize a prompt and compute the reusable prefix length for the given session.
-/// Returns (tokens, prefix_len). Also updates session tracking after the caller
-/// finishes generation.
-fn tokenize_with_prefix(
-    state: &LoadedState,
-    prompt: &str,
-    session_id: &Option<String>,
-) -> Result<(Vec<u32>, usize)> {
-    let encoding = state
-        .tokenizer
-        .encode(prompt, true)
-        .map_err(|e| anyhow::anyhow!("tokenizer encode error: {e}"))?;
-    let new_tokens: Vec<u32> = encoding.get_ids().to_vec();
-
-    let prefix_len = if session_id.is_some() && *session_id == state.current_session_id {
-        let pl = compute_prefix_len(&state.processed_tokens, &new_tokens);
-        if pl > 0 {
-            tracing::debug!(
-                "KV cache hit: reusing {pl}/{} tokens ({:.0}% prefill saved)",
-                new_tokens.len(),
-                pl as f64 / new_tokens.len() as f64 * 100.0,
-            );
-        } else {
-            tracing::debug!("KV cache miss: same session but tokens diverged, clearing cache");
-        }
-        pl
-    } else {
-        if session_id.is_some() {
-            tracing::debug!(
-                "KV cache: new session {:?} (previous: {:?}), no cache to reuse",
-                session_id,
-                state.current_session_id,
-            );
-        } else {
-            tracing::debug!("KV cache: no session_id, clearing cache");
-        }
-        0
-    };
-
-    Ok((new_tokens, prefix_len))
 }
 
 // ── Chat ───────────────────────────────────────────────────────────────────
@@ -372,10 +202,20 @@ pub fn chat(state: &mut LoadedState, request: &ChatRequest) -> Result<ChatRespon
     let prompt = template.format_prompt(&request.messages, &ReasoningMode::Disabled);
     tracing::trace!("chat prompt ({} chars): '{:.200}'", prompt.len(), prompt);
 
-    let (new_tokens, prefix_len) = tokenize_with_prefix(state, &prompt, &request.session_id)?;
+    let (new_tokens, prefix_len) = generation::tokenize_with_prefix(
+        &state.tokenizer,
+        &prompt,
+        &state.processed_tokens,
+        state.current_session_id.as_deref(),
+        &request.session_id,
+    )?;
 
-    let (raw, tokens_generated, inference_time_ms) = generate(
-        state,
+    let (raw, tokens_generated, inference_time_ms) = generation::generate(
+        &mut ModelForward(&mut state.model),
+        &state.tokenizer,
+        &state.device,
+        &state.stop_token_ids,
+        state.max_context_tokens,
         new_tokens.clone(),
         request.max_tokens,
         request.temperature,
@@ -409,10 +249,20 @@ pub fn call_tools(state: &mut LoadedState, request: &ToolCallRequest) -> Result<
         prompt,
     );
 
-    let (new_tokens, prefix_len) = tokenize_with_prefix(state, &prompt, &request.session_id)?;
+    let (new_tokens, prefix_len) = generation::tokenize_with_prefix(
+        &state.tokenizer,
+        &prompt,
+        &state.processed_tokens,
+        state.current_session_id.as_deref(),
+        &request.session_id,
+    )?;
 
-    let (raw, tokens_generated, inference_time_ms) = generate(
-        state,
+    let (raw, tokens_generated, inference_time_ms) = generation::generate(
+        &mut ModelForward(&mut state.model),
+        &state.tokenizer,
+        &state.device,
+        &state.stop_token_ids,
+        state.max_context_tokens,
         new_tokens.clone(),
         request.max_tokens,
         request.temperature,
@@ -476,9 +326,10 @@ pub fn analyze_image(
     );
 
     // Build prompt: BOI + N×IMAGE_TOKEN + EOI + user prompt
+    // Reference: https://ai.google.dev/gemma/docs/core/prompt-formatting-gemma4
     let image_placeholders = "<|image|>".repeat(num_image_tokens);
     let prompt = format!(
-        "<start_of_turn>user\n<|image>{image_placeholders}<image|>\n{}<end_of_turn>\n<start_of_turn>model\n",
+        "<|turn>user\n<|image>{image_placeholders}<image|>\n{}<turn|>\n<|turn>model\n",
         request.prompt
     );
 
@@ -605,7 +456,12 @@ fn ensure_multimodal(state: &mut LoadedState, model_dir: &Path) -> Result<()> {
 }
 
 /// Compute the number of output tokens the vision tower produces for an image.
-fn compute_num_image_tokens(h: u32, w: u32, patch_size: u32, pooling_kernel_size: u32) -> usize {
+pub fn compute_num_image_tokens(
+    h: u32,
+    w: u32,
+    patch_size: u32,
+    pooling_kernel_size: u32,
+) -> usize {
     let ph = h / patch_size;
     let pw = w / patch_size;
     let pool_area = pooling_kernel_size * pooling_kernel_size;
@@ -619,7 +475,7 @@ fn compute_num_image_tokens(h: u32, w: u32, patch_size: u32, pooling_kernel_size
 /// The PatchEmbedder in the vision tower maps `[0, 1]` → `[-1, 1]`.
 ///
 /// Returns `(tensor, height, width)` so the caller can compute token counts.
-fn preprocess_image(
+pub fn preprocess_image(
     image: &image::DynamicImage,
     vis_cfg: &Gemma4VisionConfig,
     device: &Device,
@@ -628,7 +484,8 @@ fn preprocess_image(
     let patch_size = vis_cfg.patch_size as u32;
     let pool_k = vis_cfg.pooling_kernel_size as u32;
     let grid_unit = pool_k * patch_size; // 3 * 16 = 48
-    let max_pixels = vis_cfg.default_output_length as u32 * pool_k * pool_k * patch_size * patch_size;
+    let max_pixels =
+        vis_cfg.default_output_length as u32 * pool_k * pool_k * patch_size * patch_size;
     let min_pixels = grid_unit * grid_unit;
 
     let (target_h, target_w) = crate::vision::resize::smart_resize_dims(
@@ -639,11 +496,7 @@ fn preprocess_image(
         max_pixels,
     )?;
 
-    let resized = image.resize_exact(
-        target_w,
-        target_h,
-        image::imageops::FilterType::Lanczos3,
-    );
+    let resized = image.resize_exact(target_w, target_h, image::imageops::FilterType::Lanczos3);
     let rgb = resized.to_rgb8();
 
     let (w, h) = (rgb.width() as usize, rgb.height() as usize);
@@ -670,7 +523,7 @@ fn preprocess_image(
 /// Compute the number of output tokens the audio encoder produces.
 ///
 /// Two Conv2d stride-2 subsampling stages, then optional reduction factor.
-fn compute_num_audio_tokens(mel_frames: usize, reduction_factor: usize) -> usize {
+pub fn compute_num_audio_tokens(mel_frames: usize, reduction_factor: usize) -> usize {
     // Each SSCP conv layer: t = (t + 2*pad - kernel) / stride + 1
     // With kernel=3, stride=2, pad=1 (semicausal): t = (t + 2 - 3) / 2 + 1 = (t-1)/2 + 1
     let t1 = (mel_frames.saturating_sub(1)) / 2 + 1;
@@ -681,7 +534,7 @@ fn compute_num_audio_tokens(mel_frames: usize, reduction_factor: usize) -> usize
 /// Convert raw PCM audio to mel spectrogram tensors for the Gemma 4 audio tower.
 ///
 /// Returns `(mel_tensor [1, time, 128], mask_tensor [1, time])`.
-fn prepare_audio(
+pub fn prepare_audio(
     pcm_samples: &[f32],
     sample_rate: u32,
     device: &Device,
@@ -739,8 +592,12 @@ pub fn analyze_audio(
     let start = Instant::now();
 
     // Convert PCM to mel spectrogram
-    let (mel_tensor, mask_tensor, num_mel_frames) =
-        prepare_audio(&request.pcm_samples, request.sample_rate, &state.device, state.dtype)?;
+    let (mel_tensor, mask_tensor, num_mel_frames) = prepare_audio(
+        &request.pcm_samples,
+        request.sample_rate,
+        &state.device,
+        state.dtype,
+    )?;
 
     let num_audio_tokens = compute_num_audio_tokens(num_mel_frames, 1);
     tracing::debug!(
@@ -752,9 +609,10 @@ pub fn analyze_audio(
     );
 
     // Build prompt: BOA + N×AUDIO_TOKEN + EOA + user prompt
+    // Reference: https://ai.google.dev/gemma/docs/core/prompt-formatting-gemma4
     let audio_placeholders = "<|audio|>".repeat(num_audio_tokens);
     let prompt = format!(
-        "<start_of_turn>user\n<|audio>{audio_placeholders}<audio|>\n{}<end_of_turn>\n<start_of_turn>model\n",
+        "<|turn>user\n<|audio>{audio_placeholders}<audio|>\n{}<turn|>\n<|turn>model\n",
         request.prompt
     );
 

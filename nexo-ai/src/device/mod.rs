@@ -1,12 +1,9 @@
-use candle_core::{DType, Device};
-
 /// Create a device for inference: Metal if available, CPU fallback.
 ///
-/// The `on_info` callback receives informational messages about device selection.
-/// Pass `|_| {}` to suppress output.
-///
 /// Override with env var `NEXO_AI_DEVICE=cpu` to force CPU inference.
-pub fn create_device() -> anyhow::Result<Device> {
+#[cfg(feature = "candle")]
+pub fn create_device() -> anyhow::Result<candle_core::Device> {
+    use candle_core::Device;
     let force_cpu = std::env::var("NEXO_AI_DEVICE")
         .map(|v| v.eq_ignore_ascii_case("cpu"))
         .unwrap_or(false);
@@ -26,22 +23,22 @@ pub fn create_device() -> anyhow::Result<Device> {
 /// Dtype for image generation pipelines (diffusion denoising loops).
 ///
 /// F32 on Metal — BF16 matmul accumulation errors compound through denoising
-/// loops, causing washed-out blurry images. This matches mold's implementation.
-/// F32 on CPU.
-pub fn gpu_dtype(_device: &Device) -> DType {
-    // Metal image gen needs F32 precision; BF16 causes quality issues
-    DType::F32
+/// loops, causing washed-out blurry images.
+#[cfg(feature = "candle")]
+pub fn gpu_dtype(_device: &candle_core::Device) -> candle_core::DType {
+    candle_core::DType::F32
 }
 
 /// Dtype for LLM / text model inference.
 ///
 /// BF16 on Metal (Apple Silicon supports it natively, halves memory vs F32).
 /// F32 on CPU.
-pub fn gpu_compute_dtype(device: &Device) -> DType {
+#[cfg(feature = "candle")]
+pub fn gpu_compute_dtype(device: &candle_core::Device) -> candle_core::DType {
     if device.is_cpu() {
-        DType::F32
+        candle_core::DType::F32
     } else {
-        DType::BF16
+        candle_core::DType::BF16
     }
 }
 
@@ -221,15 +218,22 @@ mod tests {
         assert_eq!(fmt_gb(500_000_000), "0.5 GB");
     }
 
+    #[cfg(feature = "candle")]
     #[test]
     fn gpu_dtype_always_f32_for_image_gen() {
-        // Image generation always uses F32 to avoid BF16 precision issues in denoising
-        assert_eq!(gpu_dtype(&Device::Cpu), DType::F32);
+        assert_eq!(
+            gpu_dtype(&candle_core::Device::Cpu),
+            candle_core::DType::F32
+        );
     }
 
+    #[cfg(feature = "candle")]
     #[test]
     fn gpu_compute_dtype_f32_for_cpu() {
-        assert_eq!(gpu_compute_dtype(&Device::Cpu), DType::F32);
+        assert_eq!(
+            gpu_compute_dtype(&candle_core::Device::Cpu),
+            candle_core::DType::F32
+        );
     }
 
     #[cfg(target_os = "macos")]

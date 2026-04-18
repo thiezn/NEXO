@@ -1,5 +1,5 @@
-pub mod pull;
 pub mod list;
+pub mod pull;
 pub mod start;
 
 use crate::cli::base::Command;

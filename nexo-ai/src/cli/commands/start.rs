@@ -3,8 +3,8 @@ use crate::config::AiConfig;
 use crate::coordinator::Coordinator;
 use crate::shared::types::ModelCategory;
 use anyhow::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub async fn run(categories: Option<Vec<String>>) -> Result<()> {
     let mut ai_config = AiConfig::load().unwrap_or_default();

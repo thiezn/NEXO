@@ -82,7 +82,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_model() -> WhisperModel {
-        WhisperModel::new("whisper-test".to_string(), 1_500_000_000, PathBuf::from("/tmp/fake"))
+        WhisperModel::new(
+            "whisper-test".to_string(),
+            1_500_000_000,
+            PathBuf::from("/tmp/fake"),
+        )
     }
 
     #[test]
