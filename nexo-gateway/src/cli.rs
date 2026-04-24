@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
+use cli_helpers::LogLevel;
 use nexo_ws_schema::SchemaSection;
-use utl_helpers::LogLevel;
 
 #[derive(Parser)]
 #[command(name = "nexo", about = "NEXO Gateway - Neural Extension Operator")]

@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 nexo-ws-schema = { path = "../shared/nexo-ws-schema", features = ["clap"] }
 nexo-ws-client = { path = "../shared/nexo-ws-client" }
-utl-helpers = { path = "../shared/utl-helpers", features = ["config"] }
+cli-helpers = { workspace = true, features = ["config", "markdown", "tracing"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

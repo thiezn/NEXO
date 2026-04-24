@@ -16,21 +16,21 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
 /// Start the gateway WebSocket server.
-pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
+pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
     info!(
         "Gateway config: host={}, port={}, tick_interval={}ms, db={}, storage={}",
         config.host, config.port, config.tick_interval_ms, config.db_path, config.storage_root,
     );
 
-    let db_path = utl_helpers::resolve_path_str(&config.db_path)?;
+    let db_path = cli_helpers::resolve_path_str(&config.db_path)?;
     let db = crate::memory::persistent::connect(&db_path).await?;
     info!("Database connected: {}", db_path.display());
 
-    let storage_root = utl_helpers::resolve_path_str(&config.storage_root)?;
+    let storage_root = cli_helpers::resolve_path_str(&config.storage_root)?;
     info!("Storage root: {}", storage_root.display());
 
     // Open git-backed storage (optional — allows gateway to run without persistent storage)
-    let git_storage = match utl_helpers::resolve_path_str(&config.nexo_storage_path) {
+    let git_storage = match cli_helpers::resolve_path_str(&config.nexo_storage_path) {
         Ok(path) => match GitStorage::open(&path) {
             Ok(gs) => {
                 let gs = Arc::new(gs);
@@ -126,7 +126,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
     let addr = config.bind_addr();
     let listener = TcpListener::bind(&addr)
         .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Failed to bind {addr}: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Network(format!("Failed to bind {addr}: {e}")))?;
 
     info!("NEXO Gateway listening on ws://{addr}");
 
@@ -136,7 +136,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
         let (stream, peer_addr) = listener
             .accept()
             .await
-            .map_err(|e| utl_helpers::Error::Network(format!("Accept failed: {e}")))?;
+            .map_err(|e| cli_helpers::Error::Network(format!("Accept failed: {e}")))?;
 
         debug!("New TCP connection from {peer_addr}");
 

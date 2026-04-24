@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use utl_helpers::LogLevel;
+use cli_helpers::LogLevel;
 
 #[derive(Parser)]
 #[command(name = "nexo-ai", about = "NEXO AI - Local inference model manager")]

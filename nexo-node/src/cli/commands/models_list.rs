@@ -1,6 +1,6 @@
 use crate::download::{default_models_dir, known_manifests, storage_path};
 
-pub fn run() -> utl_helpers::Result {
+pub fn run() -> cli_helpers::Result {
     let manifests = known_manifests();
 
     if manifests.is_empty() {

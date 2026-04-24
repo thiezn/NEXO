@@ -11,7 +11,7 @@ use std::path::Path;
 
 fn main() {
     let cli = Cli::parse();
-    utl_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
 
     if let Err(e) = run(&cli) {
         tracing::error!("{e}");
@@ -19,9 +19,9 @@ fn main() {
     }
 }
 
-fn run(cli: &Cli) -> utl_helpers::Result {
-    let output_dir = utl_helpers::resolve_path(&cli.output_dir)?;
-    let input = utl_helpers::resolve_path(&cli.input)?;
+fn run(cli: &Cli) -> cli_helpers::Result {
+    let output_dir = cli_helpers::resolve_path(&cli.output_dir)?;
+    let input = cli_helpers::resolve_path(&cli.input)?;
     let image_mode = cli.image_mode();
 
     if input.is_file() {
@@ -30,7 +30,7 @@ fn run(cli: &Cli) -> utl_helpers::Result {
     } else if input.is_dir() {
         process_directory(&input, &output_dir, image_mode)?;
     } else {
-        return Err(utl_helpers::Error::Other(format!(
+        return Err(cli_helpers::Error::Other(format!(
             "Input path does not exist: {}",
             input.display()
         )));
@@ -43,7 +43,7 @@ fn process_single(
     epub_path: &Path,
     output_dir: &Path,
     image_mode: ImageMode,
-) -> utl_helpers::Result<std::path::PathBuf> {
+) -> cli_helpers::Result<std::path::PathBuf> {
     let result = extractor::extract_single(epub_path, image_mode)?;
     writer::write_result(output_dir, &result, image_mode)
 }
@@ -52,10 +52,10 @@ fn process_directory(
     input_dir: &Path,
     output_dir: &Path,
     image_mode: ImageMode,
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     let epub_files: Vec<_> = std::fs::read_dir(input_dir)
         .map_err(|e| {
-            utl_helpers::Error::Io(format!(
+            cli_helpers::Error::Io(format!(
                 "Failed to read directory '{}': {e}",
                 input_dir.display()
             ))
@@ -102,7 +102,7 @@ fn process_directory(
     );
 
     if failed > 0 {
-        return Err(utl_helpers::Error::Other(format!(
+        return Err(cli_helpers::Error::Other(format!(
             "{failed} extraction(s) failed"
         )));
     }

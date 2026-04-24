@@ -14,7 +14,7 @@ pub struct ExtractionResult {
 pub fn extract_single(
     epub_path: &Path,
     image_mode: ImageMode,
-) -> utl_helpers::Result<ExtractionResult> {
+) -> cli_helpers::Result<ExtractionResult> {
     let start = Instant::now();
     let source_file = epub_path
         .file_name()

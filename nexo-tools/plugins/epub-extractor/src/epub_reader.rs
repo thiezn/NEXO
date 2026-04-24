@@ -23,12 +23,12 @@ struct ManifestItem {
     properties: Option<String>,
 }
 
-pub fn read_epub(path: &Path, image_mode: ImageMode) -> utl_helpers::Result<EpubContent> {
+pub fn read_epub(path: &Path, image_mode: ImageMode) -> cli_helpers::Result<EpubContent> {
     let file = std::fs::File::open(path)
-        .map_err(|e| utl_helpers::Error::Io(format!("Failed to open '{}': {e}", path.display())))?;
+        .map_err(|e| cli_helpers::Error::Io(format!("Failed to open '{}': {e}", path.display())))?;
 
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| utl_helpers::Error::Other(format!("Invalid ZIP/EPUB: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Other(format!("Invalid ZIP/EPUB: {e}")))?;
 
     let opf_path = parse_container_xml(&mut archive)?;
     let opf_dir = Path::new(&opf_path)
@@ -105,16 +105,16 @@ pub fn read_epub(path: &Path, image_mode: ImageMode) -> utl_helpers::Result<Epub
 
 fn parse_container_xml(
     archive: &mut zip::ZipArchive<std::fs::File>,
-) -> utl_helpers::Result<String> {
+) -> cli_helpers::Result<String> {
     let xml = read_zip_text(archive, "META-INF/container.xml")?;
     let doc = parse_xml(&xml)
-        .map_err(|e| utl_helpers::Error::Other(format!("Invalid container.xml: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Other(format!("Invalid container.xml: {e}")))?;
 
     doc.descendants()
         .find(|n| n.tag_name().name() == "rootfile")
         .and_then(|n| n.attribute("full-path"))
         .map(String::from)
-        .ok_or_else(|| utl_helpers::Error::Other("No rootfile found in container.xml".to_string()))
+        .ok_or_else(|| cli_helpers::Error::Other("No rootfile found in container.xml".to_string()))
 }
 
 // ── OPF Parsing ────────────────────────────────────────────────────────
@@ -126,9 +126,9 @@ struct OpfData {
     toc_id: Option<String>,
 }
 
-fn parse_opf(content: &str, opf_dir: &str) -> utl_helpers::Result<OpfData> {
+fn parse_opf(content: &str, opf_dir: &str) -> cli_helpers::Result<OpfData> {
     let doc =
-        parse_xml(content).map_err(|e| utl_helpers::Error::Other(format!("Invalid OPF: {e}")))?;
+        parse_xml(content).map_err(|e| cli_helpers::Error::Other(format!("Invalid OPF: {e}")))?;
 
     let metadata = extract_metadata(&doc);
     let manifest = extract_manifest(&doc, opf_dir);
@@ -203,7 +203,7 @@ fn extract_manifest(doc: &roxmltree::Document, opf_dir: &str) -> HashMap<String,
 fn parse_toc(
     archive: &mut zip::ZipArchive<std::fs::File>,
     opf: &OpfData,
-) -> utl_helpers::Result<Vec<String>> {
+) -> cli_helpers::Result<Vec<String>> {
     // Try NCX first (EPUB2)
     if let Some(toc_id) = &opf.toc_id {
         if let Some(item) = opf.manifest.get(toc_id) {
@@ -227,10 +227,10 @@ fn parse_toc(
     Ok(Vec::new())
 }
 
-fn parse_ncx(content: &str) -> utl_helpers::Result<Vec<String>> {
+fn parse_ncx(content: &str) -> cli_helpers::Result<Vec<String>> {
     let content = clean_entities(content);
     let doc =
-        parse_xml(&content).map_err(|e| utl_helpers::Error::Other(format!("Invalid NCX: {e}")))?;
+        parse_xml(&content).map_err(|e| cli_helpers::Error::Other(format!("Invalid NCX: {e}")))?;
 
     let mut labels = Vec::new();
     collect_ncx_labels(&doc.root(), &mut labels);
@@ -266,10 +266,10 @@ fn collect_ncx_labels(node: &roxmltree::Node, out: &mut Vec<String>) {
     }
 }
 
-fn parse_nav_toc(content: &str) -> utl_helpers::Result<Vec<String>> {
+fn parse_nav_toc(content: &str) -> cli_helpers::Result<Vec<String>> {
     let content = clean_entities(content);
     let doc = parse_xml(&content)
-        .map_err(|e| utl_helpers::Error::Other(format!("Invalid nav XHTML: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Other(format!("Invalid nav XHTML: {e}")))?;
 
     let mut labels = Vec::new();
 
@@ -347,10 +347,10 @@ struct ChapterParseCtx<'a> {
 fn parse_xhtml_chapter(
     content: &str,
     ctx: &mut ChapterParseCtx,
-) -> utl_helpers::Result<Vec<Paragraph>> {
+) -> cli_helpers::Result<Vec<Paragraph>> {
     let content = clean_entities(content);
     let doc = parse_xml(&content)
-        .map_err(|e| utl_helpers::Error::Other(format!("Invalid XHTML: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Other(format!("Invalid XHTML: {e}")))?;
 
     let body = doc
         .descendants()
@@ -498,14 +498,14 @@ fn resolve_image(src: &str, ctx: &mut ChapterParseCtx) -> Option<ImageRef> {
 fn read_zip_text(
     archive: &mut zip::ZipArchive<std::fs::File>,
     path: &str,
-) -> utl_helpers::Result<String> {
+) -> cli_helpers::Result<String> {
     let mut file = archive
         .by_name(path)
-        .map_err(|e| utl_helpers::Error::Io(format!("ZIP entry '{path}' not found: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Io(format!("ZIP entry '{path}' not found: {e}")))?;
 
     let mut content = String::new();
     file.read_to_string(&mut content)
-        .map_err(|e| utl_helpers::Error::Io(format!("Failed to read '{path}': {e}")))?;
+        .map_err(|e| cli_helpers::Error::Io(format!("Failed to read '{path}': {e}")))?;
 
     Ok(content)
 }
@@ -513,14 +513,14 @@ fn read_zip_text(
 fn read_zip_bytes(
     archive: &mut zip::ZipArchive<std::fs::File>,
     path: &str,
-) -> utl_helpers::Result<Vec<u8>> {
+) -> cli_helpers::Result<Vec<u8>> {
     let mut file = archive
         .by_name(path)
-        .map_err(|e| utl_helpers::Error::Io(format!("ZIP entry '{path}' not found: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Io(format!("ZIP entry '{path}' not found: {e}")))?;
 
     let mut buf = Vec::with_capacity(file.size() as usize);
     file.read_to_end(&mut buf)
-        .map_err(|e| utl_helpers::Error::Io(format!("Failed to read '{path}': {e}")))?;
+        .map_err(|e| cli_helpers::Error::Io(format!("Failed to read '{path}': {e}")))?;
 
     Ok(buf)
 }

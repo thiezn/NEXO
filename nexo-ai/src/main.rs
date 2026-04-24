@@ -3,7 +3,7 @@
 async fn main() {
     use clap::Parser;
     let cli = nexo_ai::cli::base::Cli::parse();
-    utl_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
 
     if let Err(e) = nexo_ai::cli::commands::dispatch(cli.command).await {
         tracing::error!("{e}");

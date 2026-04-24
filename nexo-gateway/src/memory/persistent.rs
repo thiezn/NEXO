@@ -2,10 +2,10 @@ use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 
 /// Initialize the SQLite database at the given path, running migrations.
-pub async fn initialize(db_path: &Path) -> utl_helpers::Result {
+pub async fn initialize(db_path: &Path) -> cli_helpers::Result {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            utl_helpers::Error::Io(format!(
+            cli_helpers::Error::Io(format!(
                 "Failed to create DB directory '{}': {e}",
                 parent.display()
             ))
@@ -20,20 +20,20 @@ pub async fn initialize(db_path: &Path) -> utl_helpers::Result {
 }
 
 /// Connect to the SQLite database at the given path.
-pub async fn connect(db_path: &Path) -> utl_helpers::Result<SqlitePool> {
+pub async fn connect(db_path: &Path) -> cli_helpers::Result<SqlitePool> {
     let url = format!("sqlite:{}?mode=rwc", db_path.display());
     SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&url)
         .await
-        .map_err(|e| utl_helpers::Error::Other(format!("Failed to connect to DB: {e}")))
+        .map_err(|e| cli_helpers::Error::Other(format!("Failed to connect to DB: {e}")))
 }
 
-async fn run_migrations(pool: &SqlitePool) -> utl_helpers::Result {
+async fn run_migrations(pool: &SqlitePool) -> cli_helpers::Result {
     sqlx::migrate!("./migrations")
         .run(pool)
         .await
-        .map_err(|e| utl_helpers::Error::Other(format!("Migration failed: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Other(format!("Migration failed: {e}")))?;
     Ok(())
 }
 
@@ -42,7 +42,7 @@ pub async fn upsert_device(
     pool: &SqlitePool,
     device_id: &str,
     role: nexo_ws_schema::Role,
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     sqlx::query(
         "INSERT INTO devices (id, role) VALUES (?, ?)
          ON CONFLICT(id) DO UPDATE SET role = excluded.role, last_seen = datetime('now')",
@@ -51,12 +51,12 @@ pub async fn upsert_device(
     .bind(role.as_str())
     .execute(pool)
     .await
-    .map_err(|e| utl_helpers::Error::Other(format!("Failed to upsert device: {e}")))?;
+    .map_err(|e| cli_helpers::Error::Other(format!("Failed to upsert device: {e}")))?;
     Ok(())
 }
 
 /// Record or update a user in the persistent store.
-pub async fn upsert_user(pool: &SqlitePool, user_id: &str, device_id: &str) -> utl_helpers::Result {
+pub async fn upsert_user(pool: &SqlitePool, user_id: &str, device_id: &str) -> cli_helpers::Result {
     sqlx::query(
         "INSERT INTO users (id, device_id) VALUES (?, ?)
          ON CONFLICT(id) DO UPDATE SET device_id = excluded.device_id, last_seen = datetime('now')",
@@ -65,7 +65,7 @@ pub async fn upsert_user(pool: &SqlitePool, user_id: &str, device_id: &str) -> u
     .bind(device_id)
     .execute(pool)
     .await
-    .map_err(|e| utl_helpers::Error::Other(format!("Failed to upsert user: {e}")))?;
+    .map_err(|e| cli_helpers::Error::Other(format!("Failed to upsert user: {e}")))?;
     Ok(())
 }
 

@@ -8,7 +8,7 @@ pub struct StartCommand {
     pub model_id: Option<String>,
 }
 
-pub async fn run_start(command: StartCommand) -> utl_helpers::Result {
+pub async fn run_start(command: StartCommand) -> cli_helpers::Result {
     tui::run_start(tui::StartOptions {
         url_override: command.url_override,
         initial_session_id: command.session_id,

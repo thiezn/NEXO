@@ -12,7 +12,7 @@ nexo-ws-schema = { path = "../shared/nexo-ws-schema" }
 nexo-ws-client = { path = "../shared/nexo-ws-client" }
 nexo-spec = { path = "../shared/nexo-spec", features = ["tool"] }
 nexo-ai = { path = "../nexo-ai", default-features = false, features = ["metal", "download"] }
-utl-helpers = { path = "../shared/utl-helpers", features = ["config"] }
+cli-helpers = { workspace = true, features = ["config", "tracing"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

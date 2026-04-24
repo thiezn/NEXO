@@ -2,6 +2,7 @@ use crate::config::NodeConfig;
 use crate::kv_cache::manager::SessionCacheManager;
 use crate::registry::ToolRegistry;
 use base64::Engine;
+use cli_helpers::Error;
 use nexo_ai::api::types::{
     ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, ModelCategory, ToolCallRequest,
 };
@@ -18,7 +19,6 @@ use nexo_ws_schema::{
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use utl_helpers::Error;
 
 const MAX_PREFILL_CACHE_ENTRIES: usize = 64;
 
@@ -28,7 +28,7 @@ pub async fn run_node(
     available_models: &[String],
     registry: &ToolRegistry,
     coordinator: Arc<Mutex<Coordinator>>,
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -59,7 +59,7 @@ async fn connect_and_run(
     available_models: &[String],
     registry: &ToolRegistry,
     coordinator: Arc<Mutex<Coordinator>>,
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     // Step 1: Connect to gateway
     let mut conn = NexoConnection::connect(&config.gateway_url, &config.auth_token)
         .await
@@ -311,7 +311,7 @@ async fn handle_tool_execute(
     request_id: &str,
     params: serde_json::Value,
     registry: &ToolRegistry,
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     let exec_params: ToolsExecuteParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
@@ -392,7 +392,7 @@ async fn dispatch_agent_inference(
     reader: &mut ReadHalf,
     writer: &mut WriteHalf,
     cache_manager: &Arc<Mutex<SessionCacheManager>>,
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     let mut messages: Vec<serde_json::Value> = params
         .get("messages")
         .and_then(|v| v.as_array())
@@ -749,7 +749,7 @@ async fn dispatch_image_analyze(
     params: serde_json::Value,
     coordinator: &Arc<Mutex<Coordinator>>,
     tx: &tokio::sync::mpsc::Sender<(String, Result<serde_json::Value, String>)>,
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     let analyze_params: ImageAnalyzeParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
@@ -824,7 +824,7 @@ async fn handle_model_load(
     params: serde_json::Value,
     coordinator: &Arc<Mutex<Coordinator>>,
     available_models: &[String],
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     let model_id = params
         .get("modelId")
         .and_then(|v| v.as_str())
@@ -889,7 +889,7 @@ async fn handle_model_unload(
     coordinator: &Arc<Mutex<Coordinator>>,
     available_models: &[String],
     cache_manager: &Arc<Mutex<SessionCacheManager>>,
-) -> utl_helpers::Result {
+) -> cli_helpers::Result {
     let model_id = params
         .get("modelId")
         .and_then(|v| v.as_str())
@@ -958,7 +958,7 @@ async fn handle_model_unload(
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 /// Send a frame, mapping the WS error to `Error::Network`.
-async fn send(writer: &mut WriteHalf, frame: &Frame) -> utl_helpers::Result {
+async fn send(writer: &mut WriteHalf, frame: &Frame) -> cli_helpers::Result {
     writer
         .send_frame(frame)
         .await
@@ -966,7 +966,7 @@ async fn send(writer: &mut WriteHalf, frame: &Frame) -> utl_helpers::Result {
 }
 
 /// Send a "node_busy" error response when inference is already in progress.
-async fn send_busy_error(writer: &mut WriteHalf, request_id: &str) -> utl_helpers::Result {
+async fn send_busy_error(writer: &mut WriteHalf, request_id: &str) -> cli_helpers::Result {
     let err = Frame::error_response(
         request_id,
         ErrorPayload {

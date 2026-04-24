@@ -19,7 +19,7 @@ pub enum NetworkEvent {
 
 pub async fn connect(
     url_override: Option<&str>,
-) -> utl_helpers::Result<(
+) -> cli_helpers::Result<(
     ConnectionInfo,
     UnboundedSender<NetworkCommand>,
     UnboundedReceiver<NetworkEvent>,
@@ -31,7 +31,7 @@ pub async fn connect(
 
     let mut conn = NexoConnection::connect(&url, &config.auth_token)
         .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Connection failed: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Network(format!("Connection failed: {e}")))?;
 
     let params = nexo_ws_client::default_user_connect_params(
         &config.client_id,
@@ -41,7 +41,7 @@ pub async fn connect(
     );
     let hello = perform_handshake(&mut conn, params)
         .await
-        .map_err(|e| utl_helpers::Error::Network(format!("Handshake failed: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Network(format!("Handshake failed: {e}")))?;
 
     let (writer, reader) = conn.into_split();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -69,9 +69,8 @@ async fn writer_loop(
         match command {
             NetworkCommand::Send(frame) => {
                 if let Err(error) = writer.send_frame(&frame).await {
-                    let _ = event_tx.send(NetworkEvent::Disconnected(format!(
-                        "Send failed: {error}"
-                    )));
+                    let _ =
+                        event_tx.send(NetworkEvent::Disconnected(format!("Send failed: {error}")));
                     break;
                 }
             }

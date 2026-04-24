@@ -35,8 +35,8 @@ impl ClientConfig {
             .join("nexo-client.toml")
     }
 
-    pub fn load() -> utl_helpers::Result<Self> {
-        utl_helpers::config::load_or_create(&Self::config_path())
+    pub fn load() -> cli_helpers::Result<Self> {
+        cli_helpers::config::load_or_create(&Self::config_path())
     }
 }
 

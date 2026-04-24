@@ -6,7 +6,7 @@ use nexo_ai::registry::{detect_available_models, find_manifest, manifests_for_ca
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-pub async fn run(url: Option<String>) -> utl_helpers::Result {
+pub async fn run(url: Option<String>) -> cli_helpers::Result {
     let mut config = NodeConfig::load()?;
     if let Some(u) = url {
         config.gateway_url = u;

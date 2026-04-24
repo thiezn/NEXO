@@ -17,9 +17,9 @@ use model::{Model, RunningState};
 use network::{NetworkCommand, NetworkEvent};
 use update::Effect;
 
-pub async fn run_start(options: StartOptions) -> utl_helpers::Result {
+pub async fn run_start(options: StartOptions) -> cli_helpers::Result {
     let workspace_root = std::env::current_dir().map_err(|e| {
-        utl_helpers::Error::Io(format!("Failed to determine working directory: {e}"))
+        cli_helpers::Error::Io(format!("Failed to determine working directory: {e}"))
     })?;
 
     let (connection, network_tx, mut network_rx) =
@@ -38,10 +38,10 @@ pub async fn run_start(options: StartOptions) -> utl_helpers::Result {
         terminal.draw(|frame| view::render(&mut model, frame))?;
 
         if event::poll(Duration::from_millis(50))
-            .map_err(|e| utl_helpers::Error::Io(format!("Terminal event poll failed: {e}")))?
+            .map_err(|e| cli_helpers::Error::Io(format!("Terminal event poll failed: {e}")))?
         {
             let event = event::read()
-                .map_err(|e| utl_helpers::Error::Io(format!("Terminal event read failed: {e}")))?;
+                .map_err(|e| cli_helpers::Error::Io(format!("Terminal event read failed: {e}")))?;
             match event {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     if let Some(message) = message::from_key_event(key) {

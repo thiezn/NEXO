@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use cli_helpers::LogLevel;
 use rayon::prelude::*;
-use utl_helpers::LogLevel;
 
 use game_extractor::analyze;
 use game_extractor::extractor::common::progress::{MultiProgress, ProgressBar};
@@ -62,7 +62,7 @@ struct ExtractArgs {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    utl_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
     match cli.command {
         Command::Extract(args) => run_extract(args).await,
         Command::Analyze(args) => analyze::run(&args).await,

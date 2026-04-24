@@ -68,13 +68,13 @@ impl AiConfig {
     }
 
     /// Load config from disk, creating a default file if it does not exist.
-    pub fn load() -> utl_helpers::Result<Self> {
-        utl_helpers::config::load_or_create(&Self::config_path())
+    pub fn load() -> cli_helpers::Result<Self> {
+        cli_helpers::config::load_or_create(&Self::config_path())
     }
 
     /// Persist the current config to disk.
-    pub fn save(&self) -> utl_helpers::Result {
-        utl_helpers::config::save(self, &Self::config_path())
+    pub fn save(&self) -> cli_helpers::Result {
+        cli_helpers::config::save(self, &Self::config_path())
     }
 
     /// Look up the active model name for a given category.

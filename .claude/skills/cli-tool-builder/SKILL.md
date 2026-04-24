@@ -1,6 +1,6 @@
 ---
 name: cli-tool-builder
-description: Use when creating a new CLI tool under tools/ in the nexo workspace. Covers project scaffolding, utl-helpers integration, and project conventions.
+description: Use when creating a new CLI tool under tools/ in the nexo workspace. Covers project scaffolding, cli-helpers integration, and project conventions.
 ---
 
 # CLI Tool Builder
@@ -28,7 +28,7 @@ name = "<tool_name>"
 path = "src/main.rs"
 
 [dependencies]
-utl-helpers = { path = "../../shared/utl-helpers" }
+cli-helpers = { workspace = true, features = ["tracing"] }
 clap = { version = "4", features = ["derive"] }
 tracing = "0"
 serde = { version = "1", features = ["derive"] }
@@ -44,14 +44,16 @@ workspace = true
 Common additional deps:
 - `tokio = { version = "1", features = ["rt-multi-thread", "macros"] }` — async runtime
 - `serde_json = "1"` — JSON parsing (configs, API responses)
-- `anyhow = "1"` — ergonomic error handling (prefer over `utl_helpers::Error` for inference tools)
+- `anyhow = "1"` — ergonomic error handling (prefer over `cli_helpers::Error` for inference tools)
 - `dirs = "6"` — home directory detection for config paths
 
-Enable utl-helpers features as needed:
+Enable `cli-helpers` features as needed:
 
-- `features = ["config"]` — for TOML config load/save
-- `features = ["config", "output"]` — for config + JSON/Markdown output formatting
-- Default already includes `output`
+- `features = ["tracing"]` — for `LogLevel` and tracing subscriber setup
+- `features = ["config", "tracing"]` — for TOML config load/save plus logging
+- `features = ["output", "tracing"]` — for JSON/Markdown output plus logging
+- `features = ["paths"]` — for `resolve_path` / `resolve_path_str`
+- `features = ["markdown"]` — for the markdown parser helpers
 
 Pin deps to **major version only** (e.g. `tokio = "1"`, not `"1.38.0"`).
 
@@ -67,14 +69,14 @@ use cli::Cli;
 
 fn main() {
     let cli = Cli::parse();
-    utl_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
     if let Err(e) = run(&cli) {
         tracing::error!("{e}");
         std::process::exit(1);
     }
 }
 
-fn run(cli: &Cli) -> utl_helpers::Result {
+fn run(cli: &Cli) -> cli_helpers::Result {
     // ...
     Ok(())
 }
@@ -91,7 +93,7 @@ use cli::Cli;
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    utl_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
     if let Err(e) = run(&cli).await {
         tracing::error!("{e}");
         std::process::exit(1);
@@ -107,7 +109,7 @@ Add `tokio = { version = "1", features = ["rt-multi-thread", "macros"] }` to dep
 
 ```rust
 use clap::Parser;
-use utl_helpers::LogLevel;
+use cli_helpers::LogLevel;
 
 #[derive(Parser, Debug)]
 #[command(name = "<tool_name>", about = "<description>")]
@@ -126,7 +128,7 @@ pub struct Cli {
 
 ```rust
 use clap::{Parser, Subcommand};
-use utl_helpers::LogLevel;
+use cli_helpers::LogLevel;
 
 #[derive(Parser, Debug)]
 #[command(name = "<tool_name>", about = "<description>")]
@@ -148,24 +150,35 @@ pub enum Command {
 }
 ```
 
-## utl-helpers quick reference
+## cli-helpers quick reference
 
-### Always available (no feature flags)
+### Always available
 
 | Function | Purpose |
 |---|---|
-| `utl_helpers::setup_tracing_from_level(level, no_color)` | Init tracing subscriber |
-| `utl_helpers::resolve_path(&PathBuf)` | Resolve `~/`, relative, absolute paths |
-| `utl_helpers::resolve_path_str(&str)` | Same but from `&str` |
-| `utl_helpers::Error` | Enum: `Config`, `Io`, `Network`, `Other` |
-| `utl_helpers::Result<T>` | Alias for `std::result::Result<T, Error>` (default `T = ()`) |
+| `cli_helpers::Error` | Enum: `Config`, `Io`, `Network`, `Other` |
+| `cli_helpers::Result<T>` | Alias for `std::result::Result<T, Error>` (default `T = ()`) |
+
+### `tracing` feature
+
+| Function | Purpose |
+|---|---|
+| `cli_helpers::setup_tracing_from_level(level, no_color)` | Init tracing subscriber |
+| `cli_helpers::LogLevel` | Clap `ValueEnum` log level |
+
+### `paths` feature
+
+| Function | Purpose |
+|---|---|
+| `cli_helpers::resolve_path(&PathBuf)` | Resolve `~/`, relative, absolute paths |
+| `cli_helpers::resolve_path_str(&str)` | Same but from `&str` |
 
 ### `config` feature
 
 Config files go to `~/.nexo/<tool_name>.toml`. The config struct must impl `Serialize + DeserializeOwned + Default`.
 
 ```rust
-use utl_helpers::config;
+use cli_helpers::config;
 
 let cfg: MyConfig = config::load(&path)?;           // returns Default if missing
 let cfg: MyConfig = config::load_or_create(&path)?;  // creates file if missing
@@ -175,7 +188,7 @@ config::save(&cfg, &path)?;
 ### `output` feature
 
 ```rust
-use utl_helpers::{OutputFormat, write_output};
+use cli_helpers::{OutputFormat, write_output};
 
 // OutputFormat is a clap ValueEnum: Json, Markdown
 // write_output(data, format, output_file, fields, to_markdown_fn)
@@ -207,30 +220,30 @@ impl AppConfig {
             .join("<tool_name>.toml")
     }
 
-    pub fn load() -> utl_helpers::Result<Self> {
-        utl_helpers::config::load_or_create(&Self::config_path())
+    pub fn load() -> cli_helpers::Result<Self> {
+        cli_helpers::config::load_or_create(&Self::config_path())
     }
 
-    pub fn save(&self) -> utl_helpers::Result {
-        utl_helpers::config::save(self, &Self::config_path())
+    pub fn save(&self) -> cli_helpers::Result {
+        cli_helpers::config::save(self, &Self::config_path())
     }
 }
 ```
 
-Requires `utl-helpers` with `features = ["config"]` and `dirs = "6"`.
+Requires `cli-helpers` with `features = ["config"]` and `dirs = "6"`.
 
 ## Error handling
 
-Use `utl_helpers::Error` variants for typed errors:
+Use `cli_helpers::Error` variants for typed errors:
 
 ```rust
-Err(utl_helpers::Error::Io(format!("Failed to read: {}", path.display())))
-Err(utl_helpers::Error::Other("something went wrong".into()))
+Err(cli_helpers::Error::Io(format!("Failed to read: {}", path.display())))
+Err(cli_helpers::Error::Other("something went wrong".into()))
 ```
 
 `From<io::Error>`, `From<String>`, `From<&str>`, and `From<serde_json::Error>` are implemented, so `?` works naturally for those types. For other error types (e.g. `anyhow`), either convert manually or use a different error type in your `run()` function.
 
-For inference tools that depend on `candle-*` crates, prefer `anyhow::Result` throughout (candle uses its own error type that doesn't convert to `utl_helpers::Error`).
+For inference tools that depend on `candle-*` crates, prefer `anyhow::Result` throughout (candle uses its own error type that doesn't convert to `cli_helpers::Error`).
 
 ## Pull / List / Domain dispatch pattern
 
@@ -274,4 +287,4 @@ Command::new("myprog")
 - Use `tracing::info!`, `tracing::warn!`, `tracing::error!` for logging (never `println!` for status)
 - `println!` only for primary program output (e.g. listing items, final results to stdout)
 - Domain logic belongs in `src/lib.rs` or dedicated modules, not in `main.rs`
-- For inference tools, use `anyhow::Result` throughout (candle errors don't convert to `utl_helpers::Error`)
+- For inference tools, use `anyhow::Result` throughout (candle errors don't convert to `cli_helpers::Error`)

@@ -88,12 +88,12 @@ impl NodeConfig {
             .join("nexo-node.toml")
     }
 
-    pub fn load() -> utl_helpers::Result<Self> {
-        utl_helpers::config::load_or_create(&Self::config_path())
+    pub fn load() -> cli_helpers::Result<Self> {
+        cli_helpers::config::load_or_create(&Self::config_path())
     }
 
-    pub fn save(&self) -> utl_helpers::Result {
-        utl_helpers::config::save(self, &Self::config_path())
+    pub fn save(&self) -> cli_helpers::Result {
+        cli_helpers::config::save(self, &Self::config_path())
     }
 }
 

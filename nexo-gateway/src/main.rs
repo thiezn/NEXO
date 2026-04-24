@@ -12,7 +12,7 @@ use cli::{Cli, Command};
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    utl_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
 
     if let Err(e) = run(cli.command).await {
         tracing::error!("{e}");
@@ -20,7 +20,7 @@ async fn main() {
     }
 }
 
-async fn run(command: Command) -> utl_helpers::Result {
+async fn run(command: Command) -> cli_helpers::Result {
     match command {
         Command::Init => init::run_init().await,
         Command::Start { host, port } => {

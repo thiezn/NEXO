@@ -3,7 +3,7 @@ pub mod start;
 
 use crate::cli::base::Command;
 
-pub async fn dispatch(command: Command) -> utl_helpers::Result {
+pub async fn dispatch(command: Command) -> cli_helpers::Result {
     match command {
         Command::Start {
             url,

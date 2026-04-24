@@ -1,6 +1,6 @@
 use crate::config::NodeConfig;
 
-pub fn run() -> utl_helpers::Result {
+pub fn run() -> cli_helpers::Result {
     let config = NodeConfig::default();
     config.save()?;
     let path = NodeConfig::config_path();

@@ -8,7 +8,7 @@ name = "game-extractor"
 path = "src/main.rs"
 
 [dependencies]
-utl-helpers = { path = "../../../shared/utl-helpers", features = ["progress"] }
+cli-helpers = { workspace = true, features = ["progress", "tracing"] }
 image = "0"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"

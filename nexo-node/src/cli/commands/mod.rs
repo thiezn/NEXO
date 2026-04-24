@@ -5,7 +5,7 @@ pub mod start;
 
 use crate::cli::base::{Command, ModelsCommand};
 
-pub async fn dispatch(command: Command) -> utl_helpers::Result {
+pub async fn dispatch(command: Command) -> cli_helpers::Result {
     match command {
         Command::Init => init::run(),
         Command::Start { url } => start::run(url).await,

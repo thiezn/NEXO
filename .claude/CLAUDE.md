@@ -14,7 +14,7 @@
 
 ## CLI Tools
 
-When building CLI tools, ensure to leverage the @shared/utl-helpers crate for common functionality.
+When building CLI tools, ensure to leverage the `cli-helpers` crate for common functionality.
 
-Do not add any non-generic code to the utl-helpers crate.
+Do not add any non-generic code to the `cli-helpers` crate.
 

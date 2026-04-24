@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 nexo-ws-schema = { path = "../shared/nexo-ws-schema", features = ["clap"] }
 nexo-spec = { path = "../shared/nexo-spec", features = ["tool", "schema"] }
-utl-helpers = { path = "../shared/utl-helpers", features = ["config", "interactive"] }
+cli-helpers = { workspace = true, features = ["config", "interactive", "paths", "tracing"] }
 sqlx = { version = "0", features = [
     "runtime-tokio",
     "tls-native-tls",

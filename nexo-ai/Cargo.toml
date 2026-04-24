@@ -28,8 +28,8 @@ cli = [
     "dep:clap",
     "dep:rustyline",
     "dep:ctrlc",
-    "utl-helpers/interactive",
-    "utl-helpers/progress",
+    "cli-helpers/interactive",
+    "cli-helpers/progress",
     "download",
 ]
 download = [
@@ -79,9 +79,10 @@ image = "0"
 viuer = "0"
 
 # Core
-utl-helpers = { path = "../shared/utl-helpers", features = [
+cli-helpers = { workspace = true, features = [
     "config",
     "output",
+    "tracing",
 ] }
 nexo-spec = { path = "../shared/nexo-spec", features = ["tool"] }
 serde = { version = "1", features = ["derive"] }

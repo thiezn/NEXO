@@ -1,3 +1,7 @@
+use cli_helpers::markdown::{
+    MarkdownLine as RenderedMarkdownLine, MarkdownLineKind, MarkdownSpan as RenderedMarkdownSpan,
+    parse_markdown,
+};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -242,7 +246,7 @@ fn render_input(model: &Model, frame: &mut Frame<'_>, area: Rect, theme: Theme) 
         Line::from(vec![
             Span::styled("> ", theme.accent),
             Span::styled(
-                "Type /agent, /status, /session list, or /help. Use Tab and @file completion.",
+                "Type a prompt, or use /status, /session list, or /help. Use Tab and @file completion.",
                 theme.placeholder,
             ),
         ])
@@ -323,6 +327,11 @@ fn activity_lines(model: &Model, theme: Theme) -> Vec<Line<'static>> {
 }
 
 fn append_log_entry(lines: &mut Vec<Line<'static>>, entry: &LogEntry, theme: Theme) {
+    if uses_markdown_renderer(entry) {
+        append_markdown_entry(lines, entry, theme);
+        return;
+    }
+
     let label_style = log_style(theme, entry.kind);
     let mut body_lines = entry.body.lines();
     let first_line = body_lines.next().unwrap_or_default().to_string();
@@ -337,6 +346,117 @@ fn append_log_entry(lines: &mut Vec<Line<'static>>, entry: &LogEntry, theme: The
     }
 
     lines.push(Line::raw(String::new()));
+}
+
+fn append_markdown_entry(lines: &mut Vec<Line<'static>>, entry: &LogEntry, theme: Theme) {
+    let rendered = parse_markdown(&entry.body);
+    let label_style = log_style(theme, entry.kind);
+
+    for (index, line) in rendered.lines.iter().enumerate() {
+        if line.is_blank() {
+            lines.push(Line::raw(String::new()));
+            continue;
+        }
+
+        let mut spans = Vec::new();
+        if index == 0 {
+            spans.push(Span::styled(format!("[{}] ", entry.title), label_style));
+        } else {
+            spans.push(Span::raw("  ".to_string()));
+        }
+        spans.extend(render_markdown_line(line, theme));
+        lines.push(Line::from(spans));
+    }
+
+    if rendered.lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("[{}] ", entry.title),
+            label_style,
+        )));
+    }
+
+    lines.push(Line::raw(String::new()));
+}
+
+fn render_markdown_line(line: &RenderedMarkdownLine, theme: Theme) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    if !line.prefix.is_empty() {
+        spans.push(Span::styled(
+            line.prefix.clone(),
+            markdown_prefix_style(theme, &line.kind),
+        ));
+    }
+
+    for span in &line.spans {
+        spans.push(Span::styled(
+            span.text.clone(),
+            markdown_span_style(theme, &line.kind, span),
+        ));
+    }
+
+    spans
+}
+
+fn uses_markdown_renderer(entry: &LogEntry) -> bool {
+    matches!(entry.kind, LogKind::Response) || entry.title.starts_with("assistant")
+}
+
+fn markdown_prefix_style(theme: Theme, kind: &MarkdownLineKind) -> Style {
+    match kind {
+        MarkdownLineKind::Heading { .. } => theme.accent.add_modifier(Modifier::BOLD),
+        MarkdownLineKind::Quote => theme.muted.add_modifier(Modifier::ITALIC),
+        MarkdownLineKind::ListItem => theme.accent.add_modifier(Modifier::BOLD),
+        MarkdownLineKind::CodeBlock { .. } => theme.muted.bg(Color::Rgb(24, 34, 48)),
+        MarkdownLineKind::Paragraph | MarkdownLineKind::Blank => Style::default(),
+    }
+}
+
+fn markdown_span_style(
+    theme: Theme,
+    kind: &MarkdownLineKind,
+    span: &RenderedMarkdownSpan,
+) -> Style {
+    let mut style = match kind {
+        MarkdownLineKind::Heading { level } => heading_style(theme, *level),
+        MarkdownLineKind::Quote => theme.muted.add_modifier(Modifier::ITALIC),
+        MarkdownLineKind::ListItem => Style::default(),
+        MarkdownLineKind::CodeBlock { .. } => Style::default()
+            .fg(Color::Rgb(230, 236, 244))
+            .bg(Color::Rgb(24, 34, 48)),
+        MarkdownLineKind::Paragraph | MarkdownLineKind::Blank => Style::default(),
+    };
+
+    if span.style.strong {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if span.style.emphasis {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if span.style.strikethrough {
+        style = style.add_modifier(Modifier::CROSSED_OUT);
+    }
+    if span.style.link {
+        style = style.fg(theme.info.fg.unwrap_or(Color::Cyan));
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if span.style.code && !matches!(kind, MarkdownLineKind::CodeBlock { .. }) {
+        style = style
+            .fg(Color::Rgb(230, 236, 244))
+            .bg(Color::Rgb(32, 45, 63));
+    }
+
+    style
+}
+
+fn heading_style(theme: Theme, level: u8) -> Style {
+    match level {
+        1 => theme
+            .title
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        2 => theme.title.add_modifier(Modifier::BOLD),
+        3 => theme.accent.add_modifier(Modifier::BOLD),
+        _ => theme.accent,
+    }
 }
 
 fn theme() -> Theme {
