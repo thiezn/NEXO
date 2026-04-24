@@ -1,13 +1,13 @@
-use std::collections::HashSet;
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use rayon::prelude::*;
+use std::collections::HashSet;
 
+use super::{block, costume, index, monster_sou, resource, room, sound, version};
 use crate::extractor::common::decrypt;
 use crate::extractor::common::metadata::*;
-use crate::extractor::common::output::{OutputManager, save_image, write_jsonl, sanitize_name};
+use crate::extractor::common::output::{OutputManager, sanitize_name, save_image, write_jsonl};
 use crate::extractor::common::progress::ProgressBar;
 use crate::extractor::engine::ExtractionSummary;
-use super::{block, costume, index, monster_sou, resource, room, sound, version};
 use version::ScummVersion;
 
 /// Per-room extraction result, collected after parallel processing.
@@ -22,7 +22,11 @@ struct RoomResult {
     log_lines: Vec<String>,
 }
 
-pub fn extract_game(game: &version::GameInfo, output_root: &std::path::Path, progress: Option<&ProgressBar>) -> Result<ExtractionSummary> {
+pub fn extract_game(
+    game: &version::GameInfo,
+    output_root: &std::path::Path,
+    progress: Option<&ProgressBar>,
+) -> Result<ExtractionSummary> {
     let prefix = sanitize_name(&game.display_name);
     match game.version {
         ScummVersion::V3 | ScummVersion::V4 => {
@@ -30,8 +34,16 @@ pub fn extract_game(game: &version::GameInfo, output_root: &std::path::Path, pro
             output.ensure_dirs()?;
             let mut summary = ExtractionSummary {
                 game_name: game.display_name.clone(),
-                log_lines: vec![format!("{}: output directory: {}", prefix, output.base_dir().display())],
-                backgrounds: 0, objects: 0, sounds: 0, sprites: 0, speech_files: 0,
+                log_lines: vec![format!(
+                    "{}: output directory: {}",
+                    prefix,
+                    output.base_dir().display()
+                )],
+                backgrounds: 0,
+                objects: 0,
+                sounds: 0,
+                sprites: 0,
+                speech_files: 0,
             };
             extract_v3(game, &output, &prefix, &mut summary, progress)?;
             Ok(summary)
@@ -43,50 +55,68 @@ pub fn extract_game(game: &version::GameInfo, output_root: &std::path::Path, pro
 }
 
 /// Extract V5/V6/V7 games (block-based .000/.001 or .LA0/.LA1)
-fn extract_v5v6v7(game: &version::GameInfo, output_root: &std::path::Path, prefix: &str, progress: Option<&ProgressBar>) -> Result<ExtractionSummary> {
+fn extract_v5v6v7(
+    game: &version::GameInfo,
+    output_root: &std::path::Path,
+    prefix: &str,
+    progress: Option<&ProgressBar>,
+) -> Result<ExtractionSummary> {
     let mut log = Vec::new();
 
     // Read and decrypt index file
-    let mut index_data = std::fs::read(&game.index_path)
-        .context("Failed to read index file")?;
+    let mut index_data = std::fs::read(&game.index_path).context("Failed to read index file")?;
     if game.xor_key != 0 {
         decrypt::decrypt(&mut index_data, game.xor_key);
     }
 
-    let game_index = index::parse_index(&index_data)
-        .context("Failed to parse index")?;
+    let game_index = index::parse_index(&index_data).context("Failed to parse index")?;
 
     let room_name_count = game_index.room_names.len();
-    log.push(format!("{}: found {} rooms, {} sounds in index{}",
+    log.push(format!(
+        "{}: found {} rooms, {} sounds in index{}",
         prefix,
         game_index.room_directory.len(),
         game_index.sound_directory.len(),
-        if room_name_count > 0 { format!(", {} room names", room_name_count) } else { String::new() }));
+        if room_name_count > 0 {
+            format!(", {} room names", room_name_count)
+        } else {
+            String::new()
+        }
+    ));
 
     let output = OutputManager::new(output_root, &game.display_name, game_index.room_names)?;
     output.ensure_dirs()?;
     output.ensure_lora_dirs()?;
-    log.push(format!("{}: output directory: {}", prefix, output.base_dir().display()));
+    log.push(format!(
+        "{}: output directory: {}",
+        prefix,
+        output.base_dir().display()
+    ));
 
     // Read and decrypt data file
-    let mut data = std::fs::read(&game.data_path)
-        .context("Failed to read data file")?;
+    let mut data = std::fs::read(&game.data_path).context("Failed to read data file")?;
     if game.xor_key != 0 {
         decrypt::decrypt(&mut data, game.xor_key);
     }
 
-    let lflf_entries = resource::parse_data_file(&data)
-        .context("Failed to parse data file")?;
-    log.push(format!("{}: found {} LFLF entries", prefix, lflf_entries.len()));
+    let lflf_entries = resource::parse_data_file(&data).context("Failed to parse data file")?;
+    log.push(format!(
+        "{}: found {} LFLF entries",
+        prefix,
+        lflf_entries.len()
+    ));
 
     // Process rooms in parallel
     if let Some(pb) = progress {
         pb.set_message(format!("{} rooms", lflf_entries.len()));
     }
-    let results: Vec<RoomResult> = lflf_entries.par_iter()
+    let results: Vec<RoomResult> = lflf_entries
+        .par_iter()
         .filter_map(|entry| {
             let result = extract_single_room(&data, entry, &output, game.version).ok();
-            if let Some(pb) = progress { pb.tick(); }
+            if let Some(pb) = progress {
+                pb.tick();
+            }
             result
         })
         .collect();
@@ -113,21 +143,44 @@ fn extract_v5v6v7(game: &version::GameInfo, output_root: &std::path::Path, prefi
         lora_sprites.extend(result.lora_sprites);
     }
 
-    log.push(format!("{}: extracted {} backgrounds, {} object images, {} sound files, {} sprites",
-        prefix, total_bg, total_obj, total_sounds, total_sprites));
+    log.push(format!(
+        "{}: extracted {} backgrounds, {} object images, {} sound files, {} sprites",
+        prefix, total_bg, total_obj, total_sounds, total_sprites
+    ));
 
     // Write lora_training JSONL metadata files
     if !lora_backgrounds.is_empty() {
-        write_jsonl(&lora_backgrounds, &output.lora_backgrounds_dir().join("metadata.jsonl"))?;
-        log.push(format!("{}: lora training: {} background images", prefix, lora_backgrounds.len()));
+        write_jsonl(
+            &lora_backgrounds,
+            &output.lora_backgrounds_dir().join("metadata.jsonl"),
+        )?;
+        log.push(format!(
+            "{}: lora training: {} background images",
+            prefix,
+            lora_backgrounds.len()
+        ));
     }
     if !lora_objects.is_empty() {
-        write_jsonl(&lora_objects, &output.lora_objects_dir().join("metadata.jsonl"))?;
-        log.push(format!("{}: lora training: {} object images", prefix, lora_objects.len()));
+        write_jsonl(
+            &lora_objects,
+            &output.lora_objects_dir().join("metadata.jsonl"),
+        )?;
+        log.push(format!(
+            "{}: lora training: {} object images",
+            prefix,
+            lora_objects.len()
+        ));
     }
     if !lora_sprites.is_empty() {
-        write_jsonl(&lora_sprites, &output.lora_sprites_dir().join("metadata.jsonl"))?;
-        log.push(format!("{}: lora training: {} sprite sheets", prefix, lora_sprites.len()));
+        write_jsonl(
+            &lora_sprites,
+            &output.lora_sprites_dir().join("metadata.jsonl"),
+        )?;
+        log.push(format!(
+            "{}: lora training: {} sprite sheets",
+            prefix,
+            lora_sprites.len()
+        ));
     }
 
     // Extract speech from MONSTER.SOU if present
@@ -136,7 +189,11 @@ fn extract_v5v6v7(game: &version::GameInfo, output_root: &std::path::Path, prefi
         if let Some(pb) = progress {
             pb.set_message("speech...");
         }
-        log.push(format!("{}: extracting speech from {}...", prefix, sou_path.file_name().unwrap().to_string_lossy()));
+        log.push(format!(
+            "{}: extracting speech from {}...",
+            prefix,
+            sou_path.file_name().unwrap().to_string_lossy()
+        ));
         speech_files = extract_speech(sou_path, &output, prefix, &mut log)?;
     }
 
@@ -192,7 +249,10 @@ fn extract_single_room(
                 let path = output.room_image_dir(room_num).join("background.png");
                 match save_image(&img, &path) {
                     Ok(_) => {
-                        result.log_lines.push(format!("  {}: background {}x{}", room_folder, img.width, img.height));
+                        result.log_lines.push(format!(
+                            "  {}: background {}x{}",
+                            room_folder, img.width, img.height
+                        ));
                         result.bg_count += 1;
 
                         let lora_filename = format!("{}.png", room_folder);
@@ -203,12 +263,18 @@ fn extract_single_room(
                             text: format!("a pixel art scene of {}", room_folder.replace('_', " ")),
                         });
                     }
-                    Err(e) => result.log_lines.push(format!("  Warning: {} background save failed: {}", room_folder, e)),
+                    Err(e) => result.log_lines.push(format!(
+                        "  Warning: {} background save failed: {}",
+                        room_folder, e
+                    )),
                 }
             }
         }
         Ok(None) => {}
-        Err(e) => result.log_lines.push(format!("  Warning: {} background failed: {}", room_folder, e)),
+        Err(e) => result.log_lines.push(format!(
+            "  Warning: {} background failed: {}",
+            room_folder, e
+        )),
     }
 
     // Extract object metadata first
@@ -219,7 +285,8 @@ fn extract_single_room(
         Ok(objects) => {
             for obj in &objects {
                 if obj.image.width > 0 && obj.image.height > 0 {
-                    let obj_name = obj_metas.iter()
+                    let obj_name = obj_metas
+                        .iter()
                         .find(|m| m.obj_id == obj.obj_id)
                         .and_then(|m| m.name.as_deref());
 
@@ -230,22 +297,33 @@ fn extract_single_room(
 
                     output.ensure_room_object_dir(room_num, &obj_dir_name)?;
                     let filename = format!("state_{:02}.png", obj.state);
-                    let path = output.room_object_dir(room_num, &obj_dir_name).join(&filename);
+                    let path = output
+                        .room_object_dir(room_num, &obj_dir_name)
+                        .join(&filename);
                     if let Err(e) = save_image(&obj.image, &path) {
-                        result.log_lines.push(format!("  Warning: {} obj {} save failed: {}", room_folder, obj.obj_id, e));
+                        result.log_lines.push(format!(
+                            "  Warning: {} obj {} save failed: {}",
+                            room_folder, obj.obj_id, e
+                        ));
                     } else {
                         result.obj_count += 1;
 
                         let lora_obj_name = sanitize_name(&obj_dir_name);
-                        let lora_filename = format!("{}_{}_state_{:02}.png",
-                            room_folder, lora_obj_name, obj.state);
+                        let lora_filename = format!(
+                            "{}_{}_state_{:02}.png",
+                            room_folder, lora_obj_name, obj.state
+                        );
                         let lora_path = output.lora_objects_images_dir().join(&lora_filename);
                         let _ = save_image(&obj.image, &lora_path);
                         let description = match obj_name {
-                            Some(name) if !name.is_empty() =>
-                                format!("a pixel art object: {}", name.replace('_', " ")),
-                            _ => format!("a pixel art game object {} in {}",
-                                obj.obj_id, room_folder.replace('_', " ")),
+                            Some(name) if !name.is_empty() => {
+                                format!("a pixel art object: {}", name.replace('_', " "))
+                            }
+                            _ => format!(
+                                "a pixel art game object {} in {}",
+                                obj.obj_id,
+                                room_folder.replace('_', " ")
+                            ),
                         };
                         result.lora_objects.push(LoraEntry {
                             image: format!("images/{}", lora_filename),
@@ -256,10 +334,16 @@ fn extract_single_room(
             }
 
             if !objects.is_empty() {
-                result.log_lines.push(format!("  {}: {} object images", room_folder, objects.len()));
+                result.log_lines.push(format!(
+                    "  {}: {} object images",
+                    room_folder,
+                    objects.len()
+                ));
             }
         }
-        Err(e) => result.log_lines.push(format!("  Warning: {} objects failed: {}", room_folder, e)),
+        Err(e) => result
+            .log_lines
+            .push(format!("  Warning: {} objects failed: {}", room_folder, e)),
     }
 
     // Build object metadata
@@ -269,7 +353,13 @@ fn extract_single_room(
             _ => format!("obj_{:05}", om.obj_id),
         };
         let image_files: Vec<String> = (0..om.num_states)
-            .map(|s| format!("objects/{}/state_{:02}.png", sanitize_name(&obj_dir_name), s))
+            .map(|s| {
+                format!(
+                    "objects/{}/state_{:02}.png",
+                    sanitize_name(&obj_dir_name),
+                    s
+                )
+            })
             .collect();
         obj_meta_list.push(ObjectMetadataJson {
             obj_id: om.obj_id,
@@ -292,7 +382,8 @@ fn extract_single_room(
             let mut sound_files = Vec::new();
 
             for extracted in extracted_list {
-                let filename = format!("sound_{:03}_{}.{}",
+                let filename = format!(
+                    "sound_{:03}_{}.{}",
                     sound_idx,
                     extracted.sound_type.label(),
                     extracted.sound_type.extension()
@@ -309,7 +400,11 @@ fn extract_single_room(
             });
         }
 
-        result.log_lines.push(format!("  {}: {} sound files", room_folder, room_sounds.sounds.len()));
+        result.log_lines.push(format!(
+            "  {}: {} sound files",
+            room_folder,
+            room_sounds.sounds.len()
+        ));
     }
 
     // Extract costumes (sprites)
@@ -351,10 +446,20 @@ fn extract_single_room(
                 if frame.width == 0 || frame.height == 0 || frame.pixels.is_empty() {
                     continue;
                 }
-                let img = make_costume_image(&frame.pixels, frame.width, frame.height, &costume_info.palette, pal);
-                let path = costume_path.join("frames").join(format!("frame_{:03}.png", fi));
+                let img = make_costume_image(
+                    &frame.pixels,
+                    frame.width,
+                    frame.height,
+                    &costume_info.palette,
+                    pal,
+                );
+                let path = costume_path
+                    .join("frames")
+                    .join(format!("frame_{:03}.png", fi));
                 if let Err(e) = save_image(&img, &path) {
-                    result.log_lines.push(format!("  Warning: costume frame save failed: {}", e));
+                    result
+                        .log_lines
+                        .push(format!("  Warning: costume frame save failed: {}", e));
                 }
             }
         }
@@ -373,7 +478,8 @@ fn extract_single_room(
                     }
                 }
 
-                let frame_refs: Vec<&costume::CostumeFrame> = all_frame_indices.iter()
+                let frame_refs: Vec<&costume::CostumeFrame> = all_frame_indices
+                    .iter()
                     .filter_map(|&fi| costume_info.frames.get(fi))
                     .filter(|f| f.width > 0 && f.height > 0 && !f.pixels.is_empty())
                     .collect();
@@ -387,11 +493,20 @@ fn extract_single_room(
                     continue;
                 }
 
-                let sheet_img = make_costume_image(&sheet_pixels, sw as u16, sh as u16, &costume_info.palette, pal);
+                let sheet_img = make_costume_image(
+                    &sheet_pixels,
+                    sw as u16,
+                    sh as u16,
+                    &costume_info.palette,
+                    pal,
+                );
                 let filename = format!("{}.png", sanitize_name(&anim.name));
                 let path = costume_path.join("animations").join(&filename);
                 if let Err(e) = save_image(&sheet_img, &path) {
-                    result.log_lines.push(format!("  Warning: costume sprite sheet save failed: {}", e));
+                    result.log_lines.push(format!(
+                        "  Warning: costume sprite sheet save failed: {}",
+                        e
+                    ));
                 } else {
                     anim_refs.push(SpriteAnimRef {
                         name: anim.name.clone(),
@@ -399,14 +514,20 @@ fn extract_single_room(
                         num_frames: frame_refs.len(),
                     });
 
-                    let lora_filename = format!("{}_costume_{:03}_{}.png",
-                        room_folder, costume_idx, sanitize_name(&anim.name));
+                    let lora_filename = format!(
+                        "{}_costume_{:03}_{}.png",
+                        room_folder,
+                        costume_idx,
+                        sanitize_name(&anim.name)
+                    );
                     let lora_path = output.lora_sprites_images_dir().join(&lora_filename);
                     let _ = save_image(&sheet_img, &lora_path);
                     result.lora_sprites.push(LoraEntry {
                         image: format!("images/{}", lora_filename),
-                        text: format!("a pixel art character sprite sheet: {} animation",
-                            anim.name.replace('_', " ")),
+                        text: format!(
+                            "a pixel art character sprite sheet: {} animation",
+                            anim.name.replace('_', " ")
+                        ),
                     });
                 }
             }
@@ -423,14 +544,21 @@ fn extract_single_room(
     }
 
     if !sprite_meta_list.is_empty() {
-        result.log_lines.push(format!("  {}: {} sprites ({} total frames)",
-            room_folder, sprite_meta_list.len(),
-            sprite_meta_list.iter().map(|c| c.num_frames).sum::<usize>()));
+        result.log_lines.push(format!(
+            "  {}: {} sprites ({} total frames)",
+            room_folder,
+            sprite_meta_list.len(),
+            sprite_meta_list.iter().map(|c| c.num_frames).sum::<usize>()
+        ));
     }
 
     // Write room metadata.json
     let room_name = output.room_folder_name(room_num);
-    let raw_name = if room_name.starts_with("room_") { None } else { Some(room_name) };
+    let raw_name = if room_name.starts_with("room_") {
+        None
+    } else {
+        Some(room_name)
+    };
 
     let room_meta = RoomMetadata {
         room_id: room_num,
@@ -454,16 +582,26 @@ fn extract_single_room(
 }
 
 /// Extract V3/V4 games (individual .LFL files)
-fn extract_v3(game: &version::GameInfo, output: &OutputManager, prefix: &str, summary: &mut ExtractionSummary, progress: Option<&ProgressBar>) -> Result<()> {
-    let index_data = std::fs::read(&game.index_path)
-        .context("Failed to read index file")?;
+fn extract_v3(
+    game: &version::GameInfo,
+    output: &OutputManager,
+    prefix: &str,
+    summary: &mut ExtractionSummary,
+    progress: Option<&ProgressBar>,
+) -> Result<()> {
+    let index_data = std::fs::read(&game.index_path).context("Failed to read index file")?;
 
-    let game_index = index::parse_index_v3(&index_data)
-        .context("Failed to parse V3 index")?;
-    summary.log_lines.push(format!("{}: found {} rooms in V3 index", prefix, game_index.room_directory.len()));
+    let game_index = index::parse_index_v3(&index_data).context("Failed to parse V3 index")?;
+    summary.log_lines.push(format!(
+        "{}: found {} rooms in V3 index",
+        prefix,
+        game_index.room_directory.len()
+    ));
 
     let rooms = resource::parse_v3_rooms(&game.data_path, &game_index.room_directory)?;
-    summary.log_lines.push(format!("{}: loaded {} room files", prefix, rooms.len()));
+    summary
+        .log_lines
+        .push(format!("{}: loaded {} room files", prefix, rooms.len()));
 
     output.ensure_lora_dirs()?;
     let mut lora_backgrounds: Vec<LoraEntry> = Vec::new();
@@ -483,17 +621,24 @@ fn extract_v3(game: &version::GameInfo, output: &OutputManager, prefix: &str, su
         let ro_block = match block::parse_block_v3(room_data, 0) {
             Ok(b) if b.tag_v3() == b"RO" => b,
             _ => {
-                summary.log_lines.push(format!("{}: room {:03}: no RO block found", prefix, room_id));
+                summary.log_lines.push(format!(
+                    "{}: room {:03}: no RO block found",
+                    prefix, room_id
+                ));
                 continue;
             }
         };
-        let inner_blocks = block::iter_children_v3(room_data, ro_block.data_offset_v3(), ro_block.end_offset());
+        let inner_blocks =
+            block::iter_children_v3(room_data, ro_block.data_offset_v3(), ro_block.end_offset());
 
         // Extract header (HD block)
         let (width, height) = if let Some(hd) = inner_blocks.iter().find(|b| b.tag_v3() == b"HD") {
             let d = &room_data[hd.data_offset_v3()..hd.end_offset()];
             if d.len() >= 4 {
-                (u16::from_le_bytes([d[0], d[1]]), u16::from_le_bytes([d[2], d[3]]))
+                (
+                    u16::from_le_bytes([d[0], d[1]]),
+                    u16::from_le_bytes([d[2], d[3]]),
+                )
             } else {
                 (0, 0)
             }
@@ -505,43 +650,67 @@ fn extract_v3(game: &version::GameInfo, output: &OutputManager, prefix: &str, su
         let palette = if let Some(pa) = inner_blocks.iter().find(|b| b.tag_v3() == b"PA") {
             extract_v3_palette(room_data, pa)
         } else {
-            room::Palette { colors: {
-                let mut c = [(0u8, 0u8, 0u8); 256];
-                for i in 0..256 { c[i] = (i as u8, i as u8, i as u8); }
-                c
-            }}
+            room::Palette {
+                colors: {
+                    let mut c = [(0u8, 0u8, 0u8); 256];
+                    for i in 0..256 {
+                        c[i] = (i as u8, i as u8, i as u8);
+                    }
+                    c
+                },
+            }
         };
 
         // Extract background (BM block)
         if width > 0 && height > 0 {
             if let Some(bm) = inner_blocks.iter().find(|b| b.tag_v3() == b"BM") {
-                match decode_v3_background(room_data, bm, width as usize, height as usize, &palette) {
+                match decode_v3_background(room_data, bm, width as usize, height as usize, &palette)
+                {
                     Ok(img) => {
                         let path = output.room_image_dir(room_id).join("background.png");
                         match save_image(&img, &path) {
                             Ok(_) => {
-                                summary.log_lines.push(format!("{}: {}: background {}x{}", prefix, room_folder, width, height));
+                                summary.log_lines.push(format!(
+                                    "{}: {}: background {}x{}",
+                                    prefix, room_folder, width, height
+                                ));
                                 summary.backgrounds += 1;
 
                                 let lora_filename = format!("{}.png", room_folder);
-                                let lora_path = output.lora_backgrounds_images_dir().join(&lora_filename);
+                                let lora_path =
+                                    output.lora_backgrounds_images_dir().join(&lora_filename);
                                 let _ = save_image(&img, &lora_path);
                                 lora_backgrounds.push(LoraEntry {
                                     image: format!("images/{}", lora_filename),
-                                    text: format!("a pixel art scene of {}", room_folder.replace('_', " ")),
+                                    text: format!(
+                                        "a pixel art scene of {}",
+                                        room_folder.replace('_', " ")
+                                    ),
                                 });
                             }
-                            Err(e) => summary.log_lines.push(format!("{}: {}: background save failed: {}", prefix, room_folder, e)),
+                            Err(e) => summary.log_lines.push(format!(
+                                "{}: {}: background save failed: {}",
+                                prefix, room_folder, e
+                            )),
                         }
                     }
-                    Err(e) => summary.log_lines.push(format!("{}: {}: background decode failed: {}", prefix, room_folder, e)),
+                    Err(e) => summary.log_lines.push(format!(
+                        "{}: {}: background decode failed: {}",
+                        prefix, room_folder, e
+                    )),
                 }
             }
         }
 
         // Extract V3 object images (OI blocks with OC metadata)
-        let oi_blocks: Vec<_> = inner_blocks.iter().filter(|b| b.tag_v3() == b"OI").collect();
-        let oc_blocks: Vec<_> = inner_blocks.iter().filter(|b| b.tag_v3() == b"OC").collect();
+        let oi_blocks: Vec<_> = inner_blocks
+            .iter()
+            .filter(|b| b.tag_v3() == b"OI")
+            .collect();
+        let oc_blocks: Vec<_> = inner_blocks
+            .iter()
+            .filter(|b| b.tag_v3() == b"OC")
+            .collect();
         let mut obj_meta_list: Vec<ObjectMetadataJson> = Vec::new();
 
         for (idx, oi) in oi_blocks.iter().enumerate() {
@@ -567,20 +736,33 @@ fn extract_v3(game: &version::GameInfo, output: &OutputManager, prefix: &str, su
 
             match decode_v3_image_strips(oi_data, ow, oh) {
                 Ok(pixels) => {
-                    let img = room::DecodedImage { width: ow as u16, height: oh as u16, pixels, palette };
+                    let img = room::DecodedImage {
+                        width: ow as u16,
+                        height: oh as u16,
+                        pixels,
+                        palette,
+                    };
 
                     output.ensure_room_object_dir(room_id, &obj_dir_name)?;
-                    let path = output.room_object_dir(room_id, &obj_dir_name).join("state_00.png");
+                    let path = output
+                        .room_object_dir(room_id, &obj_dir_name)
+                        .join("state_00.png");
                     if save_image(&img, &path).is_ok() {
                         summary.objects += 1;
 
-                        let lora_filename = format!("{}_{}_state_00.png", room_folder, &obj_dir_name);
+                        let lora_filename =
+                            format!("{}_{}_state_00.png", room_folder, &obj_dir_name);
                         let lora_path = output.lora_objects_images_dir().join(&lora_filename);
                         let _ = save_image(&img, &lora_path);
                         let description = match &obj_name {
-                            Some(name) if !name.is_empty() =>
-                                format!("a pixel art object: {}", name.replace('_', " ")),
-                            _ => format!("a pixel art game object {} in {}", obj_id, room_folder.replace('_', " ")),
+                            Some(name) if !name.is_empty() => {
+                                format!("a pixel art object: {}", name.replace('_', " "))
+                            }
+                            _ => format!(
+                                "a pixel art game object {} in {}",
+                                obj_id,
+                                room_folder.replace('_', " ")
+                            ),
                         };
                         lora_objects.push(LoraEntry {
                             image: format!("images/{}", lora_filename),
@@ -605,7 +787,12 @@ fn extract_v3(game: &version::GameInfo, output: &OutputManager, prefix: &str, su
         }
 
         if !oi_blocks.is_empty() {
-            summary.log_lines.push(format!("{}: {}: {} object images", prefix, room_folder, oi_blocks.len()));
+            summary.log_lines.push(format!(
+                "{}: {}: {} object images",
+                prefix,
+                room_folder,
+                oi_blocks.len()
+            ));
         }
 
         // Write room metadata.json
@@ -627,19 +814,37 @@ fn extract_v3(game: &version::GameInfo, output: &OutputManager, prefix: &str, su
         let json = serde_json::to_string_pretty(&room_meta)?;
         std::fs::write(&meta_path, json)?;
 
-        if let Some(pb) = progress { pb.tick(); }
+        if let Some(pb) = progress {
+            pb.tick();
+        }
     }
 
-    summary.log_lines.push(format!("{}: processed {} V3 rooms", prefix, rooms.len()));
+    summary
+        .log_lines
+        .push(format!("{}: processed {} V3 rooms", prefix, rooms.len()));
 
     // Write lora_training JSONL metadata files
     if !lora_backgrounds.is_empty() {
-        write_jsonl(&lora_backgrounds, &output.lora_backgrounds_dir().join("metadata.jsonl"))?;
-        summary.log_lines.push(format!("{}: lora training: {} background images", prefix, lora_backgrounds.len()));
+        write_jsonl(
+            &lora_backgrounds,
+            &output.lora_backgrounds_dir().join("metadata.jsonl"),
+        )?;
+        summary.log_lines.push(format!(
+            "{}: lora training: {} background images",
+            prefix,
+            lora_backgrounds.len()
+        ));
     }
     if !lora_objects.is_empty() {
-        write_jsonl(&lora_objects, &output.lora_objects_dir().join("metadata.jsonl"))?;
-        summary.log_lines.push(format!("{}: lora training: {} object images", prefix, lora_objects.len()));
+        write_jsonl(
+            &lora_objects,
+            &output.lora_objects_dir().join("metadata.jsonl"),
+        )?;
+        summary.log_lines.push(format!(
+            "{}: lora training: {} object images",
+            prefix,
+            lora_objects.len()
+        ));
     }
 
     Ok(())
@@ -675,7 +880,10 @@ fn extract_v3_palette(data: &[u8], pa: &block::Block) -> room::Palette {
 }
 
 /// Parse V3 object header from OC block. Returns (obj_id, x, y, width, height, name, num_states).
-fn parse_v3_object_header(data: &[u8], oc: &block::Block) -> (u16, u16, u16, u16, u16, Option<String>, u8) {
+fn parse_v3_object_header(
+    data: &[u8],
+    oc: &block::Block,
+) -> (u16, u16, u16, u16, u16, Option<String>, u8) {
     let d = &data[oc.data_offset_v3()..oc.end_offset()];
     if d.len() < 13 {
         return (0, 0, 0, 0, 0, None, 1);
@@ -729,7 +937,13 @@ fn extract_v3_obj_name(oc_data: &[u8]) -> Option<String> {
 }
 
 /// Decode V3 background image from a BM block.
-fn decode_v3_background(data: &[u8], bm: &block::Block, width: usize, height: usize, palette: &room::Palette) -> Result<room::DecodedImage> {
+fn decode_v3_background(
+    data: &[u8],
+    bm: &block::Block,
+    width: usize,
+    height: usize,
+    palette: &room::Palette,
+) -> Result<room::DecodedImage> {
     let bm_data = &data[bm.data_offset_v3()..bm.end_offset()];
     let pixels = decode_v3_image_strips(bm_data, width, height)?;
     Ok(room::DecodedImage {
@@ -783,15 +997,22 @@ fn decode_v3_image_strips(strip_data: &[u8], width: usize, height: usize) -> Res
 }
 
 /// Extract speech from MONSTER.SOU/sof/so3/sog file. Returns number of speech files extracted.
-fn extract_speech(sou_path: &std::path::Path, output: &OutputManager, prefix: &str, log: &mut Vec<String>) -> Result<usize> {
+fn extract_speech(
+    sou_path: &std::path::Path,
+    output: &OutputManager,
+    prefix: &str,
+    log: &mut Vec<String>,
+) -> Result<usize> {
     output.ensure_speech_dir()?;
 
     match monster_sou::parse_monster_file(sou_path) {
         Ok(entries) => {
             // Write speech files in parallel
-            let speech_meta: Vec<SpeechMetadataJson> = entries.par_iter()
+            let speech_meta: Vec<SpeechMetadataJson> = entries
+                .par_iter()
                 .filter_map(|entry| {
-                    let filename = format!("speech_{:05}.{}", entry.index, entry.format.extension());
+                    let filename =
+                        format!("speech_{:05}.{}", entry.index, entry.format.extension());
                     let path = output.speech_dir().join(&filename);
                     std::fs::write(&path, &entry.audio_data).ok()?;
 
@@ -815,7 +1036,10 @@ fn extract_speech(sou_path: &std::path::Path, output: &OutputManager, prefix: &s
             Ok(count)
         }
         Err(e) => {
-            log.push(format!("{}: warning: failed to parse speech file: {}", prefix, e));
+            log.push(format!(
+                "{}: warning: failed to parse speech file: {}",
+                prefix, e
+            ));
             Ok(0)
         }
     }
@@ -824,15 +1048,18 @@ fn extract_speech(sou_path: &std::path::Path, output: &OutputManager, prefix: &s
 /// Remap pixel indices through a costume palette.
 /// Index 0 is transparent (kept as 0/black).
 fn remap_costume_pixels(input: &[u8], costume_palette: &[u8]) -> Vec<u8> {
-    input.iter().map(|&idx| {
-        if idx == 0 {
-            0
-        } else if (idx as usize) < costume_palette.len() {
-            costume_palette[idx as usize]
-        } else {
-            idx
-        }
-    }).collect()
+    input
+        .iter()
+        .map(|&idx| {
+            if idx == 0 {
+                0
+            } else if (idx as usize) < costume_palette.len() {
+                costume_palette[idx as usize]
+            } else {
+                idx
+            }
+        })
+        .collect()
 }
 
 fn make_costume_image(

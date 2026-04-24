@@ -150,11 +150,7 @@ pub(super) async fn forward_to_node(
                 request_id,
                 ErrorPayload {
                     code: "timeout".into(),
-                    message: format!(
-                        "{} timed out ({}s)",
-                        errors.label,
-                        timeout.as_secs()
-                    ),
+                    message: format!("{} timed out ({}s)", errors.label, timeout.as_secs()),
                 },
             )
         }

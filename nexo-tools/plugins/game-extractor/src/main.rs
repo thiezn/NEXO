@@ -6,11 +6,14 @@ use rayon::prelude::*;
 use utl_helpers::LogLevel;
 
 use game_extractor::analyze;
-use game_extractor::extractor::{Engine, ExtractionSummary, common::progress, sci, scumm};
 use game_extractor::extractor::common::progress::{MultiProgress, ProgressBar};
+use game_extractor::extractor::{Engine, ExtractionSummary, common::progress, sci, scumm};
 
 #[derive(Parser)]
-#[command(name = "game_extractor", about = "Extract and analyze assets from adventure game files")]
+#[command(
+    name = "game_extractor",
+    about = "Extract and analyze assets from adventure game files"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -78,7 +81,11 @@ async fn run_extract(args: ExtractArgs) -> Result<()> {
     }
 
     if games.is_empty() {
-        let dirs: Vec<_> = args.game_dirs.iter().map(|d| d.display().to_string()).collect();
+        let dirs: Vec<_> = args
+            .game_dirs
+            .iter()
+            .map(|d| d.display().to_string())
+            .collect();
         anyhow::bail!("No games found in {}", dirs.join(", "));
     }
 
@@ -107,22 +114,25 @@ async fn run_extract(args: ExtractArgs) -> Result<()> {
             }
         }
     } else {
-        let results: Vec<_> = games.par_iter().map(|game| {
-            let pb = progress::game_spinner(&mp, game.game_name());
-            pb.set_message("extracting...");
-            let result = match game.extract(&args.output, Some(&pb)) {
-                Ok(summary) => {
-                    pb.finish_and_clear();
-                    Some(summary)
-                }
-                Err(e) => {
-                    pb.finish_with_message(format!("error: {}", e));
-                    None
-                }
-            };
-            overall.inc(1);
-            result
-        }).collect();
+        let results: Vec<_> = games
+            .par_iter()
+            .map(|game| {
+                let pb = progress::game_spinner(&mp, game.game_name());
+                pb.set_message("extracting...");
+                let result = match game.extract(&args.output, Some(&pb)) {
+                    Ok(summary) => {
+                        pb.finish_and_clear();
+                        Some(summary)
+                    }
+                    Err(e) => {
+                        pb.finish_with_message(format!("error: {}", e));
+                        None
+                    }
+                };
+                overall.inc(1);
+                result
+            })
+            .collect();
 
         results.into_iter().flatten().collect()
     };
@@ -134,11 +144,21 @@ async fn run_extract(args: ExtractArgs) -> Result<()> {
         println!("\n=== Summary ===");
         for s in &summaries {
             let mut parts = Vec::new();
-            if s.backgrounds > 0 { parts.push(format!("{} backgrounds", s.backgrounds)); }
-            if s.objects > 0 { parts.push(format!("{} objects", s.objects)); }
-            if s.sounds > 0 { parts.push(format!("{} sounds", s.sounds)); }
-            if s.sprites > 0 { parts.push(format!("{} sprites", s.sprites)); }
-            if s.speech_files > 0 { parts.push(format!("{} speech files", s.speech_files)); }
+            if s.backgrounds > 0 {
+                parts.push(format!("{} backgrounds", s.backgrounds));
+            }
+            if s.objects > 0 {
+                parts.push(format!("{} objects", s.objects));
+            }
+            if s.sounds > 0 {
+                parts.push(format!("{} sounds", s.sounds));
+            }
+            if s.sprites > 0 {
+                parts.push(format!("{} sprites", s.sprites));
+            }
+            if s.speech_files > 0 {
+                parts.push(format!("{} speech files", s.speech_files));
+            }
             if parts.is_empty() {
                 println!("  {}: no assets extracted", s.game_name);
             } else {

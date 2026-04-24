@@ -1,4 +1,4 @@
-use crate::download::{find_manifest, known_manifests, pull_model, Component};
+use crate::download::{Component, find_manifest, known_manifests, pull_model};
 
 pub async fn run(model: &str, force: bool) -> utl_helpers::Result {
     let manifests: Vec<_> = if model == "all" {

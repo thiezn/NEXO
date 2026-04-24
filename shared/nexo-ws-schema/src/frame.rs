@@ -56,10 +56,7 @@ impl Frame {
     }
 
     /// Build a successful response frame.
-    pub fn ok_response(
-        id: &str,
-        payload: impl Serialize,
-    ) -> Result<Self, serde_json::Error> {
+    pub fn ok_response(id: &str, payload: impl Serialize) -> Result<Self, serde_json::Error> {
         Ok(Frame::Response {
             id: id.to_string(),
             ok: true,
@@ -79,10 +76,7 @@ impl Frame {
     }
 
     /// Build an event frame.
-    pub fn event(
-        kind: EventKind,
-        payload: impl Serialize,
-    ) -> Result<Self, serde_json::Error> {
+    pub fn event(kind: EventKind, payload: impl Serialize) -> Result<Self, serde_json::Error> {
         Ok(Frame::Event {
             event: kind,
             payload: serde_json::to_value(payload)?,
@@ -166,8 +160,7 @@ mod tests {
 
     #[test]
     fn event_without_seq_omits_field() {
-        let frame =
-            Frame::event(EventKind::Heartbeat, serde_json::json!({})).unwrap();
+        let frame = Frame::event(EventKind::Heartbeat, serde_json::json!({})).unwrap();
         let json = serde_json::to_value(&frame).unwrap();
         assert!(json.get("seq").is_none());
         assert!(json.get("stateVersion").is_none());

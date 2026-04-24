@@ -8,6 +8,8 @@
   `127.0.0.1:6969`).
 - **Nodes** (macOS/iOS/headless) also connect over **WebSocket**, but
   declare `role: node` with explicit capabilities/commands.
+- There is no peer-to-peer client transport. Client-to-client messaging is
+  routed through the gateway.
 
 ## Components and flows
 
@@ -16,14 +18,17 @@
 - Maintains connections to clients and nodes
 - Exposes a typed WS API (requests, responses, server‑push events).
 - Validates inbound frames against JSON Schema.
-- Emits events like `agent`, `chat`, `presence`, `health`, `heartbeat`, `cron`.
+- Emits events like `agent`, `message`, `presence`, `heartbeat`, `cron`, `tick`, `shutdown`.
 
 ### Clients (macOS / iOS app / CLI)
 
 - One WS connection per client.
-- Provide a user identity in `connect` and client identity; pairing is **user‑based** (`role: "user"`), client identity is informational (e.g. `cli`, `iOS`, `macOS`). The `role` field is the sole discriminator between users and nodes.
+- Provide a user routing identity in `connect`; today the gateway uses `client.id` for
+  `role: "user"` connections when routing directed messages and associating sessions.
+  Multiple connected peers can share the same `client.id`, in which case all of them
+  receive directed `message` events. `device.id` identifies the concrete device.
 - Send requests (`health`, `status`, `send`, `agent`, `system-presence`).
-- Subscribe to events (`tick`, `agent`, `presence`, `shutdown`).
+- Subscribe to events (`tick`, `agent`, `message`, `presence`, `shutdown`).
 
 ### Nodes (macOS / iOS / headless)
 
@@ -82,6 +87,19 @@ sequenceDiagram
 
     Note over Node,Gateway: On disconnect: gateway deregisters<br>all tools from this node
 ```
+
+  ## Client-to-client messaging
+
+  ```mermaid
+  sequenceDiagram
+    participant Alice as Client A
+    participant Gateway
+    participant Bob as Client B
+
+    Alice->>Gateway: request:send {target:"bob", payload:{...}}
+    Gateway-->>Alice: response {delivered:true}
+    Gateway-->>Bob: event:message {from:"alice", target:"bob", payload:{...}}
+  ```
 
 ## Brain (agent loop)
 

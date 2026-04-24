@@ -1,4 +1,4 @@
-use crate::shared::types::{ChatMessage, ChatRole};
+use crate::api::types::{ChatMessage, ChatRole};
 
 use super::{ChatTemplate, ReasoningMode};
 

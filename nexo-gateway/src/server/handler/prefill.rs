@@ -11,7 +11,9 @@ pub(super) fn handle_fetch_deprecated(request_id: &str) -> Frame {
         request_id,
         ErrorPayload {
             code: "deprecated".into(),
-            message: "prefill.fetch is no longer used; prefill content is included in the system prompt".into(),
+            message:
+                "prefill.fetch is no longer used; prefill content is included in the system prompt"
+                    .into(),
         },
     )
 }
@@ -40,10 +42,7 @@ pub(super) async fn handle_markdown_create(
     }
 }
 
-pub(super) async fn handle_markdown_list(
-    request_id: &str,
-    state: &SharedState,
-) -> Frame {
+pub(super) async fn handle_markdown_list(request_id: &str, state: &SharedState) -> Frame {
     match git_blocking(request_id, state, |git| {
         crate::agent::prefill::list_markdown(&git)
     })
@@ -117,10 +116,7 @@ pub(super) async fn handle_collection_create(
     }
 }
 
-pub(super) async fn handle_collection_list(
-    request_id: &str,
-    state: &SharedState,
-) -> Frame {
+pub(super) async fn handle_collection_list(request_id: &str, state: &SharedState) -> Frame {
     match git_blocking(request_id, state, |git| {
         crate::agent::prefill::list_collections(&git)
     })

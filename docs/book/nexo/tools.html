@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a9c2ee70.js";
+            window.path_to_searchindex_js = "../searchindex-b491b92b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a50eb69.js"></script>
+        <script src="../toc-aa7fd050.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -175,26 +175,153 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="tools"><a class="header" href="#tools">Tools</a></h1>
-<p>NEXO is designed around tool use. It provides a few out of the box default tools, and has an in memory registry of other tools it can leverage.</p>
-<h2 id="base-categories"><a class="header" href="#base-categories">Base Categories</a></h2>
-<p>These categories are the base tools provided directly by the gateway. They are tools that interact with the core of the NEXO system itself and provide fundamental capabilities that other tools and agents can build on top of.</p>
-<h3 id="core-tools"><a class="header" href="#core-tools">Core tools</a></h3>
+<p>NEXO is designed around tool use. Tools are callable functions that the agent can invoke during its reasoning loop. They come in two categories: <strong>gateway-local tools</strong> that run inside the gateway process, and <strong>node tools</strong> provided by connected nexo-node instances.</p>
+<h2 id="gateway-local-tools"><a class="header" href="#gateway-local-tools">Gateway-local tools</a></h2>
+<p>Gateway-local tools are always available — they don’t depend on any node being connected. They execute directly in the gateway process and appear in the tool catalog with <code>source: "gateway"</code>.</p>
+<p>All gateway-local tool output is cleaned up via a transformation pipeline: ANSI escape codes are stripped, long output is truncated, and content-specific transformations are applied (see <a href="#output-transformations">Output transformations</a> below).</p>
+<h3 id="io-tools"><a class="header" href="#io-tools">IO tools</a></h3>
+<p>File, shell, and web access for the agent.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>io.read</code></td><td>Read a file from the filesystem</td></tr>
+<tr><td><code>io.edit</code></td><td>Edit an existing file or create a new one</td></tr>
+<tr><td><code>io.bash</code></td><td>Execute a bash command on the gateway host</td></tr>
+<tr><td><code>io.web_fetch</code></td><td>Fetch a web page or API endpoint</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="ioread"><a class="header" href="#ioread"><code>io.read</code></a></h4>
+<p>Read file content with language-aware comment stripping.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>path</code></td><td>string</td><td>yes</td><td>File path to read</td></tr>
+<tr><td><code>offset</code></td><td>integer</td><td>no</td><td>Line number to start from (0-indexed)</td></tr>
+<tr><td><code>limit</code></td><td>integer</td><td>no</td><td>Maximum number of lines to return</td></tr>
+</tbody>
+</table>
+</div>
+<p>The tool detects the programming language from the file extension and applies minimal filtering — stripping non-doc comments and normalizing blank lines. Data formats (JSON, YAML, TOML, etc.) pass through unchanged.</p>
+<h4 id="ioedit"><a class="header" href="#ioedit"><code>io.edit</code></a></h4>
+<p>Two modes: <strong>create</strong> (write a new file) or <strong>edit</strong> (find-and-replace in an existing file).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>path</code></td><td>string</td><td>yes</td><td>File path to edit or create</td></tr>
+<tr><td><code>old_string</code></td><td>string</td><td>no</td><td>Text to find and replace (edit mode)</td></tr>
+<tr><td><code>new_string</code></td><td>string</td><td>no</td><td>Replacement text (edit mode)</td></tr>
+<tr><td><code>content</code></td><td>string</td><td>no</td><td>Full file content (create mode)</td></tr>
+</tbody>
+</table>
+</div>
+<p>In edit mode, <code>old_string</code> must appear exactly once in the file. If it appears 0 or 2+ times, the tool returns an error asking for more context.</p>
+<h4 id="iobash"><a class="header" href="#iobash"><code>io.bash</code></a></h4>
+<p>Execute a shell command with timeout protection.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>command</code></td><td>string</td><td>yes</td><td>Bash command to execute</td></tr>
+<tr><td><code>timeout_ms</code></td><td>integer</td><td>no</td><td>Timeout in milliseconds (default: 30000, max: 120000)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Returns exit code, stdout, and stderr. Output is stripped of ANSI codes and truncated to 500 lines per stream.</p>
+<h4 id="ioweb_fetch"><a class="header" href="#ioweb_fetch"><code>io.web_fetch</code></a></h4>
+<p>Fetch a URL and return its content in a readable format.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>url</code></td><td>string</td><td>yes</td><td>URL to fetch</td></tr>
+</tbody>
+</table>
+</div>
+<p>Response handling by content type:</p>
 <ul>
-<li>Read, Write, Delete files, Execute bash commands</li>
+<li><strong>HTML</strong> — converted to markdown</li>
+<li><strong>JSON</strong> — compacted (values preserved, long strings truncated, arrays summarized)</li>
+<li><strong>Other</strong> — returned as plain text with truncation</li>
 </ul>
-<h3 id="memory-tools"><a class="header" href="#memory-tools">Memory tools</a></h3>
+<h3 id="notes-tools"><a class="header" href="#notes-tools">Notes tools</a></h3>
+<p>Git-backed note-taking for persistent memory across conversations.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>notes.create</code></td><td>Create a timestamped markdown note</td></tr>
+<tr><td><code>notes.list</code></td><td>List all saved note filenames</td></tr>
+<tr><td><code>notes.read</code></td><td>Read a specific note by filename</td></tr>
+<tr><td><code>notes.update_summary</code></td><td>Write the organized notes summary</td></tr>
+</tbody>
+</table>
+</div>
+<p>Notes are stored in <code>~/.nexo/nexo-storage/NOTES/</code> as git-tracked markdown files. The summary is at <code>NOTES/SUMMARY.md</code> and is updated periodically by a cron job.</p>
+<h2 id="node-tools"><a class="header" href="#node-tools">Node tools</a></h2>
+<p>Node tools are provided by external processes (nexo-node instances) that connect to the gateway over WebSocket. Each node registers its tools after connecting, and the gateway routes execution requests to the appropriate node.</p>
+<h3 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h3>
+<ol>
+<li>A <strong>nexo-node</strong> starts and connects to the gateway with <code>role: node</code></li>
+<li>After handshake, the node sends <code>tools.register</code> with full tool specifications (name, description, JSON Schema parameters)</li>
+<li>The gateway stores these in an <strong>in-memory registry</strong> (not persisted to disk)</li>
+<li>Users/agents can query available tools via <code>tools.catalog</code></li>
+<li>Users/agents can execute tools via <code>tools.execute</code> — the gateway routes the request to the owning node and relays the response</li>
+</ol>
+<h3 id="lifecycle"><a class="header" href="#lifecycle">Lifecycle</a></h3>
 <ul>
-<li>Store, recall, forget</li>
+<li><strong>Registration</strong>: Nodes register tools immediately after connecting. They may call <code>tools.register</code> again to update their tool set.</li>
+<li><strong>Deregistration</strong>: When a node disconnects, the gateway automatically removes all its tools from the registry.</li>
+<li><strong>Reconnection</strong>: Nodes automatically reconnect on disconnect and re-register their tools.</li>
+<li><strong>Multiple nodes</strong>: Multiple nodes can be connected simultaneously. Each node can provide different tools, and the gateway routes to the correct node.</li>
 </ul>
-<h3 id="schedule-tools"><a class="header" href="#schedule-tools">Schedule tools</a></h3>
+<h3 id="built-in-node-tools"><a class="header" href="#built-in-node-tools">Built-in node tools</a></h3>
+<p>The <code>nexo-node</code> binary ships with two built-in tools for testing:</p>
 <ul>
-<li>cron_add, cron_list, etc</li>
+<li><code>echo.run</code> — Echoes the input back as output</li>
+<li><code>ping</code> — Returns “pong”, useful for testing connectivity</li>
 </ul>
-<h2 id="other-tools"><a class="header" href="#other-tools">Other tools</a></h2>
-<p>Not sure how to categorize this, but these should be the tools i can bring in and outof the system like my llm models, graphic tools, game extractor, epub extractor, etc.</p>
 <h2 id="tool-registry"><a class="header" href="#tool-registry">Tool registry</a></h2>
-<p>The tool registry can be queried by clients to see which tools are currently available. It shows the status of the tools, and which llm model(s) its currently leveraging if applicable.</p>
-<p>Nodes will be able to register with the gateway to provide additional tools. This all happens through WebSocket interface and health polling.</p>
+<p>The tool registry can be queried by clients to see which tools are currently available. It shows the status of the tools, including whether the providing node is currently connected.</p>
+<p>The <code>tools.catalog</code> method returns entries with:</p>
+<ul>
+<li><code>name</code>: Tool name (e.g. <code>io.read</code>, <code>notes.create</code>, <code>echo.run</code>)</li>
+<li><code>description</code>: Human-readable description</li>
+<li><code>source</code>: Where the tool comes from (<code>gateway</code> or <code>node</code>)</li>
+<li><code>available</code>: Whether the tool is currently usable</li>
+<li><code>parameters</code>: JSON Schema for the tool’s input parameters</li>
+</ul>
+<h2 id="output-transformations"><a class="header" href="#output-transformations">Output transformations</a></h2>
+<p>Gateway-local tools apply a pipeline of transformations to clean up output for LLM consumption:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Transformation</th><th>Applied to</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>ANSI stripping</td><td><code>io.read</code>, <code>io.bash</code></td><td>Removes terminal color/style escape codes</td></tr>
+<tr><td>Code filtering</td><td><code>io.read</code></td><td>Language-aware comment stripping, blank line normalization</td></tr>
+<tr><td>Line truncation</td><td><code>io.bash</code>, <code>io.web_fetch</code></td><td>Keeps first/last portions of very long output</td></tr>
+<tr><td>HTML→markdown</td><td><code>io.web_fetch</code></td><td>Converts HTML pages to readable markdown</td></tr>
+<tr><td>JSON compaction</td><td><code>io.web_fetch</code></td><td>Summarizes JSON responses (truncated strings, array counts)</td></tr>
+</tbody>
+</table>
+</div>
 
                     </main>
 
@@ -231,22 +358,6 @@
         <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
         <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
 
-        <!-- Livereload script (if served using the cli tool) -->
-        <script>
-            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
-            const socket = new WebSocket(wsAddress);
-            socket.onmessage = function (event) {
-                if (event.data === "reload") {
-                    socket.close();
-                    location.reload();
-                }
-            };
-
-            window.onbeforeunload = function() {
-                socket.close();
-            }
-        </script>
 
 
         <script>

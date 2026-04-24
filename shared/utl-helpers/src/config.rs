@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::path::Path;
 
 /// Load a config from the given TOML file path.

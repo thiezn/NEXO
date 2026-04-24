@@ -170,6 +170,30 @@ impl GatewayState {
         self.find_node_with_loaded_category(|c| matches!(c, ModelCategory::Image))
     }
 
+    /// Find all connected user peers for a routing identity, excluding the origin peer.
+    pub fn find_user_peers_by_client_id(
+        &self,
+        client_id: &str,
+        exclude_peer_id: &str,
+    ) -> Vec<(PeerId, mpsc::Sender<Frame>)> {
+        self.peers
+            .iter()
+            .filter_map(|(peer_id, peer)| {
+                if peer.role != Role::User
+                    || peer.client_id != client_id
+                    || peer_id == exclude_peer_id
+                {
+                    return None;
+                }
+
+                self.peer_senders
+                    .get(peer_id)
+                    .cloned()
+                    .map(|sender| (peer_id.clone(), sender))
+            })
+            .collect()
+    }
+
     /// Returns true if any node has a Chat or Tool model loaded.
     pub fn has_llm_peer(&self) -> bool {
         self.find_any_llm_peer().is_some()
@@ -322,6 +346,41 @@ mod tests {
         state.add_peer(make_node_peer("n1", vec!["epub".into()]), dummy_sender());
         assert_eq!(state.connected_users(), 2);
         assert_eq!(state.connected_nodes(), 1);
+    }
+
+    #[test]
+    fn find_user_peers_by_client_id_excludes_origin() {
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
+        state.add_peer(
+            PeerInfo {
+                id: "sender".into(),
+                client_id: "user-a".into(),
+                role: Role::User,
+                scopes: vec![Scope::UserRead],
+                capabilities: vec![],
+                commands: vec![],
+                device_id: Some("dev-1".into()),
+                connected_at: chrono::Utc::now(),
+            },
+            dummy_sender(),
+        );
+        state.add_peer(
+            PeerInfo {
+                id: "target".into(),
+                client_id: "user-b".into(),
+                role: Role::User,
+                scopes: vec![Scope::UserRead],
+                capabilities: vec![],
+                commands: vec![],
+                device_id: Some("dev-2".into()),
+                connected_at: chrono::Utc::now(),
+            },
+            dummy_sender(),
+        );
+
+        let recipients = state.find_user_peers_by_client_id("user-b", "sender");
+        assert_eq!(recipients.len(), 1);
+        assert_eq!(recipients[0].0, "target");
     }
 
     #[test]

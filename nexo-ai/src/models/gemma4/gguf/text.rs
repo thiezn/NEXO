@@ -15,7 +15,7 @@ use candle_core::{D, DType, Device, IndexOp, Result, Tensor};
 use candle_nn::{Activation, Embedding, Module};
 
 use crate::models::gemma4::generation::TextForward;
-use crate::shared::types::LayerKvSnapshot;
+use crate::api::types::LayerKvSnapshot;
 
 pub const MAX_SEQ_LEN: usize = 131072;
 pub const DEFAULT_SLIDING_WINDOW_TYPE: usize = 6;

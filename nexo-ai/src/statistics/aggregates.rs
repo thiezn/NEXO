@@ -1,4 +1,4 @@
-use crate::shared::types::ModelCategory;
+use crate::api::types::ModelCategory;
 use serde::{Deserialize, Serialize};
 
 /// Running statistics using Welford's online algorithm.

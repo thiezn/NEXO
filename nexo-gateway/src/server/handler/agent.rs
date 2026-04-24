@@ -25,26 +25,22 @@ pub(super) async fn handle_agent(
 
     let (session_id, prefill_collection_id) = match agent_params.session_id {
         Some(sid) => {
-            let pcid: Option<String> =
-                sqlx::query_as::<_, (Option<String>,)>(
-                    "SELECT prefill_collection_id FROM sessions WHERE id = ?",
-                )
-                .bind(&sid)
-                .fetch_optional(db)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|(c,)| c);
+            let pcid: Option<String> = sqlx::query_as::<_, (Option<String>,)>(
+                "SELECT prefill_collection_id FROM sessions WHERE id = ?",
+            )
+            .bind(&sid)
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|(c,)| c);
             (sid, pcid)
         }
         None => {
             match crate::agent::session::create_session(db, &user_id, None, None::<&str>).await {
                 Ok(pair) => pair,
                 Err(e) => {
-                    return internal_error(
-                        request_id,
-                        format!("Failed to create session: {e}"),
-                    )
+                    return internal_error(request_id, format!("Failed to create session: {e}"));
                 }
             }
         }
@@ -131,10 +127,9 @@ pub(super) async fn handle_session_list(
     let user_id = resolve_user_id(state, peer_id).await;
 
     match crate::agent::session::list_sessions(db, &user_id).await {
-        Ok(sessions) => ok_or_internal_error(
-            request_id,
-            nexo_ws_schema::SessionListResponse { sessions },
-        ),
+        Ok(sessions) => {
+            ok_or_internal_error(request_id, nexo_ws_schema::SessionListResponse { sessions })
+        }
         Err(e) => internal_error(request_id, format!("Failed to list sessions: {e}")),
     }
 }
@@ -144,11 +139,10 @@ pub(super) async fn handle_session_get(
     params: serde_json::Value,
     db: &SqlitePool,
 ) -> Frame {
-    let get_params: SessionGetParams =
-        match parse_params(request_id, params, "session.get") {
-            Ok(p) => p,
-            Err(f) => return f,
-        };
+    let get_params: SessionGetParams = match parse_params(request_id, params, "session.get") {
+        Ok(p) => p,
+        Err(f) => return f,
+    };
 
     match crate::agent::session::get_session(db, &get_params.session_id).await {
         Ok(Some(resp)) => ok_or_internal_error(request_id, resp),
@@ -168,17 +162,15 @@ pub(super) async fn handle_session_clear(
     params: serde_json::Value,
     db: &SqlitePool,
 ) -> Frame {
-    let clear_params: SessionClearParams =
-        match parse_params(request_id, params, "session.clear") {
-            Ok(p) => p,
-            Err(f) => return f,
-        };
+    let clear_params: SessionClearParams = match parse_params(request_id, params, "session.clear") {
+        Ok(p) => p,
+        Err(f) => return f,
+    };
 
     match crate::agent::session::clear_session(db, &clear_params.session_id).await {
-        Ok(cleared) => ok_or_internal_error(
-            request_id,
-            nexo_ws_schema::SessionClearResponse { cleared },
-        ),
+        Ok(cleared) => {
+            ok_or_internal_error(request_id, nexo_ws_schema::SessionClearResponse { cleared })
+        }
         Err(e) => internal_error(request_id, format!("Failed to clear session: {e}")),
     }
 }

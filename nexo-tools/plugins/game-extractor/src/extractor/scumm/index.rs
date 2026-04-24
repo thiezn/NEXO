@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use anyhow::{Result, Context};
 use super::block::{Block, parse_block};
+use anyhow::{Context, Result};
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct RoomDirEntry {
@@ -44,14 +44,22 @@ pub fn parse_index(data: &[u8]) -> Result<GameIndex> {
                 room_directory = parse_directory(data, &block)
                     .with_context(|| "parsing DROO")?
                     .into_iter()
-                    .map(|(id, file_num, offset)| RoomDirEntry { room_id: id, file_num, offset })
+                    .map(|(id, file_num, offset)| RoomDirEntry {
+                        room_id: id,
+                        file_num,
+                        offset,
+                    })
                     .collect();
             }
             b"DSOU" => {
                 sound_directory = parse_directory(data, &block)
                     .with_context(|| "parsing DSOU")?
                     .into_iter()
-                    .map(|(id, file_num, offset)| SoundDirEntry { sound_id: id, file_num, offset })
+                    .map(|(id, file_num, offset)| SoundDirEntry {
+                        sound_id: id,
+                        file_num,
+                        offset,
+                    })
                     .collect();
             }
             _ => {}
@@ -60,7 +68,11 @@ pub fn parse_index(data: &[u8]) -> Result<GameIndex> {
         pos = block.end_offset();
     }
 
-    Ok(GameIndex { room_directory, sound_directory, room_names })
+    Ok(GameIndex {
+        room_directory,
+        sound_directory,
+        room_names,
+    })
 }
 
 /// Parse RNAM block: V5 has room_no(1) + room_name(9 bytes XOR 0xFF) entries.
@@ -78,10 +90,7 @@ fn parse_rnam(data: &[u8], block: &Block) -> HashMap<u8, String> {
         if pos + 10 > d.len() {
             break;
         }
-        let name_bytes: Vec<u8> = d[pos + 1..pos + 10]
-            .iter()
-            .map(|b| b ^ 0xFF)
-            .collect();
+        let name_bytes: Vec<u8> = d[pos + 1..pos + 10].iter().map(|b| b ^ 0xFF).collect();
         let name = name_bytes
             .iter()
             .take_while(|&&b| b != 0)
@@ -138,9 +147,8 @@ pub fn parse_index_v3(data: &[u8]) -> Result<GameIndex> {
     let mut pos = 0;
 
     while pos + 6 <= data.len() {
-        let size = u32::from_le_bytes([
-            data[pos], data[pos + 1], data[pos + 2], data[pos + 3],
-        ]) as usize;
+        let size =
+            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         let tag = [data[pos + 4], data[pos + 5]];
 
         if size < 6 || pos + size > data.len() {
@@ -157,8 +165,10 @@ pub fn parse_index_v3(data: &[u8]) -> Result<GameIndex> {
                     if base + 5 <= block_data.len() {
                         let file_num = block_data[base];
                         let offset = u32::from_le_bytes([
-                            block_data[base + 1], block_data[base + 2],
-                            block_data[base + 3], block_data[base + 4],
+                            block_data[base + 1],
+                            block_data[base + 2],
+                            block_data[base + 3],
+                            block_data[base + 4],
                         ]);
                         if file_num != 0 || offset != 0 {
                             room_directory.push(RoomDirEntry {

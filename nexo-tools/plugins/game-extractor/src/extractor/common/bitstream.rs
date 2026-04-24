@@ -19,7 +19,12 @@ impl<'a> BitReader<'a> {
     /// Create a BitReader with 2 bytes preloaded (16 bits), matching
     /// ScummVM's MajMinCodec::setupBitReader.
     pub fn new_preloaded(data: &'a [u8]) -> Self {
-        let mut reader = Self { data, pos: 0, bits: 0, cl: 0 };
+        let mut reader = Self {
+            data,
+            pos: 0,
+            bits: 0,
+            cl: 0,
+        };
         if data.len() >= 2 {
             reader.bits = data[0] as u32 | ((data[1] as u32) << 8);
             reader.cl = 16;

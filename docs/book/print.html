@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a9c2ee70.js";
+            window.path_to_searchindex_js = "searchindex-b491b92b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4a50eb69.js"></script>
+        <script src="toc-aa7fd050.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -209,7 +209,13 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
 <ul>
 <li>Connect to the <strong>same WS server</strong> with <code>role: node</code>.</li>
 <li>Provide a device identity in <code>connect</code>; pairing is <strong>device‑based</strong> (role <code>node</code>)</li>
-<li>Expose commands like <code>epub_extractor.*</code>, <code>text-to-speech.*</code>.</li>
+<li>After handshake, register full tool specs via <code>tools.register</code>.</li>
+<li>Listen for <code>tools.execute</code> requests forwarded by the gateway.</li>
+<li>Handle <code>agent</code> inference requests from the gateway loop runner.</li>
+<li>Respond to <code>model.load</code> / <code>model.unload</code> commands; push <code>model.status</code> updates.</li>
+<li>Expose commands like <code>epub_extractor.*</code>, <code>echo.*</code>, <code>ping</code>.</li>
+<li>Automatically reconnect and re-register on disconnect.</li>
+<li>On macOS, nexo-node also starts and monitors local inference servers (llama-server, etc.). See <a href="/nexo/model_management.html">Model Management</a> §6.</li>
 </ul>
 <h2 id="connection-lifecycle-single-client"><a class="header" href="#connection-lifecycle-single-client">Connection lifecycle (single client)</a></h2>
 <pre class="mermaid">sequenceDiagram
@@ -230,6 +236,62 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
     Gateway--&gt;&gt;Client: response:agent&lt;br&gt;final {runId, status, summary}
 </pre>
 
+<h2 id="node-registration--tool-execution"><a class="header" href="#node-registration--tool-execution">Node registration + tool execution</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant Node
+    participant Gateway
+    participant User
+
+    Node-&gt;&gt;Gateway: request:connect (role=node, capabilities)
+    Gateway--&gt;&gt;Node: response:hello-ok
+    Node-&gt;&gt;Gateway: request:tools.register (full specs)
+    Gateway--&gt;&gt;Node: response {registered: N}
+    Note right of Gateway: Tools stored in memory registry
+
+    User-&gt;&gt;Gateway: request:tools.catalog
+    Gateway--&gt;&gt;User: response {tools: [...]}
+
+    User-&gt;&gt;Gateway: request:tools.execute {tool, args}
+    Gateway-&gt;&gt;Node: forwarded:tools.execute {tool, args}
+    Node--&gt;&gt;Gateway: response {success, output}
+    Gateway--&gt;&gt;User: relayed response {success, output}
+
+    Note over Node,Gateway: On disconnect: gateway deregisters&lt;br&gt;all tools from this node
+</pre>
+
+<h2 id="brain-agent-loop"><a class="header" href="#brain-agent-loop">Brain (agent loop)</a></h2>
+<p>The gateway spawns an <strong>AgentHandle</strong> at startup — a background task that processes
+agent commands sequentially. When a client sends an <code>agent</code> request:</p>
+<ol>
+<li>The handler creates (or resumes) a session and an agent run in SQLite</li>
+<li>It submits an <code>AgentCommand::RunAgent</code> to the brain via an mpsc channel</li>
+<li>The brain runs the loop: context assembly → inference → tool calls → repeat</li>
+<li>Lifecycle events (<code>thinking</code>, <code>tool_call</code>, <code>streaming</code>, <code>completed</code>) are broadcast
+to all connected clients via the event channel</li>
+</ol>
+<pre class="mermaid">flowchart LR
+    Client --&gt;|request:agent| Handler
+    Handler --&gt;|AgentCommand| Brain
+    Brain --&gt;|inference request| Node
+    Node --&gt;|response| Brain
+    Brain --&gt;|event:agent| Client
+    Brain --&gt;|tools.execute| Node
+</pre>
+
+<h3 id="capability-locking"><a class="header" href="#capability-locking">Capability locking</a></h3>
+<p>When the brain invokes a node capability (inference or tool execution), it acquires
+an advisory lock in the <code>capability_locks</code> SQLite table. This prevents concurrent
+agent runs from using the same capability. Locks expire after 5 minutes for crash
+recovery.</p>
+<h3 id="cron-scheduler"><a class="header" href="#cron-scheduler">Cron scheduler</a></h3>
+<p>A background scheduler task runs alongside the brain, checking every 60 seconds for
+due cron jobs. When a job fires, it emits a <code>cron</code> event and submits an agent command
+to the brain.</p>
+<h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
+<p>A client can have multiple sessions and maintains a <code>sessionId</code> locally. Sessions are
+created explicitly via <code>session.create</code> or implicitly when an <code>agent</code> request is sent
+without a <code>sessionId</code>. After a client restart, it can query <code>session.list</code> to resume
+previous conversations.</p>
 <h2 id="wire-protocol-summary"><a class="header" href="#wire-protocol-summary">Wire protocol (summary)</a></h2>
 <ul>
 <li>
@@ -362,10 +424,221 @@ handshake time.</p>
 <li>users may call <code>tools.catalog</code> (<code>user.read</code>) to fetch the runtime tool catalog for an
 agent. The response includes grouped tools and provenance metadata:
 <ul>
-<li><code>source</code>: <code>core</code>, <code>ai</code> or <code>plugin</code></li>
+<li><code>source</code>: <code>core</code>, <code>ai</code>, <code>node</code> or <code>plugin</code></li>
 </ul>
 </li>
 </ul>
+<h2 id="node-tool-registration-toolsregister"><a class="header" href="#node-tool-registration-toolsregister">Node tool registration (<code>tools.register</code>)</a></h2>
+<p>After connecting, nodes send a <code>tools.register</code> request to provide the gateway with
+full tool specifications (name, description, JSON Schema parameters). The gateway stores
+these in an in-memory registry and uses them to serve <code>tools.catalog</code> responses and route
+<code>tools.execute</code> requests.</p>
+<p>Node → Gateway:</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "tools.register",
+  "params": {
+    "tools": [
+      {
+        "name": "echo.run",
+        "description": "Echoes the input back as output",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "input": { "type": "string", "description": "The text to echo back" }
+          },
+          "required": ["input"]
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<p>Gateway → Node:</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": { "registered": 1 }
+}
+</code></pre>
+<p>Nodes may call <code>tools.register</code> multiple times to update their tool set. When a node
+disconnects, the gateway automatically deregisters all of its tools.</p>
+<h2 id="tool-execution-toolsexecute"><a class="header" href="#tool-execution-toolsexecute">Tool execution (<code>tools.execute</code>)</a></h2>
+<p>Users (or the agent) request tool execution via <code>tools.execute</code>. The gateway looks up the
+tool in its registry, forwards the request to the owning node, and relays the response
+back to the caller. Execution has a 30-second timeout.</p>
+<p>User → Gateway:</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "tools.execute",
+  "params": {
+    "tool": "echo.run",
+    "args": { "input": "hello" },
+    "idempotencyKey": "key-123"
+  }
+}
+</code></pre>
+<p>Gateway → User (relayed from node):</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": {
+    "success": true,
+    "output": "hello",
+    "error": null
+  }
+}
+</code></pre>
+<p>Error cases:</p>
+<ul>
+<li><code>tool_not_found</code>: the tool name is not in the registry</li>
+<li><code>tool_unavailable</code>: the node hosting the tool is disconnected</li>
+<li><code>timeout</code>: the node did not respond within 30 seconds</li>
+</ul>
+<h2 id="agent-agent"><a class="header" href="#agent-agent">Agent (<code>agent</code>)</a></h2>
+<p>Start an agent run. The gateway creates (or resumes) a session, acknowledges
+immediately with <code>status: "accepted"</code>, then streams <code>agent</code> events as the brain
+processes the request.</p>
+<p>Client → Gateway:</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "agent",
+  "params": {
+    "prompt": "Summarize today's news",
+    "idempotencyKey": "key-456",
+    "sessionId": "optional-session-id",
+    "context": { "files": ["notes.md"] },
+    "thinking": true,
+    "modelId": "gemma4-27b"
+  }
+}
+</code></pre>
+<p>Gateway → Client (immediate ack):</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": {
+    "runId": "run-uuid-v7",
+    "sessionId": "session-uuid-v7",
+    "status": "accepted"
+  }
+}
+</code></pre>
+<p>Gateway → Client (streaming events):</p>
+<pre><code class="language-json">{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run" } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
+</code></pre>
+<h3 id="agent-params"><a class="header" href="#agent-params">Agent params</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>prompt</code></td><td>string</td><td>yes</td><td>The user message</td></tr>
+<tr><td><code>idempotencyKey</code></td><td>string</td><td>yes</td><td>Deduplication key</td></tr>
+<tr><td><code>sessionId</code></td><td>string</td><td>no</td><td>Resume existing session</td></tr>
+<tr><td><code>context</code></td><td>object</td><td>no</td><td>Additional context blob</td></tr>
+<tr><td><code>thinking</code></td><td>bool</td><td>no</td><td>Enable extended thinking mode (default: false)</td></tr>
+<tr><td><code>modelId</code></td><td>string</td><td>no</td><td>Request a specific model</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="agent-event-payload"><a class="header" href="#agent-event-payload">Agent event payload</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runId</code></td><td>string</td><td>The run identifier</td></tr>
+<tr><td><code>sessionId</code></td><td>string</td><td>The session identifier</td></tr>
+<tr><td><code>status</code></td><td>string</td><td>Current status (see below)</td></tr>
+<tr><td><code>content</code></td><td>string?</td><td>Visible reply text (on <code>streaming</code>)</td></tr>
+<tr><td><code>thinkingContent</code></td><td>string?</td><td>Ephemeral thinking text (on <code>streaming</code>, when thinking enabled)</td></tr>
+<tr><td><code>toolName</code></td><td>string?</td><td>Tool being called (on <code>tool_call</code>)</td></tr>
+<tr><td><code>error</code></td><td>string?</td><td>Error message (on <code>failed</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="agent-status-values"><a class="header" href="#agent-status-values">Agent status values</a></h3>
+<p><code>accepted</code> → <code>thinking</code> → <code>streaming</code> → <code>completed</code>
+<code>accepted</code> → <code>thinking</code> → <code>tool_call</code> → <code>thinking</code> → … → <code>completed</code>
+Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-initiated).</p>
+<h2 id="sessions-1"><a class="header" href="#sessions-1">Sessions</a></h2>
+<h3 id="sessioncreate"><a class="header" href="#sessioncreate"><code>session.create</code></a></h3>
+<p>Create a new conversation session.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat" } }
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…" } }
+</code></pre>
+<h3 id="sessionlist"><a class="header" href="#sessionlist"><code>session.list</code></a></h3>
+<p>List all sessions for the current user.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.list", "params": {} }
+</code></pre>
+<pre><code class="language-json">{
+  "type": "response", "id": "…", "ok": true,
+  "payload": {
+    "sessions": [
+      { "sessionId": "…", "name": "My chat", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
+    ]
+  }
+}
+</code></pre>
+<h3 id="sessionget"><a class="header" href="#sessionget"><code>session.get</code></a></h3>
+<p>Retrieve a session with its full message history.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.get", "params": { "sessionId": "…" } }
+</code></pre>
+<pre><code class="language-json">{
+  "type": "response", "id": "…", "ok": true,
+  "payload": {
+    "sessionId": "…", "name": "My chat", "createdAt": "…",
+    "messages": [
+      { "id": "…", "role": "user", "content": "hello", "createdAt": "…" },
+      { "id": "…", "role": "assistant", "content": "hi back", "createdAt": "…" }
+    ]
+  }
+}
+</code></pre>
+<h3 id="sessionclear"><a class="header" href="#sessionclear"><code>session.clear</code></a></h3>
+<p>Delete a session and all associated data (messages, runs).</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.clear", "params": { "sessionId": "…" } }
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "cleared": true } }
+</code></pre>
+<h2 id="cron-jobs"><a class="header" href="#cron-jobs">Cron jobs</a></h2>
+<h3 id="croncreate"><a class="header" href="#croncreate"><code>cron.create</code></a></h3>
+<p>Create a scheduled agent task.</p>
+<pre><code class="language-json">{
+  "type": "request", "id": "…", "method": "cron.create",
+  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "prompt": "Summarize yesterday" }
+}
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "jobId": "…" } }
+</code></pre>
+<h3 id="cronlist"><a class="header" href="#cronlist"><code>cron.list</code></a></h3>
+<p>List all cron jobs.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "cron.list", "params": {} }
+</code></pre>
+<pre><code class="language-json">{
+  "type": "response", "id": "…", "ok": true,
+  "payload": { "jobs": [{ "jobId": "…", "name": "Daily summary", "schedule": "0 9 * * *", "enabled": true }] }
+}
+</code></pre>
+<h3 id="crondelete"><a class="header" href="#crondelete"><code>cron.delete</code></a></h3>
+<p>Delete a cron job.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "cron.delete", "params": { "jobId": "…" } }
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "deleted": true } }
+</code></pre>
 <h2 id="versioning"><a class="header" href="#versioning">Versioning</a></h2>
 <ul>
 <li>Clients send <code>minProtocol</code> + <code>maxProtocol</code>; the server rejects mismatches.</li>
@@ -378,56 +651,1023 @@ agent. The response includes grouped tools and provenance metadata:
 <li>All WS clients must include <code>device</code> identity during <code>connect</code> (user + node).</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="agent"><a class="header" href="#agent">Agent</a></h1>
-<p>The gateway runs a main agent loop. This is the heart of the system that actually executes tools.</p>
-<p>I really want it to resemble a game engine loop, with a fixed tick rate and a clear separation between the “game state” (agent state) and the side-effecting operations (tool calls). This should make it easier to reason about the flow of data and the timing of operations.</p>
-<p>Not sure if thats a good idea, but I want a romantic view of the world.</p>
+<h1 id="agent-loop"><a class="header" href="#agent-loop">Agent Loop</a></h1>
+<p>The agent loop is the brain of the NEXO system. It receives structured requests from
+the gateway WebSocket, orchestrates inference and tool execution, and streams lifecycle
+events back to the client.</p>
+<h2 id="overview-1"><a class="header" href="#overview-1">Overview</a></h2>
+<p>Each agent invocation spawns a <strong>serialized loop</strong> bound to a session. The loop:</p>
+<ol>
+<li>Persists the user message</li>
+<li>Assembles conversation context from the session’s message history</li>
+<li>Forwards an inference request to an LLM-capable node</li>
+<li>Handles the response — either streaming a reply or executing tool calls</li>
+<li>Repeats (tool results feed back into the next inference turn)</li>
+<li>Marks the run as completed or failed</li>
+</ol>
+<h2 id="agent-loop-lifecycle"><a class="header" href="#agent-loop-lifecycle">Agent loop lifecycle</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant Client
+    participant Gateway
+    participant Brain
+    participant Node
+
+    Client-&gt;&gt;Gateway: request:agent {prompt, sessionId?}
+    Gateway-&gt;&gt;Brain: AgentCommand::RunAgent
+    Gateway--&gt;&gt;Client: response:agent {runId, sessionId, status:"accepted"}
+
+    Brain-&gt;&gt;Brain: persist user message
+    Brain--&gt;&gt;Client: event:agent {status:"thinking"}
+    Brain-&gt;&gt;Brain: assemble context
+    Brain-&gt;&gt;Brain: acquire capability lock
+    Brain-&gt;&gt;Node: forward inference request
+    Node--&gt;&gt;Brain: inference response (text or tool_calls)
+
+    alt Plain reply
+        Brain-&gt;&gt;Brain: persist assistant message
+        Brain--&gt;&gt;Client: event:agent {status:"streaming", content}
+        Brain--&gt;&gt;Client: event:agent {status:"completed"}
+    else Tool calls
+        Brain--&gt;&gt;Client: event:agent {status:"tool_call", toolName}
+        Brain-&gt;&gt;Node: tools.execute {tool, args}
+        Node--&gt;&gt;Brain: tool result
+        Brain-&gt;&gt;Brain: persist tool result
+        Brain-&gt;&gt;Brain: re-enter loop (back to inference)
+    end
+
+    Brain-&gt;&gt;Brain: release locks, finish run
+</pre>
+
+<h2 id="agent-run-state-machine"><a class="header" href="#agent-run-state-machine">Agent run state machine</a></h2>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Accepted
+    Accepted --&gt; Thinking
+    Thinking --&gt; Streaming: plain reply
+    Thinking --&gt; ToolCall: tool_calls in response
+    ToolCall --&gt; Thinking: tool results fed back
+    Streaming --&gt; Completed
+    Thinking --&gt; Failed: error
+    ToolCall --&gt; Failed: error
+    [*] --&gt; Cancelled: client cancels
+</pre>
+
+<h3 id="status-values"><a class="header" href="#status-values">Status values</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Status</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>accepted</code></td><td>Run created, queued for processing</td></tr>
+<tr><td><code>thinking</code></td><td>Assembling context and waiting for inference</td></tr>
+<tr><td><code>tool_call</code></td><td>Model requested a tool execution</td></tr>
+<tr><td><code>streaming</code></td><td>Model is generating a reply</td></tr>
+<tr><td><code>completed</code></td><td>Run finished successfully</td></tr>
+<tr><td><code>failed</code></td><td>Run encountered an error</td></tr>
+<tr><td><code>cancelled</code></td><td>Run was cancelled by the client</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="sessions-2"><a class="header" href="#sessions-2">Sessions</a></h2>
+<p>Sessions are persistent conversation containers. A client can:</p>
+<ul>
+<li><strong>Create</strong> a session explicitly via <code>session.create</code>, or let the gateway auto-create
+one when sending an <code>agent</code> request without a <code>sessionId</code>.</li>
+<li><strong>List</strong> active sessions via <code>session.list</code> (returns message counts and timestamps).</li>
+<li><strong>Retrieve</strong> a session’s full message history via <code>session.get</code>.</li>
+<li><strong>Clear</strong> a session and all its data via <code>session.clear</code>.</li>
+</ul>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Created: session.create
+    Created --&gt; Active: agent request
+    Active --&gt; Active: more messages
+    Active --&gt; Cleared: session.clear
+    Cleared --&gt; [*]
+</pre>
+
+<p>Sessions persist across client reconnections. A client stores the <code>sessionId</code> locally
+and provides it in subsequent <code>agent</code> requests to maintain conversational context.</p>
+<h2 id="capability-locking-1"><a class="header" href="#capability-locking-1">Capability locking</a></h2>
+<p>When the agent loop invokes a node capability (e.g. LLM inference or a tool), it
+acquires an advisory lock in SQLite:</p>
+<ul>
+<li><strong>Acquire</strong>: <code>INSERT OR IGNORE</code> on the <code>capability_locks</code> table with a 5-minute expiry.</li>
+<li><strong>Release</strong>: <code>DELETE</code> after the operation completes.</li>
+<li><strong>Expiry</strong>: Locks older than their <code>expires_at</code> are automatically reaped.</li>
+</ul>
+<p>This prevents two concurrent agent runs from using the same capability simultaneously,
+ensuring consistent tool/model access across the distributed node network.</p>
+<h2 id="cron-jobs-1"><a class="header" href="#cron-jobs-1">Cron jobs</a></h2>
+<p>Cron jobs are scheduled agent tasks stored in the database. Each job specifies:</p>
+<ul>
+<li>A <strong>schedule</strong> (cron expression)</li>
+<li>A <strong>prompt</strong> (what the agent should do)</li>
+<li>An optional <strong>session_id</strong> (to continue a conversation)</li>
+</ul>
+<p>The cron scheduler runs as a background task, polling every 60 seconds for due jobs.
+When a job fires, it submits an <code>AgentCommand</code> to the brain and emits a <code>cron</code> event.</p>
+<h2 id="end-to-end-chat-flow"><a class="header" href="#end-to-end-chat-flow">End-to-end chat flow</a></h2>
+<p>The following diagram shows the full lifecycle of a chat message originating from the
+Moretimer app, flowing through the gateway and node, and streaming back to the client.</p>
+<pre class="mermaid">sequenceDiagram
+    participant App as Moretimer App
+    participant GW as Gateway
+    participant DB as SQLite
+    participant Node as LLM Node
+
+    App-&gt;&gt;GW: session.create {name}
+    GW-&gt;&gt;DB: INSERT session
+    GW--&gt;&gt;App: {sessionId}
+    App-&gt;&gt;App: store sessionId on thread
+
+    App-&gt;&gt;GW: agent {prompt, sessionId}
+    GW-&gt;&gt;DB: INSERT run + user message
+    GW--&gt;&gt;App: response {runId, sessionId, status: accepted}
+    GW--&gt;&gt;App: event:agent {status: thinking}
+
+    GW-&gt;&gt;GW: ensure_model_loaded
+    alt Model not in VRAM
+        GW-&gt;&gt;Node: model.load {modelId}
+        Node--&gt;&gt;GW: {loaded: true}
+        Node-&gt;&gt;GW: model.status (push)
+    end
+
+    GW-&gt;&gt;GW: load SOUL.md + resolve prefill (if collection set)
+    GW-&gt;&gt;GW: build system prompt (SOUL + prefill + tools)
+    GW-&gt;&gt;Node: agent {messages, tools}
+
+    Node--&gt;&gt;GW: inference response
+
+    alt Plain reply
+        GW-&gt;&gt;DB: INSERT assistant message
+        GW--&gt;&gt;App: event:agent {status: streaming, content}
+        GW--&gt;&gt;App: event:agent {status: completed}
+        App-&gt;&gt;App: update message bubble
+    else Tool calls
+        GW--&gt;&gt;App: event:agent {status: tool_call, toolName}
+        alt Gateway-native tool
+            GW-&gt;&gt;GW: execute locally (e.g. notes.create)
+        else Node tool
+            GW-&gt;&gt;Node: tools.execute {tool, args}
+            Node--&gt;&gt;GW: tool result
+        end
+        GW-&gt;&gt;DB: INSERT tool message
+        GW-&gt;&gt;Node: agent {messages + tool results}
+        Node--&gt;&gt;GW: final response
+        GW-&gt;&gt;DB: INSERT assistant message
+        GW--&gt;&gt;App: event:agent {status: streaming, content}
+        GW--&gt;&gt;App: event:agent {status: completed}
+    end
+
+    Note over App: Later, on re-open
+    App-&gt;&gt;GW: session.get {sessionId}
+    GW-&gt;&gt;DB: SELECT messages
+    GW--&gt;&gt;App: {messages}
+</pre>
+
+<h3 id="queued-requests"><a class="header" href="#queued-requests">Queued requests</a></h3>
+<p>When no LLM node is available at the time of an agent request, the gateway queues the
+run instead of failing it:</p>
+<pre class="mermaid">sequenceDiagram
+    participant App as Moretimer App
+    participant GW as Gateway
+    participant DB as SQLite
+    participant Node as LLM Node
+
+    App-&gt;&gt;GW: agent {prompt, sessionId}
+    GW-&gt;&gt;DB: INSERT run (status: accepted)
+    GW--&gt;&gt;App: response {runId, status: accepted}
+    GW-&gt;&gt;GW: no LLM node available
+    GW-&gt;&gt;DB: UPDATE run (status: queued)
+    GW--&gt;&gt;App: event:agent {status: queued}
+
+    Note over Node: Node connects later
+    Node-&gt;&gt;GW: connect {models: [...]}
+    GW-&gt;&gt;GW: drain_queue
+    GW-&gt;&gt;DB: claim queued runs
+    GW-&gt;&gt;Node: model.load + agent (inference)
+    Node--&gt;&gt;GW: response
+    GW--&gt;&gt;App: event:agent {status: streaming, content}
+    GW--&gt;&gt;App: event:agent {status: completed}
+</pre>
+
+<h2 id="thinking-mode"><a class="header" href="#thinking-mode">Thinking mode</a></h2>
+<p>When <code>thinking: true</code> is set in the agent request, the gateway enables Gemma 4’s
+extended thinking capability:</p>
+<ol>
+<li><strong>Injection</strong>: The <code>&lt;|think|&gt;</code> token is prepended to the system prompt before inference.</li>
+<li><strong>Response format</strong>: The model may return thinking content wrapped in
+<code>&lt;|channel&gt;thought\n...&lt;channel|&gt;</code> blocks alongside the visible reply.</li>
+<li><strong>Stripping</strong>: The gateway strips thinking blocks from the raw response. Only the
+visible text is persisted to the session history. Thinking content is emitted as
+an ephemeral <code>thinkingContent</code> field in the <code>streaming</code> agent event.</li>
+<li><strong>Multi-turn</strong>: Because thinking content is never persisted, subsequent turns in
+the same session automatically receive a clean history — no special handling is needed.</li>
+</ol>
+<h3 id="gemma-4-sampling-parameters"><a class="header" href="#gemma-4-sampling-parameters">Gemma 4 sampling parameters</a></h3>
+<p>When using Gemma 4 models, the recommended sampling configuration is:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Value</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>temperature</code></td><td><code>1.0</code></td><td>Required for thinking mode</td></tr>
+<tr><td><code>top_p</code></td><td><code>0.95</code></td><td>Nucleus sampling</td></tr>
+<tr><td><code>top_k</code></td><td><code>64</code></td><td>Top-k filtering before top-p</td></tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p><strong>Note</strong>: Queued runs that are drained on node reconnect lose the <code>thinking</code> flag
+and default to <code>thinking: false</code>.</p>
+</blockquote>
+<h2 id="system-prompt-composition"><a class="header" href="#system-prompt-composition">System prompt composition</a></h2>
+<p>The system prompt is assembled from these sources, in order:</p>
+<ol>
+<li><strong>Thinking token</strong> — If <code>thinking: true</code>, the <code>&lt;|think|&gt;</code> token is prepended.</li>
+<li><strong>SOUL.md</strong> — Always loaded from <code>~/.nexo/nexo-storage/SOUL.md</code> (if it exists). Defines the agent’s personality and persistent instructions.</li>
+<li><strong>Prefill collection</strong> — If the session has a <code>prefill_collection_id</code>, the gateway resolves it from <code>PREFILL/collections.json</code>, reads each referenced markdown file, and concatenates them.</li>
+<li><strong>Tool descriptions</strong> — A structured description of all available tools (both node-registered and gateway-native).</li>
+</ol>
+<p>If none of these produce content, a default “You are a helpful assistant.” prompt is used.</p>
+<h2 id="gateway-native-tools"><a class="header" href="#gateway-native-tools">Gateway-native tools</a></h2>
+<p>Some tools execute directly on the gateway rather than being forwarded to a node. These are registered at startup and appear in the tool catalog alongside node tools (with <code>source: "gateway"</code>).</p>
+<p>Current gateway-native tools:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>notes.create</code></td><td>Create a timestamped note in git storage</td></tr>
+<tr><td><code>notes.list</code></td><td>List all note filenames</td></tr>
+<tr><td><code>notes.read</code></td><td>Read a specific note</td></tr>
+<tr><td><code>notes.update_summary</code></td><td>Write the notes summary</td></tr>
+</tbody>
+</table>
+</div>
+<p>When the agent loop encounters a tool call, it checks gateway tools first. If a match is found, the tool executes locally without any node involvement. Otherwise, the call is forwarded to the appropriate node.</p>
+<h2 id="context-assembly"><a class="header" href="#context-assembly">Context assembly</a></h2>
+<p>Before each inference call, the brain loads the full conversation history from the
+<code>messages</code> table for the current session, ordered chronologically. The system prompt
+(see above) is prepended as a system message.</p>
+<p>The context window includes messages with roles:</p>
+<ul>
+<li><code>user</code> — user prompts</li>
+<li><code>assistant</code> — model responses</li>
+<li><code>tool</code> — tool execution results</li>
+<li><code>system</code> — context injections</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory"><a class="header" href="#memory">Memory</a></h1>
 <h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
 <ul>
-<li>Markdown files (Unstructured storage, llm and user friendly)</li>
-<li>SQLite database (Structured storage, queryable, relational)</li>
-<li>In-memory (Volatile storage, fast access, temporary)</li>
+<li><strong>Git-backed storage</strong> — Persistent, versioned storage at <code>~/.nexo/nexo-storage</code> using a bare git repository with SSH remote sync</li>
+<li><strong>SQLite database</strong> — Structured storage for sessions, runs, messages, cron jobs</li>
+<li><strong>In-memory</strong> — Volatile storage, fast access, temporary (GatewayState)</li>
 </ul>
+<h2 id="git-storage-nexonexo-storage"><a class="header" href="#git-storage-nexonexo-storage">Git storage (<code>~/.nexo/nexo-storage</code>)</a></h2>
+<p>The git-backed storage repository holds user-facing persistent data. Every write triggers a pull → write → commit → push cycle, keeping all data versioned and portable.</p>
+<h3 id="repository-structure"><a class="header" href="#repository-structure">Repository structure</a></h3>
+<pre><code>~/.nexo/nexo-storage/
+├── SOUL.md                  # Agent personality (always prepended to system prompt)
+├── PREFILL/
+│   ├── collections.json     # Collection definitions
+│   ├── identity.md          # Example prefill markdown
+│   └── skills.md            # Example prefill markdown
+└── NOTES/
+    ├── SUMMARY.md           # Auto-generated summary of all notes
+    └── 2026-01-15T12-00-00.md  # Timestamped notes
+</code></pre>
+<h3 id="soulmd"><a class="header" href="#soulmd">SOUL.md</a></h3>
+<p>A markdown file whose content is always prepended to the agent’s system prompt. Use it to define personality, communication style, or persistent instructions.</p>
+<h3 id="prefill-system-prefill"><a class="header" href="#prefill-system-prefill">Prefill system (<code>PREFILL/</code>)</a></h3>
+<p>Composable context templates that can be attached to sessions:</p>
+<ul>
+<li><strong>Markdown files</strong> — Individual <code>.md</code> files stored in <code>PREFILL/</code></li>
+<li><strong>Collections</strong> — Named groups of markdown files defined in <code>PREFILL/collections.json</code></li>
+</ul>
+<p>When a session has a <code>prefill_collection_id</code>, the gateway resolves the collection at inference time: reads each referenced markdown file in order, concatenates them, and includes the result in the system prompt (after SOUL.md, before tool descriptions).</p>
+<p><code>collections.json</code> schema:</p>
+<pre><code class="language-json">{
+  "collections": [
+    {
+      "id": "default",
+      "name": "Default Identity",
+      "description": "Core personality",
+      "markdown_files": ["identity.md", "skills.md"]
+    }
+  ]
+}
+</code></pre>
+<h3 id="notes-system-notes"><a class="header" href="#notes-system-notes">Notes system (<code>NOTES/</code>)</a></h3>
+<p>Agent-accessible note storage with gateway-native tools:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>notes.create</code></td><td>Create a timestamped note</td></tr>
+<tr><td><code>notes.list</code></td><td>List all note filenames</td></tr>
+<tr><td><code>notes.read</code></td><td>Read a specific note</td></tr>
+<tr><td><code>notes.update_summary</code></td><td>Write <code>NOTES/SUMMARY.md</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>A default cron job (<code>notes-summary</code>, every 6 hours) prompts the agent to read all notes and generate an organized summary.</p>
+<h2 id="sqlite-schema"><a class="header" href="#sqlite-schema">SQLite schema</a></h2>
+<p>The gateway’s SQLite database stores structured operational state:</p>
+<h3 id="core-tables"><a class="header" href="#core-tables">Core tables</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Table</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>devices</code></td><td>Known devices (nodes + clients), with first/last seen timestamps</td></tr>
+<tr><td><code>users</code></td><td>Known users, linked to a device</td></tr>
+<tr><td><code>idempotency_keys</code></td><td>Deduplication cache for side-effecting methods</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="session--agent-tables"><a class="header" href="#session--agent-tables">Session &amp; agent tables</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Table</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>sessions</code></td><td>Conversation containers, linked to a user</td></tr>
+<tr><td><code>agent_runs</code></td><td>One row per agent invocation, tracks status and summary</td></tr>
+<tr><td><code>messages</code></td><td>Conversation messages (user, assistant, tool, system), ordered by time</td></tr>
+<tr><td><code>capability_locks</code></td><td>Advisory locks for tool/model exclusivity during agent runs</td></tr>
+<tr><td><code>cron_jobs</code></td><td>Scheduled agent tasks with cron expressions</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="data-flow"><a class="header" href="#data-flow">Data flow</a></h3>
+<pre><code>User prompt
+  → messages table (role: "user")
+  → context assembly (SELECT * FROM messages WHERE session_id ORDER BY created_at)
+  → LLM inference (via node)
+  → messages table (role: "assistant" or "tool")
+  → agent_runs table (status: "completed")
+</code></pre>
 <h2 id="categories"><a class="header" href="#categories">Categories</a></h2>
 <ul>
-<li>conversation / chat transcripts</li>
-<li>Daily / Session Summaries</li>
-<li>Core / Long term facts</li>
+<li><strong>Conversation / chat transcripts</strong> — stored in <code>messages</code> table per session</li>
+<li><strong>Daily / session summaries</strong> — stored as <code>agent_runs.summary</code></li>
+<li><strong>Core / long-term facts</strong> — SOUL.md and prefill markdown files in git storage</li>
+<li><strong>Notes</strong> — Timestamped agent-created notes in git storage</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tools"><a class="header" href="#tools">Tools</a></h1>
-<p>NEXO is designed around tool use. It provides a few out of the box default tools, and has an in memory registry of other tools it can leverage.</p>
-<h2 id="base-categories"><a class="header" href="#base-categories">Base Categories</a></h2>
-<p>These categories are the base tools provided directly by the gateway. They are tools that interact with the core of the NEXO system itself and provide fundamental capabilities that other tools and agents can build on top of.</p>
-<h3 id="core-tools"><a class="header" href="#core-tools">Core tools</a></h3>
+<p>NEXO is designed around tool use. Tools are callable functions that the agent can invoke during its reasoning loop. They come in two categories: <strong>gateway-local tools</strong> that run inside the gateway process, and <strong>node tools</strong> provided by connected nexo-node instances.</p>
+<h2 id="gateway-local-tools"><a class="header" href="#gateway-local-tools">Gateway-local tools</a></h2>
+<p>Gateway-local tools are always available — they don’t depend on any node being connected. They execute directly in the gateway process and appear in the tool catalog with <code>source: "gateway"</code>.</p>
+<p>All gateway-local tool output is cleaned up via a transformation pipeline: ANSI escape codes are stripped, long output is truncated, and content-specific transformations are applied (see <a href="#output-transformations">Output transformations</a> below).</p>
+<h3 id="io-tools"><a class="header" href="#io-tools">IO tools</a></h3>
+<p>File, shell, and web access for the agent.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>io.read</code></td><td>Read a file from the filesystem</td></tr>
+<tr><td><code>io.edit</code></td><td>Edit an existing file or create a new one</td></tr>
+<tr><td><code>io.bash</code></td><td>Execute a bash command on the gateway host</td></tr>
+<tr><td><code>io.web_fetch</code></td><td>Fetch a web page or API endpoint</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="ioread"><a class="header" href="#ioread"><code>io.read</code></a></h4>
+<p>Read file content with language-aware comment stripping.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>path</code></td><td>string</td><td>yes</td><td>File path to read</td></tr>
+<tr><td><code>offset</code></td><td>integer</td><td>no</td><td>Line number to start from (0-indexed)</td></tr>
+<tr><td><code>limit</code></td><td>integer</td><td>no</td><td>Maximum number of lines to return</td></tr>
+</tbody>
+</table>
+</div>
+<p>The tool detects the programming language from the file extension and applies minimal filtering — stripping non-doc comments and normalizing blank lines. Data formats (JSON, YAML, TOML, etc.) pass through unchanged.</p>
+<h4 id="ioedit"><a class="header" href="#ioedit"><code>io.edit</code></a></h4>
+<p>Two modes: <strong>create</strong> (write a new file) or <strong>edit</strong> (find-and-replace in an existing file).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>path</code></td><td>string</td><td>yes</td><td>File path to edit or create</td></tr>
+<tr><td><code>old_string</code></td><td>string</td><td>no</td><td>Text to find and replace (edit mode)</td></tr>
+<tr><td><code>new_string</code></td><td>string</td><td>no</td><td>Replacement text (edit mode)</td></tr>
+<tr><td><code>content</code></td><td>string</td><td>no</td><td>Full file content (create mode)</td></tr>
+</tbody>
+</table>
+</div>
+<p>In edit mode, <code>old_string</code> must appear exactly once in the file. If it appears 0 or 2+ times, the tool returns an error asking for more context.</p>
+<h4 id="iobash"><a class="header" href="#iobash"><code>io.bash</code></a></h4>
+<p>Execute a shell command with timeout protection.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>command</code></td><td>string</td><td>yes</td><td>Bash command to execute</td></tr>
+<tr><td><code>timeout_ms</code></td><td>integer</td><td>no</td><td>Timeout in milliseconds (default: 30000, max: 120000)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Returns exit code, stdout, and stderr. Output is stripped of ANSI codes and truncated to 500 lines per stream.</p>
+<h4 id="ioweb_fetch"><a class="header" href="#ioweb_fetch"><code>io.web_fetch</code></a></h4>
+<p>Fetch a URL and return its content in a readable format.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>url</code></td><td>string</td><td>yes</td><td>URL to fetch</td></tr>
+</tbody>
+</table>
+</div>
+<p>Response handling by content type:</p>
 <ul>
-<li>Read, Write, Delete files, Execute bash commands</li>
+<li><strong>HTML</strong> — converted to markdown</li>
+<li><strong>JSON</strong> — compacted (values preserved, long strings truncated, arrays summarized)</li>
+<li><strong>Other</strong> — returned as plain text with truncation</li>
 </ul>
-<h3 id="memory-tools"><a class="header" href="#memory-tools">Memory tools</a></h3>
+<h3 id="notes-tools"><a class="header" href="#notes-tools">Notes tools</a></h3>
+<p>Git-backed note-taking for persistent memory across conversations.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>notes.create</code></td><td>Create a timestamped markdown note</td></tr>
+<tr><td><code>notes.list</code></td><td>List all saved note filenames</td></tr>
+<tr><td><code>notes.read</code></td><td>Read a specific note by filename</td></tr>
+<tr><td><code>notes.update_summary</code></td><td>Write the organized notes summary</td></tr>
+</tbody>
+</table>
+</div>
+<p>Notes are stored in <code>~/.nexo/nexo-storage/NOTES/</code> as git-tracked markdown files. The summary is at <code>NOTES/SUMMARY.md</code> and is updated periodically by a cron job.</p>
+<h2 id="node-tools"><a class="header" href="#node-tools">Node tools</a></h2>
+<p>Node tools are provided by external processes (nexo-node instances) that connect to the gateway over WebSocket. Each node registers its tools after connecting, and the gateway routes execution requests to the appropriate node.</p>
+<h3 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h3>
+<ol>
+<li>A <strong>nexo-node</strong> starts and connects to the gateway with <code>role: node</code></li>
+<li>After handshake, the node sends <code>tools.register</code> with full tool specifications (name, description, JSON Schema parameters)</li>
+<li>The gateway stores these in an <strong>in-memory registry</strong> (not persisted to disk)</li>
+<li>Users/agents can query available tools via <code>tools.catalog</code></li>
+<li>Users/agents can execute tools via <code>tools.execute</code> — the gateway routes the request to the owning node and relays the response</li>
+</ol>
+<h3 id="lifecycle"><a class="header" href="#lifecycle">Lifecycle</a></h3>
 <ul>
-<li>Store, recall, forget</li>
+<li><strong>Registration</strong>: Nodes register tools immediately after connecting. They may call <code>tools.register</code> again to update their tool set.</li>
+<li><strong>Deregistration</strong>: When a node disconnects, the gateway automatically removes all its tools from the registry.</li>
+<li><strong>Reconnection</strong>: Nodes automatically reconnect on disconnect and re-register their tools.</li>
+<li><strong>Multiple nodes</strong>: Multiple nodes can be connected simultaneously. Each node can provide different tools, and the gateway routes to the correct node.</li>
 </ul>
-<h3 id="schedule-tools"><a class="header" href="#schedule-tools">Schedule tools</a></h3>
+<h3 id="built-in-node-tools"><a class="header" href="#built-in-node-tools">Built-in node tools</a></h3>
+<p>The <code>nexo-node</code> binary ships with two built-in tools for testing:</p>
 <ul>
-<li>cron_add, cron_list, etc</li>
+<li><code>echo.run</code> — Echoes the input back as output</li>
+<li><code>ping</code> — Returns “pong”, useful for testing connectivity</li>
 </ul>
-<h2 id="other-tools"><a class="header" href="#other-tools">Other tools</a></h2>
-<p>Not sure how to categorize this, but these should be the tools i can bring in and outof the system like my llm models, graphic tools, game extractor, epub extractor, etc.</p>
 <h2 id="tool-registry"><a class="header" href="#tool-registry">Tool registry</a></h2>
-<p>The tool registry can be queried by clients to see which tools are currently available. It shows the status of the tools, and which llm model(s) its currently leveraging if applicable.</p>
-<p>Nodes will be able to register with the gateway to provide additional tools. This all happens through WebSocket interface and health polling.</p>
+<p>The tool registry can be queried by clients to see which tools are currently available. It shows the status of the tools, including whether the providing node is currently connected.</p>
+<p>The <code>tools.catalog</code> method returns entries with:</p>
+<ul>
+<li><code>name</code>: Tool name (e.g. <code>io.read</code>, <code>notes.create</code>, <code>echo.run</code>)</li>
+<li><code>description</code>: Human-readable description</li>
+<li><code>source</code>: Where the tool comes from (<code>gateway</code> or <code>node</code>)</li>
+<li><code>available</code>: Whether the tool is currently usable</li>
+<li><code>parameters</code>: JSON Schema for the tool’s input parameters</li>
+</ul>
+<h2 id="output-transformations"><a class="header" href="#output-transformations">Output transformations</a></h2>
+<p>Gateway-local tools apply a pipeline of transformations to clean up output for LLM consumption:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Transformation</th><th>Applied to</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>ANSI stripping</td><td><code>io.read</code>, <code>io.bash</code></td><td>Removes terminal color/style escape codes</td></tr>
+<tr><td>Code filtering</td><td><code>io.read</code></td><td>Language-aware comment stripping, blank line normalization</td></tr>
+<tr><td>Line truncation</td><td><code>io.bash</code>, <code>io.web_fetch</code></td><td>Keeps first/last portions of very long output</td></tr>
+<tr><td>HTML→markdown</td><td><code>io.web_fetch</code></td><td>Converts HTML pages to readable markdown</td></tr>
+<tr><td>JSON compaction</td><td><code>io.web_fetch</code></td><td>Summarizes JSON responses (truncated strings, array counts)</td></tr>
+</tbody>
+</table>
+</div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
-<p>All configuration is in ~/.nexo/gateway.toml</p>
+<p>All configuration is in ~/.nexo/nexo-gateway.toml</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="code-layout"><a href="#code-layout" class="header">Code Layout</a></h1>
-<p>shared/nexo-ws-schema has the full websocket schema definition that both clients and gateway can use.
-shared/nexo-tool has the trait definiton that tools should adopt to allow for integration into nexo
-gateway is the main server component that clients connect to, it maintains connections to tools and agents and routes messages between them.
-nexo-tools/* contains various tools. They will always be a rust binary/cli and library in one. They will adopt the NexoTool trait and implement the required methods. The cli can be used locally if you don’t want to go through nexo. The library is mainly there to ensure decoupling the cli from any code that need them. Some tools might be dependent on the library of other tools, for instance the image processing tool will be used by the game extractor and the epub extractor, but also as a standalone tool for mutating images for other purposes.</p>
-<p>TODO: Inspect https://github.com/zeroclaw-labs/zeroclaw/blob/41dd23175fe991adf1ee1a5693eff69e09ef2a3a/src/tools/traits.rs#L14 for example on how they do a generic trait. I like the name ToolSpec. Use the async_trait crate.</p>
+<h1 id="code-layout"><a class="header" href="#code-layout">Code Layout</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nexo-ai"><a class="header" href="#nexo-ai">NEXO AI</a></h1>
+<p><code>nexo-ai</code> is the inference runtime crate for the NEXO workspace. It provides a single trait-based API for local Candle models and OpenAI-compatible remote backends, plus registry, lifecycle, download, and statistics layers around that API.</p>
+<p>The current architecture is built around two explicit ideas:</p>
+<ul>
+<li>model family and execution backend are separate concepts</li>
+<li>model code is organized by family, with backend-specific implementations below each family</li>
+</ul>
+<h2 id="what-the-crate-owns"><a class="header" href="#what-the-crate-owns">What The Crate Owns</a></h2>
+<ul>
+<li>API traits and request/response types in <code>src/api</code></li>
+<li>static model registry and download metadata in <code>src/registry</code></li>
+<li>lifecycle, loading, and memory management in <code>src/coordinator</code></li>
+<li>backend adapters for local Candle execution and OpenAI-compatible remote execution</li>
+<li>CLI and REPL entry points behind the <code>cli</code> feature</li>
+</ul>
+<h2 id="runtime-categories"><a class="header" href="#runtime-categories">Runtime Categories</a></h2>
+<p>The registry currently ships models in these categories:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Category</th><th>Trait</th><th>Typical families</th></tr>
+</thead>
+<tbody>
+<tr><td>Chat</td><td><code>ChatModel</code></td><td>Gemma 4</td></tr>
+<tr><td>Tool</td><td><code>ToolModel</code></td><td>Gemma 4</td></tr>
+<tr><td>Image</td><td><code>ImageModel</code></td><td>Gemma 4</td></tr>
+<tr><td>Listen</td><td><code>AudioAnalysisModel</code></td><td>Whisper, Gemma 4 GGUF</td></tr>
+<tr><td>Imagine</td><td><code>ImagineModel</code></td><td>Flux.2, Qwen-Image, Z-Image</td></tr>
+</tbody>
+</table>
+</div>
+<p>Every concrete model also implements <code>ModelInfo</code>, which provides the shared lifecycle surface: <code>load</code>, <code>unload</code>, <code>is_loaded</code>, <code>name</code>, <code>family</code>, <code>categories</code>, and memory estimation.</p>
+<h2 id="feature-flags"><a class="header" href="#feature-flags">Feature Flags</a></h2>
+<p><code>nexo-ai</code> is split by runtime feature instead of one monolithic build:</p>
+<ul>
+<li><code>candle</code>: enables local model implementations</li>
+<li><code>mlx</code>: enables the MLX VLM OpenAI-compatible remote path</li>
+<li><code>cli</code>: enables the terminal CLI and REPL</li>
+</ul>
+<p>This matters because some model families, such as Gemma 4, span both local and remote backends.</p>
+<h2 id="module-layout"><a class="header" href="#module-layout">Module Layout</a></h2>
+<p>The crate now follows a family-first layout:</p>
+<pre><code class="language-text">nexo-ai/src/
+├── api/                Traits and request/response types
+├── audio/              Shared audio preprocessing
+├── cli/                CLI commands and REPL
+├── config/             Config loading and runtime overrides
+├── coordinator/        Model factory, slot lifecycle, memory policy
+├── device/             Device and memory checks
+├── download/           Generic manifest/download machinery
+├── models/
+│   ├── support/        Shared prompting and Candle-only helpers
+│   ├── flux2/
+│   │   ├── common/
+│   │   ├── candle/
+│   │   └── openai/
+│   ├── gemma4/
+│   │   ├── common/
+│   │   ├── candle/
+│   │   └── openai/
+│   ├── qwen_image/
+│   ├── whisper/
+│   └── z_image/
+├── openai/             Generic OpenAI protocol, client, and model adapter
+├── registry/           Manifest metadata and list-model view
+├── servers/            Provider-specific server integrations
+├── statistics/         Inference metrics and aggregates
+├── vision/             Shared image preprocessing
+└── lib.rs
+</code></pre>
+<h2 id="family-and-runtime-metadata"><a class="header" href="#family-and-runtime-metadata">Family And Runtime Metadata</a></h2>
+<p>The registry no longer uses backend names as fake model families. Each manifest now carries:</p>
+<ul>
+<li><code>ModelFamily</code>: <code>Whisper</code>, <code>Flux</code>, <code>ZImage</code>, <code>QwenImage</code>, <code>Gemma4</code></li>
+<li><code>ModelRuntime</code>: local Candle backends or remote OpenAI-compatible providers</li>
+</ul>
+<p>That split lets the coordinator load the same family through different backends without hard-coding backend names into user-facing metadata.</p>
+<p>Examples:</p>
+<ul>
+<li><code>gemma-4-e2b-it</code> is <code>Gemma4 + candle-safetensors</code></li>
+<li><code>gemma-4-e2b-it-q5</code> is <code>Gemma4 + candle-gguf</code></li>
+<li><code>mlx-gemma-4-e2b-it-8bit</code> is <code>Gemma4 + mlx-vlm</code></li>
+</ul>
+<h2 id="current-families"><a class="header" href="#current-families">Current Families</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Family</th><th>Local backends</th><th>Remote backends</th></tr>
+</thead>
+<tbody>
+<tr><td>Whisper</td><td>Candle safetensors</td><td>none</td></tr>
+<tr><td>Flux.2</td><td>Candle safetensors</td><td>none</td></tr>
+<tr><td>Z-Image</td><td>Candle GGUF</td><td>none</td></tr>
+<tr><td>Qwen-Image</td><td>Candle safetensors and GGUF</td><td>none</td></tr>
+<tr><td>Gemma 4</td><td>Candle safetensors and GGUF</td><td>MLX VLM via OpenAI-compatible API</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="coordinator-role"><a class="header" href="#coordinator-role">Coordinator Role</a></h2>
+<p>The coordinator owns:</p>
+<ul>
+<li>active model selection per category</li>
+<li>lazy load and unload operations</li>
+<li>memory preflight checks before large loads</li>
+<li>factory dispatch from registry metadata to concrete model implementations</li>
+<li>statistics recording for load and inference activity</li>
+</ul>
+<p>Because runtime metadata is explicit, the loader no longer switches on raw manifest strings such as <code>"mlx"</code>.</p>
+<h2 id="cli-notes"><a class="header" href="#cli-notes">CLI Notes</a></h2>
+<p>The <code>list</code> command now shows both family and backend, which makes mixed-family or mixed-runtime installs easier to inspect.</p>
+<p>The REPL uses the same coordinator and model traits as library consumers, so CLI behavior stays aligned with gateway and service integration.</p>
+<h2 id="where-to-read-next"><a class="header" href="#where-to-read-next">Where To Read Next</a></h2>
+<ul>
+<li><code>Architecture</code> covers the full crate structure and request/load flows</li>
+<li><code>Candle Architecture</code> explains the local backend layout</li>
+<li><code>OpenAI Architecture</code> explains the generic remote adapter and the MLX server integration</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
+<p>The <code>nexo-ai</code> crate is structured as a small set of stable layers:</p>
+<ul>
+<li>a trait and type API at the top</li>
+<li>a registry that describes what exists</li>
+<li>a coordinator that decides what to load</li>
+<li>backend-specific model code that does the actual inference</li>
+</ul>
+<p>The main refactor goal was to make family ownership and backend ownership explicit. Generic OpenAI logic now lives in one place, provider-specific server logic lives in one place, and each model family owns its own prompting and backend adapters.</p>
+<h2 id="layer-overview"><a class="header" href="#layer-overview">Layer Overview</a></h2>
+<pre class="mermaid">flowchart TD
+    API[api&lt;br/&gt;traits and request types]
+    Registry[registry&lt;br/&gt;family and runtime metadata]
+    Coordinator[coordinator&lt;br/&gt;factory and lifecycle]
+    Models[models/&lt;family&gt;&lt;br/&gt;common, candle, openai]
+    OpenAI[openai&lt;br/&gt;protocol, client, generic model adapter]
+    Servers[servers&lt;br/&gt;provider integrations]
+    Device[device&lt;br/&gt;memory and hardware checks]
+    Stats[statistics&lt;br/&gt;load and inference metrics]
+
+    API --&gt; Coordinator
+    Registry --&gt; Coordinator
+    Device --&gt; Coordinator
+    Coordinator --&gt; Models
+    Coordinator --&gt; OpenAI
+    OpenAI --&gt; Servers
+    Coordinator --&gt; Stats
+</pre>
+
+<h2 id="top-level-responsibilities"><a class="header" href="#top-level-responsibilities">Top-Level Responsibilities</a></h2>
+<h3 id="srcapi"><a class="header" href="#srcapi"><code>src/api</code></a></h3>
+<p>This is the stable runtime contract. It contains:</p>
+<ul>
+<li><code>model_traits.rs</code> for <code>ModelInfo</code> and category traits</li>
+<li><code>types.rs</code> for all request and response types</li>
+<li><code>lora_traits.rs</code> for adapter-capable model surfaces</li>
+</ul>
+<p>Everything else in the crate is built to satisfy these interfaces.</p>
+<h3 id="srcregistry"><a class="header" href="#srcregistry"><code>src/registry</code></a></h3>
+<p>The registry is static metadata, not executable model logic.</p>
+<p>Each <code>AiModelManifest</code> now carries:</p>
+<ul>
+<li>download files and sizes</li>
+<li>supported categories</li>
+<li><code>ModelFamily</code></li>
+<li><code>ModelRuntime</code></li>
+</ul>
+<p>That makes the registry the single source of truth for both user-facing model listing and runtime dispatch.</p>
+<h3 id="srccoordinator"><a class="header" href="#srccoordinator"><code>src/coordinator</code></a></h3>
+<p>The coordinator owns runtime state:</p>
+<ul>
+<li>loaded model slots</li>
+<li>active model selections per category</li>
+<li>configuration overrides</li>
+<li>load and unload policy</li>
+<li>the model factory used to instantiate concrete implementations</li>
+</ul>
+<p>The important change here is that creation now dispatches from explicit <code>(family, runtime)</code> metadata instead of matching on ad hoc manifest strings.</p>
+<h3 id="srcmodels"><a class="header" href="#srcmodels"><code>src/models</code></a></h3>
+<p>Each model family owns its own layout. The standard target shape is:</p>
+<pre><code class="language-text">models/&lt;family&gt;/
+├── common/
+├── candle/
+└── openai/
+</code></pre>
+<p>Not every family implements every backend. Empty backend folders are acceptable if they keep the family layout predictable.</p>
+<h3 id="srcopenai"><a class="header" href="#srcopenai"><code>src/openai</code></a></h3>
+<p>This module is intentionally generic. It contains:</p>
+<ul>
+<li>protocol types for OpenAI-compatible APIs</li>
+<li>a reusable HTTP client</li>
+<li>a generic <code>OpenAiModel&lt;F, S&gt;</code> adapter</li>
+</ul>
+<p>It does not own Gemma-specific prompting or MLX-specific process management.</p>
+<h3 id="srcservers"><a class="header" href="#srcservers"><code>src/servers</code></a></h3>
+<p>This module owns provider integration details, such as:</p>
+<ul>
+<li>process startup</li>
+<li>health checks</li>
+<li>model listing</li>
+<li>unload hooks</li>
+</ul>
+<p>Today that mainly means the <code>mlx_vlm</code> integration.</p>
+<h2 id="load-path"><a class="header" href="#load-path">Load Path</a></h2>
+<p>This is the current load path for every model:</p>
+<pre class="mermaid">flowchart LR
+    Request[load model by name]
+    Manifest[registry manifest lookup]
+    Memory[device preflight memory check]
+    Factory[coordinator factory]
+    Impl[concrete model implementation]
+    Slot[loaded model slot]
+    Stats[load statistics]
+
+    Request --&gt; Manifest
+    Manifest --&gt; Memory
+    Memory --&gt; Factory
+    Factory --&gt; Impl
+    Impl --&gt; Slot
+    Slot --&gt; Stats
+</pre>
+
+<p>The factory decision is driven by the manifest. That keeps download metadata, list output, and loader behavior aligned.</p>
+<h2 id="request-path"><a class="header" href="#request-path">Request Path</a></h2>
+<p>Once a model is loaded, request handling is intentionally boring:</p>
+<pre class="mermaid">flowchart LR
+    Caller[CLI or service caller]
+    Trait[ModelInfo plus category trait]
+    Model[concrete model instance]
+    Backend[Candle pipeline or OpenAI adapter]
+    Result[typed response plus metrics]
+
+    Caller --&gt; Trait
+    Trait --&gt; Model
+    Model --&gt; Backend
+    Backend --&gt; Result
+</pre>
+
+<p>The caller does not need to know whether the implementation is local or remote.</p>
+<h2 id="shared-support-code"><a class="header" href="#shared-support-code">Shared Support Code</a></h2>
+<p><code>models/support</code> holds cross-family helpers that do not belong to one family. Two examples are important:</p>
+<ul>
+<li><code>prompting.rs</code> for shared chat-template abstractions</li>
+<li><code>conversation.rs</code> for CLI conversation management</li>
+</ul>
+<p>The Candle-only tensor and weight helpers also live under <code>models/support</code>, but they stay behind the <code>candle</code> feature.</p>
+<h2 id="why-the-split-matters"><a class="header" href="#why-the-split-matters">Why The Split Matters</a></h2>
+<p>This layout fixes a few real problems from the previous structure:</p>
+<ul>
+<li>generic OpenAI code is no longer mixed with MLX-specific code</li>
+<li>Gemma 4 owns its prompt formatting for both Candle and MLX paths</li>
+<li>backend names are no longer treated as model families</li>
+<li>dead compatibility namespaces such as <code>shared</code> and <code>remote_models</code> are gone</li>
+</ul>
+<h2 id="backend-specific-docs"><a class="header" href="#backend-specific-docs">Backend-Specific Docs</a></h2>
+<ul>
+<li><code>Candle Architecture</code> covers the local runtime path</li>
+<li><code>OpenAI Architecture</code> covers the generic OpenAI adapter and MLX provider integration</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="candle-architecture"><a class="header" href="#candle-architecture">Candle Architecture</a></h1>
+<p>The Candle path is the local inference backend in <code>nexo-ai</code>. It covers model loading from local files, Apple Silicon execution, and family-specific pipelines for chat, image, audio, and image generation workloads.</p>
+<h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
+<p>Candle currently backs these families:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Family</th><th>Runtime variants</th></tr>
+</thead>
+<tbody>
+<tr><td>Whisper</td><td>safetensors</td></tr>
+<tr><td>Flux.2</td><td>safetensors</td></tr>
+<tr><td>Z-Image</td><td>GGUF</td></tr>
+<tr><td>Qwen-Image</td><td>safetensors and GGUF</td></tr>
+<tr><td>Gemma 4</td><td>safetensors and GGUF</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="layout"><a class="header" href="#layout">Layout</a></h2>
+<p>The refactor standardizes Candle families under a family-first structure:</p>
+<pre><code class="language-text">models/&lt;family&gt;/
+├── common/
+│   └── family-owned shared code
+├── candle/
+│   └── local inference implementation
+└── openai/
+	└── optional remote adapter
++```
+
+For Candle specifically:
+
+- `common/` holds code shared by multiple backends inside the family
+- `candle/` holds the local runtime implementation
+- `models/support/` holds cross-family Candle helpers such as encoders and weight loading
+
+## Local Load Flow
+
+```mermaid
+flowchart LR
+	Manifest[registry manifest&lt;br/&gt;runtime = Candle]
+	Factory[coordinator factory]
+	Family[family model wrapper]
+	Pipeline[family candle pipeline]
+	Files[local model files]
+	Ready[loaded model slot]
+
+	Manifest --&gt; Factory
+	Factory --&gt; Family
+	Family --&gt; Pipeline
+	Files --&gt; Pipeline
+	Pipeline --&gt; Ready
++```
+
+The coordinator does not load tensors directly. It selects the correct family model, and that model delegates to its family-owned Candle pipeline.
+
+## Family Ownership
+
+### Whisper
+
+Whisper is a straightforward local-only family. Its Candle code lives under `models/whisper/candle` and handles transcription-specific preprocessing and decoding.
+
+### Flux.2
+
+Flux.2 uses local Candle pipelines for image generation. Shared family config and sampling code live under `models/flux2/common`, while the transformer and VAE implementation stay in `models/flux2/candle`.
+
+### Qwen-Image And Z-Image
+
+These families both use Candle locally but with different weight formats. The registry runtime metadata tells the coordinator whether the runtime is `candle-safetensors` or `candle-gguf`; loader logic no longer has to guess from filenames.
+
+### Gemma 4
+
+Gemma 4 is the most important mixed-backend family:
+
+- `common/template.rs` owns prompt formatting
+- `candle/safetensors` owns the local safetensors path
+- `candle/gguf` owns the local GGUF path
+- `openai/` owns the remote OpenAI-compatible adapter
+
+That split keeps the family-specific rules together while still making the backend implementation explicit.
+
+## Shared Candle Support
+
+`models/support` contains two kinds of shared code:
+
+- backend-agnostic prompting helpers such as `ChatTemplate`
+- Candle-only helpers such as encoder and weight utilities
+
+This matters because prompting is reused by both local and remote paths, while tensor-loading code is only relevant to Candle builds.
+
+## Why The Runtime Metadata Matters
+
+Before the refactor, some runtime choices were inferred indirectly from strings or file extensions. The registry now records the backend directly, which improves three things:
+
+- CLI output can show the real backend
+- the coordinator can dispatch without special cases like `"mlx"` as a family
+- mixed families such as Gemma 4 can expose both local and remote backends cleanly
+
+## Design Rule
+
+When adding a new local model family, prefer this sequence:
+
+1. add the family root under `models/&lt;family&gt;`
+2. put family-shared code under `common/`
+3. put local inference code under `candle/`
+4. register the family and backend explicitly in the registry
+5. add the `(family, runtime)` factory branch in the coordinator
+
+That keeps the backend contract consistent with the rest of the crate.
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="openai-architecture"><a class="header" href="#openai-architecture">OpenAI Architecture</a></h1>
+<p>The OpenAI path in <code>nexo-ai</code> is the generic remote inference backend. It is responsible for talking to any OpenAI-compatible server without baking provider-specific rules into the transport layer.</p>
+<p>Today the main concrete provider is <code>mlx_vlm</code>, but the architecture is intentionally split so that additional providers can be added without cloning the whole adapter stack.</p>
+<h2 id="module-split"><a class="header" href="#module-split">Module Split</a></h2>
+<p>The remote path is divided into three layers:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Module</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td><code>openai/protocol.rs</code></td><td>OpenAI-compatible request and response wire types</td></tr>
+<tr><td><code>openai/client.rs</code></td><td>HTTP transport for chat and model-list requests</td></tr>
+<tr><td><code>openai/model.rs</code></td><td>Generic <code>OpenAiModel&lt;F, S&gt;</code> runtime adapter</td></tr>
+</tbody>
+</table>
+</div>
+<p>Provider-specific logic lives outside that layer:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Module</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td><code>servers/mlx_vlm</code></td><td>MLX server process lifecycle and health checks</td></tr>
+<tr><td><code>models/gemma4/openai</code></td><td>Gemma-specific request-model resolution and tool parsing</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="generic-adapter-model"><a class="header" href="#generic-adapter-model">Generic Adapter Model</a></h2>
+<p><code>OpenAiModel&lt;F, S&gt;</code> is parameterized over two small interfaces:</p>
+<ul>
+<li><code>F: OpenAiFamilyAdapter</code></li>
+<li><code>S: OpenAiServerControl</code></li>
+</ul>
+<p>That split is the key architectural boundary.</p>
+<p>The family adapter owns:</p>
+<ul>
+<li>the model family name</li>
+<li>request-model resolution</li>
+<li>response interpretation such as tool-call parsing</li>
+</ul>
+<p>The server control owns:</p>
+<ul>
+<li>ensuring the remote server is running</li>
+<li>unload behavior for the current provider</li>
+</ul>
+<h2 id="current-gemma-plus-mlx-path"><a class="header" href="#current-gemma-plus-mlx-path">Current Gemma Plus MLX Path</a></h2>
+<pre class="mermaid">flowchart LR
+    Manifest[registry manifest&lt;br/&gt;family = Gemma4&lt;br/&gt;runtime = mlx-vlm]
+    Factory[coordinator factory]
+    Model[OpenAiModel&lt;Gemma4OpenAiFamily, MlxVlmHandle&gt;]
+    Handle[MlxVlmHandle]
+    Server[MlxServer process]
+    API[OpenAI-compatible HTTP API]
+    Parse[Gemma family response parsing]
+
+    Manifest --&gt; Factory
+    Factory --&gt; Model
+    Model --&gt; Handle
+    Handle --&gt; Server
+    Model --&gt; API
+    API --&gt; Parse
+</pre>
+
+<p>The important part is that MLX-specific process management and Gemma-specific prompt behavior are separate dependencies of the generic adapter, not embedded into it.</p>
+<h2 id="protocol-layer"><a class="header" href="#protocol-layer">Protocol Layer</a></h2>
+<p><code>openai/protocol.rs</code> contains the wire types used across remote backends:</p>
+<ul>
+<li>model listing responses</li>
+<li>chat completion requests</li>
+<li>multimodal content parts</li>
+<li>tool definitions</li>
+<li>tool-call responses</li>
+<li>usage accounting</li>
+</ul>
+<p>This file should stay free of provider-specific assumptions.</p>
+<h2 id="client-layer"><a class="header" href="#client-layer">Client Layer</a></h2>
+<p><code>openai/client.rs</code> is a small transport wrapper over <code>reqwest</code>. It currently handles:</p>
+<ul>
+<li><code>POST /v1/chat/completions</code></li>
+<li><code>GET /v1/models</code></li>
+</ul>
+<p>The client does not know anything about Gemma, MLX, or the coordinator. It just sends and receives typed protocol payloads.</p>
+<h2 id="family-adapter-layer"><a class="header" href="#family-adapter-layer">Family Adapter Layer</a></h2>
+<p><code>models/gemma4/openai</code> owns the Gemma-specific parts of the remote path.</p>
+<p>That includes:</p>
+<ul>
+<li><code>default_request_model_id</code>, which maps local registry names to the request model id expected by the remote backend</li>
+<li><code>Gemma4OpenAiFamily</code>, which plugs Gemma behavior into the generic <code>OpenAiModel</code></li>
+<li>fallback tool parsing using the same Gemma template used by the Candle path</li>
+</ul>
+<p>This is what keeps the Candle and MLX prompt behavior aligned for Gemma 4.</p>
+<h2 id="server-integration-layer"><a class="header" href="#server-integration-layer">Server Integration Layer</a></h2>
+<p><code>servers/mlx_vlm</code> owns the provider integration details:</p>
+<ul>
+<li>launching <code>mlx_vlm.server</code></li>
+<li>health probing</li>
+<li>model listing</li>
+<li>unload requests</li>
+<li>shared handle management through <code>MlxVlmHandle</code></li>
+</ul>
+<p>The coordinator stores the handle, and the generic OpenAI model only depends on the <code>OpenAiServerControl</code> interface.</p>
+<h2 id="why-this-split-is-better"><a class="header" href="#why-this-split-is-better">Why This Split Is Better</a></h2>
+<p>This refactor removes two earlier architecture problems:</p>
+<ul>
+<li>generic OpenAI code no longer depends directly on <code>MlxServer</code></li>
+<li>Gemma-specific remote behavior no longer lives in a generic transport namespace</li>
+</ul>
+<p>That makes the remote path easier to extend. Adding a new provider should mostly mean:</p>
+<ol>
+<li>implement a new server integration in <code>src/servers</code></li>
+<li>add or reuse a family adapter in <code>models/&lt;family&gt;/openai</code></li>
+<li>register the new runtime in the registry</li>
+<li>add the new <code>(family, runtime)</code> branch in the coordinator factory</li>
+</ol>
+<h2 id="practical-outcome"><a class="header" href="#practical-outcome">Practical Outcome</a></h2>
+<p>The user-visible effect is simple:</p>
+<ul>
+<li><code>list</code> can show <code>gemma4</code> as the family and <code>mlx-vlm</code> as the backend</li>
+<li>the loader can create the correct adapter without fake family names</li>
+<li>shared prompt formatting stays owned by the family, not duplicated across backends</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="introduction-1"><a class="header" href="#introduction-1">Introduction</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -463,22 +1703,6 @@ https://github.com/zeroclaw-labs/zeroclaw/blob/41dd23175fe991adf1ee1a5693eff69e0
         <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
         <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
 
-        <!-- Livereload script (if served using the cli tool) -->
-        <script>
-            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
-            const socket = new WebSocket(wsAddress);
-            socket.onmessage = function (event) {
-                if (event.data === "reload") {
-                    socket.close();
-                    location.reload();
-                }
-            };
-
-            window.onbeforeunload = function() {
-                socket.close();
-            }
-        </script>
 
 
         <script>

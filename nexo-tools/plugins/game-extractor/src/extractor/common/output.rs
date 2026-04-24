@@ -1,7 +1,7 @@
+use anyhow::{Context, Result};
+use image::RgbImage;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use anyhow::{Result, Context};
-use image::RgbImage;
 
 use super::metadata::LoraEntry;
 
@@ -15,18 +15,22 @@ impl OutputManager {
         Self::new(output_root, display_name, Default::default())
     }
 
-    pub fn new(output_root: &Path, display_name: &str, room_names: HashMap<u8, String>) -> Result<Self> {
+    pub fn new(
+        output_root: &Path,
+        display_name: &str,
+        room_names: HashMap<u8, String>,
+    ) -> Result<Self> {
         let folder_name = display_name
             .to_lowercase()
             .replace(' ', "_")
             .replace('\'', "")
             .replace(':', "");
         let base_dir = output_root.join(&folder_name);
-        let room_names = room_names
-            .into_iter()
-            .map(|(k, v)| (k as u16, v))
-            .collect();
-        Ok(Self { base_dir, room_names })
+        let room_names = room_names.into_iter().map(|(k, v)| (k as u16, v)).collect();
+        Ok(Self {
+            base_dir,
+            room_names,
+        })
     }
 
     pub fn base_dir(&self) -> &Path {
@@ -43,7 +47,10 @@ impl OutputManager {
     }
 
     pub fn room_dir(&self, room_id: u16) -> PathBuf {
-        self.base_dir.join("assets").join("rooms").join(self.room_folder_name(room_id))
+        self.base_dir
+            .join("assets")
+            .join("rooms")
+            .join(self.room_folder_name(room_id))
     }
 
     pub fn room_image_dir(&self, room_id: u16) -> PathBuf {
@@ -51,7 +58,9 @@ impl OutputManager {
     }
 
     pub fn room_object_dir(&self, room_id: u16, obj_name: &str) -> PathBuf {
-        self.room_image_dir(room_id).join("objects").join(sanitize_name(obj_name))
+        self.room_image_dir(room_id)
+            .join("objects")
+            .join(sanitize_name(obj_name))
     }
 
     pub fn room_audio_dir(&self, room_id: u16) -> PathBuf {
@@ -165,7 +174,8 @@ pub fn save_image(img: &dyn PaletteImage, path: &Path) -> Result<()> {
     let rgb_image = RgbImage::from_raw(img.width() as u32, img.height() as u32, rgb_data)
         .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer"))?;
 
-    rgb_image.save(path)
+    rgb_image
+        .save(path)
         .with_context(|| format!("Failed to save {}", path.display()))?;
     Ok(())
 }

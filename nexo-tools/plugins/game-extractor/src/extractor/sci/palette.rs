@@ -1,5 +1,5 @@
-use anyhow::Result;
 use super::version::SciVersion;
+use anyhow::Result;
 
 pub type Palette = [[u8; 3]; 256];
 
@@ -41,9 +41,12 @@ pub fn parse_palette(data: &[u8], _version: SciVersion) -> Result<Palette> {
     }
 
     // Detect palette format — based on ScummVM GfxPalette::createFromData()
-    if (data[0] == 0 && data[1] == 1) ||
-       (data[0] == 0 && data[1] == 0 && data.len() >= 31 &&
-        u16::from_le_bytes([data[29], data[30]]) == 0) {
+    if (data[0] == 0 && data[1] == 1)
+        || (data[0] == 0
+            && data[1] == 0
+            && data.len() >= 31
+            && u16::from_le_bytes([data[29], data[30]]) == 0)
+    {
         // SCI0/SCI1 palette: palOffset=260, VARIABLE format (used, R, G, B), 256 colors
         return parse_palette_sci0(data);
     }
@@ -72,7 +75,11 @@ fn parse_palette_sci0(data: &[u8]) -> Result<Palette> {
     let mut palette = [[0u8; 3]; 256];
 
     if data.len() < 260 + 256 * 4 {
-        anyhow::bail!("SCI0 palette data too small ({}, need {})", data.len(), 260 + 256 * 4);
+        anyhow::bail!(
+            "SCI0 palette data too small ({}, need {})",
+            data.len(),
+            260 + 256 * 4
+        );
     }
 
     // Palette data at offset 260: 4 bytes per color (used, R, G, B)

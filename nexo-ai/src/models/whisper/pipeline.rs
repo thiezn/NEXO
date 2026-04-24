@@ -8,8 +8,8 @@ use candle_transformers::models::whisper;
 use candle_transformers::models::whisper::model::Whisper;
 
 use crate::audio::AudioBuffer;
-use crate::models::shared::weights::find_safetensor_files;
-use crate::shared::types::{ListenRequest, ListenResponse};
+use crate::api::types::{ListenRequest, ListenResponse};
+use crate::models::support::weights::find_safetensor_files;
 
 use super::decode::{self, WhisperTokens};
 use super::mel;
@@ -177,7 +177,7 @@ fn transcribe_chunk(
     chunk: &[f32],
     language: Option<&str>,
     chunk_offset_ms: u64,
-) -> Result<(String, Vec<crate::shared::types::TranscriptionSegment>)> {
+) -> Result<(String, Vec<crate::api::types::TranscriptionSegment>)> {
     let config = &state.model.config;
 
     // Compute mel spectrogram and truncate to N_FRAMES (3000).

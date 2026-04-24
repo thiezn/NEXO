@@ -1,6 +1,6 @@
-use anyhow::Result;
 use super::palette::Palette;
 use super::version::SciVersion;
+use anyhow::Result;
 
 /// Extracted picture (background image).
 pub struct PictureResource {
@@ -11,7 +11,11 @@ pub struct PictureResource {
 }
 
 /// Parse a picture resource based on SCI version.
-pub fn parse_picture(data: &[u8], version: SciVersion, global_palette: &Palette) -> Result<PictureResource> {
+pub fn parse_picture(
+    data: &[u8],
+    version: SciVersion,
+    global_palette: &Palette,
+) -> Result<PictureResource> {
     if data.len() < 2 {
         anyhow::bail!("Picture data too small");
     }
@@ -44,8 +48,7 @@ fn parse_picture_sci11(data: &[u8], global_palette: &Palette) -> Result<PictureR
     // Parse embedded palette if present
     let palette = if palette_data_offset > 0 && palette_data_offset < data.len() {
         let pal_data = &data[palette_data_offset..];
-        super::palette::parse_palette(pal_data, SciVersion::Sci11)
-            .unwrap_or(*global_palette)
+        super::palette::parse_palette(pal_data, SciVersion::Sci11).unwrap_or(*global_palette)
     } else {
         *global_palette
     };
@@ -65,8 +68,10 @@ fn parse_picture_sci11(data: &[u8], global_palette: &Palette) -> Result<PictureR
     // displaceX at ch+4, displaceY at ch+6
     let clear_key = data[ch + 8];
 
-    let rle_offset = u32::from_le_bytes([data[ch + 24], data[ch + 25], data[ch + 26], data[ch + 27]]) as usize;
-    let literal_offset = u32::from_le_bytes([data[ch + 28], data[ch + 29], data[ch + 30], data[ch + 31]]) as usize;
+    let rle_offset =
+        u32::from_le_bytes([data[ch + 24], data[ch + 25], data[ch + 26], data[ch + 27]]) as usize;
+    let literal_offset =
+        u32::from_le_bytes([data[ch + 28], data[ch + 29], data[ch + 30], data[ch + 31]]) as usize;
 
     if width == 0 || height == 0 {
         anyhow::bail!("SCI1.1 picture has zero dimensions");
@@ -95,7 +100,13 @@ fn parse_picture_sci11(data: &[u8], global_palette: &Palette) -> Result<PictureR
 }
 
 /// Decode RLE data for picture cels — delegates to the shared SCI1.1 RLE decoder in view.rs.
-fn decode_pic_rle(rle_data: &[u8], literal_data: Option<&[u8]>, width: u16, height: u16, clear_key: u8) -> Vec<u8> {
+fn decode_pic_rle(
+    rle_data: &[u8],
+    literal_data: Option<&[u8]>,
+    width: u16,
+    height: u16,
+    clear_key: u8,
+) -> Vec<u8> {
     super::view::decode_rle_vga11(rle_data, literal_data, width, height, clear_key)
         .unwrap_or_else(|_| vec![clear_key; width as usize * height as usize])
 }
@@ -106,7 +117,11 @@ const VECTOR_PIC_HEIGHT: u16 = 190;
 
 /// Parse SCI0/SCI1 vector picture by rendering drawing commands to a bitmap.
 /// Based on ScummVM's GfxPicture::drawVectorData().
-fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Palette) -> Result<PictureResource> {
+fn parse_picture_vector(
+    data: &[u8],
+    _version: SciVersion,
+    global_palette: &Palette,
+) -> Result<PictureResource> {
     let width: u16 = VECTOR_PIC_WIDTH;
     let height: u16 = VECTOR_PIC_HEIGHT;
     let total = width as usize * height as usize;
@@ -132,7 +147,9 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
         match opcode {
             0xF0 => {
                 // SET_COLOR
-                if pos >= data.len() { break; }
+                if pos >= data.len() {
+                    break;
+                }
                 current_color = data[pos];
                 pos += 1;
                 visual_enabled = true;
@@ -143,7 +160,9 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
             }
             0xF2 => {
                 // SET_PRIORITY
-                if pos >= data.len() { break; }
+                if pos >= data.len() {
+                    break;
+                }
                 pos += 1; // skip priority value (we don't render priority)
             }
             0xF3 => {
@@ -151,41 +170,80 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
             }
             0xF4 => {
                 // SHORT_PATTERNS
-                if pos >= data.len() { break; }
+                if pos >= data.len() {
+                    break;
+                }
                 _pattern_texture = data[pos];
                 pos += 1;
                 // Read absolute start coords
-                if pos + 3 > data.len() { break; }
+                if pos + 3 > data.len() {
+                    break;
+                }
                 let (mut x, mut y) = read_abs_coords(data, &mut pos);
-                draw_pattern(&mut pixels, width, height, x, y, _pattern_code, current_color, visual_enabled);
+                draw_pattern(
+                    &mut pixels,
+                    width,
+                    height,
+                    x,
+                    y,
+                    _pattern_code,
+                    current_color,
+                    visual_enabled,
+                );
                 // Short relative coords for subsequent points
                 while pos < data.len() && data[pos] < 0xF0 {
                     if (_pattern_code & 0x20) != 0 {
-                        if pos >= data.len() { break; }
+                        if pos >= data.len() {
+                            break;
+                        }
                         _pattern_texture = data[pos];
                         pos += 1;
                     }
-                    if pos >= data.len() || data[pos] >= 0xF0 { break; }
+                    if pos >= data.len() || data[pos] >= 0xF0 {
+                        break;
+                    }
                     read_rel_coords_short(data, &mut pos, &mut x, &mut y);
-                    draw_pattern(&mut pixels, width, height, x, y, _pattern_code, current_color, visual_enabled);
+                    draw_pattern(
+                        &mut pixels,
+                        width,
+                        height,
+                        x,
+                        y,
+                        _pattern_code,
+                        current_color,
+                        visual_enabled,
+                    );
                 }
             }
             0xF5 => {
                 // MEDIUM_LINES
-                if pos + 3 > data.len() { break; }
+                if pos + 3 > data.len() {
+                    break;
+                }
                 let (mut x, mut y) = read_abs_coords(data, &mut pos);
                 while pos < data.len() && data[pos] < 0xF0 {
                     let old_x = x;
                     let old_y = y;
                     read_rel_coords_med(data, &mut pos, &mut x, &mut y);
                     if visual_enabled {
-                        draw_line(&mut pixels, width, height, old_x, old_y, x, y, current_color);
+                        draw_line(
+                            &mut pixels,
+                            width,
+                            height,
+                            old_x,
+                            old_y,
+                            x,
+                            y,
+                            current_color,
+                        );
                     }
                 }
             }
             0xF6 => {
                 // LONG_LINES (absolute coordinates)
-                if pos + 3 > data.len() { break; }
+                if pos + 3 > data.len() {
+                    break;
+                }
                 let (mut x, mut y) = read_abs_coords(data, &mut pos);
                 while pos + 2 < data.len() && data[pos] < 0xF0 {
                     let old_x = x;
@@ -194,20 +252,40 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
                     x = coords.0;
                     y = coords.1;
                     if visual_enabled {
-                        draw_line(&mut pixels, width, height, old_x, old_y, x, y, current_color);
+                        draw_line(
+                            &mut pixels,
+                            width,
+                            height,
+                            old_x,
+                            old_y,
+                            x,
+                            y,
+                            current_color,
+                        );
                     }
                 }
             }
             0xF7 => {
                 // SHORT_LINES (short relative coordinates)
-                if pos + 3 > data.len() { break; }
+                if pos + 3 > data.len() {
+                    break;
+                }
                 let (mut x, mut y) = read_abs_coords(data, &mut pos);
                 while pos < data.len() && data[pos] < 0xF0 {
                     let old_x = x;
                     let old_y = y;
                     read_rel_coords_short(data, &mut pos, &mut x, &mut y);
                     if visual_enabled {
-                        draw_line(&mut pixels, width, height, old_x, old_y, x, y, current_color);
+                        draw_line(
+                            &mut pixels,
+                            width,
+                            height,
+                            old_x,
+                            old_y,
+                            x,
+                            y,
+                            current_color,
+                        );
                     }
                 }
             }
@@ -222,22 +300,37 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
             }
             0xF9 => {
                 // SET_PATTERN
-                if pos >= data.len() { break; }
+                if pos >= data.len() {
+                    break;
+                }
                 _pattern_code = data[pos];
                 pos += 1;
             }
             0xFA => {
                 // ABSOLUTE_PATTERN
                 if (_pattern_code & 0x20) != 0 {
-                    if pos >= data.len() { break; }
+                    if pos >= data.len() {
+                        break;
+                    }
                     _pattern_texture = data[pos];
                     pos += 1;
                 }
                 while pos + 2 < data.len() && data[pos] < 0xF0 {
                     let (px, py) = read_abs_coords(data, &mut pos);
-                    draw_pattern(&mut pixels, width, height, px, py, _pattern_code, current_color, visual_enabled);
+                    draw_pattern(
+                        &mut pixels,
+                        width,
+                        height,
+                        px,
+                        py,
+                        _pattern_code,
+                        current_color,
+                        visual_enabled,
+                    );
                     if (_pattern_code & 0x20) != 0 {
-                        if pos >= data.len() || data[pos] >= 0xF0 { break; }
+                        if pos >= data.len() || data[pos] >= 0xF0 {
+                            break;
+                        }
                         _pattern_texture = data[pos];
                         pos += 1;
                     }
@@ -245,7 +338,9 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
             }
             0xFB => {
                 // SET_CONTROL
-                if pos >= data.len() { break; }
+                if pos >= data.len() {
+                    break;
+                }
                 pos += 1; // skip control value (we don't render control)
             }
             0xFC => {
@@ -254,27 +349,55 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
             0xFD => {
                 // MEDIUM_PATTERNS
                 if (_pattern_code & 0x20) != 0 {
-                    if pos >= data.len() { break; }
+                    if pos >= data.len() {
+                        break;
+                    }
                     _pattern_texture = data[pos];
                     pos += 1;
                 }
-                if pos + 3 > data.len() { break; }
+                if pos + 3 > data.len() {
+                    break;
+                }
                 let (mut x, mut y) = read_abs_coords(data, &mut pos);
-                draw_pattern(&mut pixels, width, height, x, y, _pattern_code, current_color, visual_enabled);
+                draw_pattern(
+                    &mut pixels,
+                    width,
+                    height,
+                    x,
+                    y,
+                    _pattern_code,
+                    current_color,
+                    visual_enabled,
+                );
                 while pos < data.len() && data[pos] < 0xF0 {
                     if (_pattern_code & 0x20) != 0 {
-                        if pos >= data.len() { break; }
+                        if pos >= data.len() {
+                            break;
+                        }
                         _pattern_texture = data[pos];
                         pos += 1;
                     }
-                    if pos >= data.len() || data[pos] >= 0xF0 { break; }
+                    if pos >= data.len() || data[pos] >= 0xF0 {
+                        break;
+                    }
                     read_rel_coords_med(data, &mut pos, &mut x, &mut y);
-                    draw_pattern(&mut pixels, width, height, x, y, _pattern_code, current_color, visual_enabled);
+                    draw_pattern(
+                        &mut pixels,
+                        width,
+                        height,
+                        x,
+                        y,
+                        _pattern_code,
+                        current_color,
+                        visual_enabled,
+                    );
                 }
             }
             0xFE => {
                 // Extended opcode (PIC_OP_OPX)
-                if pos >= data.len() { break; }
+                if pos >= data.len() {
+                    break;
+                }
                 let sub_opcode = data[pos];
                 pos += 1;
 
@@ -287,18 +410,24 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
                     }
                     0x01 => {
                         // EMBEDDED_VIEW: render bitmap cel onto canvas
-                        if pos + 3 > data.len() { break; }
+                        if pos + 3 > data.len() {
+                            break;
+                        }
                         let (view_x, view_y) = read_abs_coords(data, &mut pos);
-                        if pos + 2 > data.len() { break; }
+                        if pos + 2 > data.len() {
+                            break;
+                        }
                         let view_size = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
                         pos += 2;
                         // Cel header: width(2) + height(2) + displaceX(1) + displaceY(1) + clearKey(1) + extra(1) = 8 bytes
-                        if pos + 8 > data.len() { break; }
-                        let cel_w = u16::from_le_bytes([data[pos], data[pos+1]]) as usize;
-                        let cel_h = u16::from_le_bytes([data[pos+2], data[pos+3]]) as usize;
-                        let _displace_x = data[pos+4] as i8;
-                        let _displace_y = data[pos+5];
-                        let clear_key = data[pos+6];
+                        if pos + 8 > data.len() {
+                            break;
+                        }
+                        let cel_w = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
+                        let cel_h = u16::from_le_bytes([data[pos + 2], data[pos + 3]]) as usize;
+                        let _displace_x = data[pos + 4] as i8;
+                        let _displace_y = data[pos + 5];
+                        let clear_key = data[pos + 6];
                         pos += 8;
                         // Remaining data is RLE-encoded pixel data
                         let rle_len = view_size.saturating_sub(8);
@@ -306,8 +435,17 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
                         let rle_data = &data[pos..rle_end];
                         // Decode RLE and draw onto canvas
                         if visual_enabled && cel_w > 0 && cel_h > 0 {
-                            draw_embedded_view(&mut pixels, width, height, view_x, view_y,
-                                cel_w, cel_h, clear_key, rle_data);
+                            draw_embedded_view(
+                                &mut pixels,
+                                width,
+                                height,
+                                view_x,
+                                view_y,
+                                cel_w,
+                                cel_h,
+                                clear_key,
+                                rle_data,
+                            );
                         }
                         pos = rle_end;
                     }
@@ -317,7 +455,7 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
                             break;
                         }
                         pos += 256; // translation map
-                        pos += 4;   // stamp
+                        pos += 4; // stamp
                         for i in 0..256 {
                             let offset = pos + i * 4;
                             let _used = data[offset];
@@ -353,7 +491,11 @@ fn parse_picture_vector(data: &[u8], _version: SciVersion, global_palette: &Pale
         width,
         height,
         pixels,
-        palette: if has_embedded_palette { Some(palette) } else { Some(*global_palette) },
+        palette: if has_embedded_palette {
+            Some(palette)
+        } else {
+            Some(*global_palette)
+        },
     })
 }
 
@@ -373,18 +515,30 @@ fn read_abs_coords(data: &[u8], pos: &mut usize) -> (i16, i16) {
 
 /// Read 1-byte short relative coordinates.
 fn read_rel_coords_short(data: &[u8], pos: &mut usize, x: &mut i16, y: &mut i16) {
-    if *pos >= data.len() { return; }
+    if *pos >= data.len() {
+        return;
+    }
     let byte = data[*pos];
     *pos += 1;
     let dx = ((byte >> 4) & 0x07) as i16;
     let dy = (byte & 0x07) as i16;
-    if (byte & 0x80) != 0 { *x -= dx; } else { *x += dx; }
-    if (byte & 0x08) != 0 { *y -= dy; } else { *y += dy; }
+    if (byte & 0x80) != 0 {
+        *x -= dx;
+    } else {
+        *x += dx;
+    }
+    if (byte & 0x08) != 0 {
+        *y -= dy;
+    } else {
+        *y += dy;
+    }
 }
 
 /// Read 2-byte medium relative coordinates: byte0=Y disp, byte1=X disp.
 fn read_rel_coords_med(data: &[u8], pos: &mut usize, x: &mut i16, y: &mut i16) {
-    if *pos + 2 > data.len() { return; }
+    if *pos + 2 > data.len() {
+        return;
+    }
     let byte1 = data[*pos];
     let byte2 = data[*pos + 1];
     *pos += 2;
@@ -402,9 +556,17 @@ fn read_rel_coords_med(data: &[u8], pos: &mut usize, x: &mut i16, y: &mut i16) {
 
 /// Draw an embedded view cel onto the picture canvas using RLE decompression.
 /// RLE format: same as SCI view cel encoding (CC=top 2 bits determine operation).
-fn draw_embedded_view(pixels: &mut [u8], canvas_w: u16, canvas_h: u16,
-                       draw_x: i16, draw_y: i16, cel_w: usize, cel_h: usize,
-                       clear_key: u8, rle_data: &[u8]) {
+fn draw_embedded_view(
+    pixels: &mut [u8],
+    canvas_w: u16,
+    canvas_h: u16,
+    draw_x: i16,
+    draw_y: i16,
+    cel_w: usize,
+    cel_h: usize,
+    clear_key: u8,
+    rle_data: &[u8],
+) {
     let cw = canvas_w as usize;
     let ch = canvas_h as usize;
     let mut rle_pos = 0;
@@ -426,11 +588,15 @@ fn draw_embedded_view(pixels: &mut [u8], canvas_w: u16, canvas_h: u16,
                 }
                 0x80 => {
                     // Fill with next byte
-                    if rle_pos >= rle_data.len() { break; }
+                    if rle_pos >= rle_data.len() {
+                        break;
+                    }
                     let fill = rle_data[rle_pos];
                     rle_pos += 1;
                     for _ in 0..count {
-                        if col >= cel_w { break; }
+                        if col >= cel_w {
+                            break;
+                        }
                         if fill != clear_key {
                             let px = draw_x as i32 + col as i32;
                             let py = draw_y as i32 + row as i32;
@@ -445,7 +611,9 @@ fn draw_embedded_view(pixels: &mut [u8], canvas_w: u16, canvas_h: u16,
                     // Literal pixels (0x00 = count up to 63, 0x40 = count + 64)
                     let cnt = if command == 0x40 { count + 64 } else { count };
                     for _ in 0..cnt {
-                        if rle_pos >= rle_data.len() || col >= cel_w { break; }
+                        if rle_pos >= rle_data.len() || col >= cel_w {
+                            break;
+                        }
                         let pixel = rle_data[rle_pos];
                         rle_pos += 1;
                         if pixel != clear_key {
@@ -458,15 +626,28 @@ fn draw_embedded_view(pixels: &mut [u8], canvas_w: u16, canvas_h: u16,
                         col += 1;
                     }
                 }
-                _ => { break; }
+                _ => {
+                    break;
+                }
             }
         }
     }
 }
 
 /// Draw a simple pattern (filled circle/rect) at the given position.
-fn draw_pattern(pixels: &mut [u8], width: u16, height: u16, cx: i16, cy: i16, pattern_code: u8, color: u8, visual_enabled: bool) {
-    if !visual_enabled { return; }
+fn draw_pattern(
+    pixels: &mut [u8],
+    width: u16,
+    height: u16,
+    cx: i16,
+    cy: i16,
+    pattern_code: u8,
+    color: u8,
+    visual_enabled: bool,
+) {
+    if !visual_enabled {
+        return;
+    }
     let size = (pattern_code & 0x07) as i16;
     let is_rect = (pattern_code & 0x10) != 0;
     let w = width as i16;
@@ -500,7 +681,16 @@ fn draw_pattern(pixels: &mut [u8], width: u16, height: u16, cx: i16, cy: i16, pa
 }
 
 /// Bresenham line drawing.
-fn draw_line(pixels: &mut [u8], width: u16, height: u16, x0: i16, y0: i16, x1: i16, y1: i16, color: u8) {
+fn draw_line(
+    pixels: &mut [u8],
+    width: u16,
+    height: u16,
+    x0: i16,
+    y0: i16,
+    x1: i16,
+    y1: i16,
+    color: u8,
+) {
     let w = width as i32;
     let h = height as i32;
 
@@ -520,7 +710,9 @@ fn draw_line(pixels: &mut [u8], width: u16, height: u16, x0: i16, y0: i16, x1: i
             pixels[(y0 * w + x0) as usize] = color;
         }
 
-        if x0 == x1 && y0 == y1 { break; }
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
         let e2 = 2 * err;
         if e2 >= dy {
             err += dy;
@@ -534,7 +726,14 @@ fn draw_line(pixels: &mut [u8], width: u16, height: u16, x0: i16, y0: i16, x1: i
 }
 
 /// Simple flood fill.
-fn flood_fill(pixels: &mut [u8], width: u16, height: u16, start_x: i16, start_y: i16, fill_color: u8) {
+fn flood_fill(
+    pixels: &mut [u8],
+    width: u16,
+    height: u16,
+    start_x: i16,
+    start_y: i16,
+    fill_color: u8,
+) {
     let w = width as usize;
     let h = height as usize;
 
@@ -561,9 +760,17 @@ fn flood_fill(pixels: &mut [u8], width: u16, height: u16, start_x: i16, start_y:
 
         pixels[idx] = fill_color;
 
-        if x > 0 { stack.push((x - 1, y)); }
-        if x + 1 < w { stack.push((x + 1, y)); }
-        if y > 0 { stack.push((x, y - 1)); }
-        if y + 1 < h { stack.push((x, y + 1)); }
+        if x > 0 {
+            stack.push((x - 1, y));
+        }
+        if x + 1 < w {
+            stack.push((x + 1, y));
+        }
+        if y > 0 {
+            stack.push((x, y - 1));
+        }
+        if y + 1 < h {
+            stack.push((x, y + 1));
+        }
     }
 }

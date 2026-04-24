@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a9c2ee70.js";
+            window.path_to_searchindex_js = "../searchindex-b491b92b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a50eb69.js"></script>
+        <script src="../toc-aa7fd050.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -174,10 +174,274 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="agent"><a class="header" href="#agent">Agent</a></h1>
-<p>The gateway runs a main agent loop. This is the heart of the system that actually executes tools.</p>
-<p>I really want it to resemble a game engine loop, with a fixed tick rate and a clear separation between the “game state” (agent state) and the side-effecting operations (tool calls). This should make it easier to reason about the flow of data and the timing of operations.</p>
-<p>Not sure if thats a good idea, but I want a romantic view of the world.</p>
+                        <h1 id="agent-loop"><a class="header" href="#agent-loop">Agent Loop</a></h1>
+<p>The agent loop is the brain of the NEXO system. It receives structured requests from
+the gateway WebSocket, orchestrates inference and tool execution, and streams lifecycle
+events back to the client.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>Each agent invocation spawns a <strong>serialized loop</strong> bound to a session. The loop:</p>
+<ol>
+<li>Persists the user message</li>
+<li>Assembles conversation context from the session’s message history</li>
+<li>Forwards an inference request to an LLM-capable node</li>
+<li>Handles the response — either streaming a reply or executing tool calls</li>
+<li>Repeats (tool results feed back into the next inference turn)</li>
+<li>Marks the run as completed or failed</li>
+</ol>
+<h2 id="agent-loop-lifecycle"><a class="header" href="#agent-loop-lifecycle">Agent loop lifecycle</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant Client
+    participant Gateway
+    participant Brain
+    participant Node
+
+    Client-&gt;&gt;Gateway: request:agent {prompt, sessionId?}
+    Gateway-&gt;&gt;Brain: AgentCommand::RunAgent
+    Gateway--&gt;&gt;Client: response:agent {runId, sessionId, status:"accepted"}
+
+    Brain-&gt;&gt;Brain: persist user message
+    Brain--&gt;&gt;Client: event:agent {status:"thinking"}
+    Brain-&gt;&gt;Brain: assemble context
+    Brain-&gt;&gt;Brain: acquire capability lock
+    Brain-&gt;&gt;Node: forward inference request
+    Node--&gt;&gt;Brain: inference response (text or tool_calls)
+
+    alt Plain reply
+        Brain-&gt;&gt;Brain: persist assistant message
+        Brain--&gt;&gt;Client: event:agent {status:"streaming", content}
+        Brain--&gt;&gt;Client: event:agent {status:"completed"}
+    else Tool calls
+        Brain--&gt;&gt;Client: event:agent {status:"tool_call", toolName}
+        Brain-&gt;&gt;Node: tools.execute {tool, args}
+        Node--&gt;&gt;Brain: tool result
+        Brain-&gt;&gt;Brain: persist tool result
+        Brain-&gt;&gt;Brain: re-enter loop (back to inference)
+    end
+
+    Brain-&gt;&gt;Brain: release locks, finish run
+</pre>
+
+<h2 id="agent-run-state-machine"><a class="header" href="#agent-run-state-machine">Agent run state machine</a></h2>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Accepted
+    Accepted --&gt; Thinking
+    Thinking --&gt; Streaming: plain reply
+    Thinking --&gt; ToolCall: tool_calls in response
+    ToolCall --&gt; Thinking: tool results fed back
+    Streaming --&gt; Completed
+    Thinking --&gt; Failed: error
+    ToolCall --&gt; Failed: error
+    [*] --&gt; Cancelled: client cancels
+</pre>
+
+<h3 id="status-values"><a class="header" href="#status-values">Status values</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Status</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>accepted</code></td><td>Run created, queued for processing</td></tr>
+<tr><td><code>thinking</code></td><td>Assembling context and waiting for inference</td></tr>
+<tr><td><code>tool_call</code></td><td>Model requested a tool execution</td></tr>
+<tr><td><code>streaming</code></td><td>Model is generating a reply</td></tr>
+<tr><td><code>completed</code></td><td>Run finished successfully</td></tr>
+<tr><td><code>failed</code></td><td>Run encountered an error</td></tr>
+<tr><td><code>cancelled</code></td><td>Run was cancelled by the client</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
+<p>Sessions are persistent conversation containers. A client can:</p>
+<ul>
+<li><strong>Create</strong> a session explicitly via <code>session.create</code>, or let the gateway auto-create
+one when sending an <code>agent</code> request without a <code>sessionId</code>.</li>
+<li><strong>List</strong> active sessions via <code>session.list</code> (returns message counts and timestamps).</li>
+<li><strong>Retrieve</strong> a session’s full message history via <code>session.get</code>.</li>
+<li><strong>Clear</strong> a session and all its data via <code>session.clear</code>.</li>
+</ul>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Created: session.create
+    Created --&gt; Active: agent request
+    Active --&gt; Active: more messages
+    Active --&gt; Cleared: session.clear
+    Cleared --&gt; [*]
+</pre>
+
+<p>Sessions persist across client reconnections. A client stores the <code>sessionId</code> locally
+and provides it in subsequent <code>agent</code> requests to maintain conversational context.</p>
+<h2 id="capability-locking"><a class="header" href="#capability-locking">Capability locking</a></h2>
+<p>When the agent loop invokes a node capability (e.g. LLM inference or a tool), it
+acquires an advisory lock in SQLite:</p>
+<ul>
+<li><strong>Acquire</strong>: <code>INSERT OR IGNORE</code> on the <code>capability_locks</code> table with a 5-minute expiry.</li>
+<li><strong>Release</strong>: <code>DELETE</code> after the operation completes.</li>
+<li><strong>Expiry</strong>: Locks older than their <code>expires_at</code> are automatically reaped.</li>
+</ul>
+<p>This prevents two concurrent agent runs from using the same capability simultaneously,
+ensuring consistent tool/model access across the distributed node network.</p>
+<h2 id="cron-jobs"><a class="header" href="#cron-jobs">Cron jobs</a></h2>
+<p>Cron jobs are scheduled agent tasks stored in the database. Each job specifies:</p>
+<ul>
+<li>A <strong>schedule</strong> (cron expression)</li>
+<li>A <strong>prompt</strong> (what the agent should do)</li>
+<li>An optional <strong>session_id</strong> (to continue a conversation)</li>
+</ul>
+<p>The cron scheduler runs as a background task, polling every 60 seconds for due jobs.
+When a job fires, it submits an <code>AgentCommand</code> to the brain and emits a <code>cron</code> event.</p>
+<h2 id="end-to-end-chat-flow"><a class="header" href="#end-to-end-chat-flow">End-to-end chat flow</a></h2>
+<p>The following diagram shows the full lifecycle of a chat message originating from the
+Moretimer app, flowing through the gateway and node, and streaming back to the client.</p>
+<pre class="mermaid">sequenceDiagram
+    participant App as Moretimer App
+    participant GW as Gateway
+    participant DB as SQLite
+    participant Node as LLM Node
+
+    App-&gt;&gt;GW: session.create {name}
+    GW-&gt;&gt;DB: INSERT session
+    GW--&gt;&gt;App: {sessionId}
+    App-&gt;&gt;App: store sessionId on thread
+
+    App-&gt;&gt;GW: agent {prompt, sessionId}
+    GW-&gt;&gt;DB: INSERT run + user message
+    GW--&gt;&gt;App: response {runId, sessionId, status: accepted}
+    GW--&gt;&gt;App: event:agent {status: thinking}
+
+    GW-&gt;&gt;GW: ensure_model_loaded
+    alt Model not in VRAM
+        GW-&gt;&gt;Node: model.load {modelId}
+        Node--&gt;&gt;GW: {loaded: true}
+        Node-&gt;&gt;GW: model.status (push)
+    end
+
+    GW-&gt;&gt;GW: load SOUL.md + resolve prefill (if collection set)
+    GW-&gt;&gt;GW: build system prompt (SOUL + prefill + tools)
+    GW-&gt;&gt;Node: agent {messages, tools}
+
+    Node--&gt;&gt;GW: inference response
+
+    alt Plain reply
+        GW-&gt;&gt;DB: INSERT assistant message
+        GW--&gt;&gt;App: event:agent {status: streaming, content}
+        GW--&gt;&gt;App: event:agent {status: completed}
+        App-&gt;&gt;App: update message bubble
+    else Tool calls
+        GW--&gt;&gt;App: event:agent {status: tool_call, toolName}
+        alt Gateway-native tool
+            GW-&gt;&gt;GW: execute locally (e.g. notes.create)
+        else Node tool
+            GW-&gt;&gt;Node: tools.execute {tool, args}
+            Node--&gt;&gt;GW: tool result
+        end
+        GW-&gt;&gt;DB: INSERT tool message
+        GW-&gt;&gt;Node: agent {messages + tool results}
+        Node--&gt;&gt;GW: final response
+        GW-&gt;&gt;DB: INSERT assistant message
+        GW--&gt;&gt;App: event:agent {status: streaming, content}
+        GW--&gt;&gt;App: event:agent {status: completed}
+    end
+
+    Note over App: Later, on re-open
+    App-&gt;&gt;GW: session.get {sessionId}
+    GW-&gt;&gt;DB: SELECT messages
+    GW--&gt;&gt;App: {messages}
+</pre>
+
+<h3 id="queued-requests"><a class="header" href="#queued-requests">Queued requests</a></h3>
+<p>When no LLM node is available at the time of an agent request, the gateway queues the
+run instead of failing it:</p>
+<pre class="mermaid">sequenceDiagram
+    participant App as Moretimer App
+    participant GW as Gateway
+    participant DB as SQLite
+    participant Node as LLM Node
+
+    App-&gt;&gt;GW: agent {prompt, sessionId}
+    GW-&gt;&gt;DB: INSERT run (status: accepted)
+    GW--&gt;&gt;App: response {runId, status: accepted}
+    GW-&gt;&gt;GW: no LLM node available
+    GW-&gt;&gt;DB: UPDATE run (status: queued)
+    GW--&gt;&gt;App: event:agent {status: queued}
+
+    Note over Node: Node connects later
+    Node-&gt;&gt;GW: connect {models: [...]}
+    GW-&gt;&gt;GW: drain_queue
+    GW-&gt;&gt;DB: claim queued runs
+    GW-&gt;&gt;Node: model.load + agent (inference)
+    Node--&gt;&gt;GW: response
+    GW--&gt;&gt;App: event:agent {status: streaming, content}
+    GW--&gt;&gt;App: event:agent {status: completed}
+</pre>
+
+<h2 id="thinking-mode"><a class="header" href="#thinking-mode">Thinking mode</a></h2>
+<p>When <code>thinking: true</code> is set in the agent request, the gateway enables Gemma 4’s
+extended thinking capability:</p>
+<ol>
+<li><strong>Injection</strong>: The <code>&lt;|think|&gt;</code> token is prepended to the system prompt before inference.</li>
+<li><strong>Response format</strong>: The model may return thinking content wrapped in
+<code>&lt;|channel&gt;thought\n...&lt;channel|&gt;</code> blocks alongside the visible reply.</li>
+<li><strong>Stripping</strong>: The gateway strips thinking blocks from the raw response. Only the
+visible text is persisted to the session history. Thinking content is emitted as
+an ephemeral <code>thinkingContent</code> field in the <code>streaming</code> agent event.</li>
+<li><strong>Multi-turn</strong>: Because thinking content is never persisted, subsequent turns in
+the same session automatically receive a clean history — no special handling is needed.</li>
+</ol>
+<h3 id="gemma-4-sampling-parameters"><a class="header" href="#gemma-4-sampling-parameters">Gemma 4 sampling parameters</a></h3>
+<p>When using Gemma 4 models, the recommended sampling configuration is:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Value</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>temperature</code></td><td><code>1.0</code></td><td>Required for thinking mode</td></tr>
+<tr><td><code>top_p</code></td><td><code>0.95</code></td><td>Nucleus sampling</td></tr>
+<tr><td><code>top_k</code></td><td><code>64</code></td><td>Top-k filtering before top-p</td></tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p><strong>Note</strong>: Queued runs that are drained on node reconnect lose the <code>thinking</code> flag
+and default to <code>thinking: false</code>.</p>
+</blockquote>
+<h2 id="system-prompt-composition"><a class="header" href="#system-prompt-composition">System prompt composition</a></h2>
+<p>The system prompt is assembled from these sources, in order:</p>
+<ol>
+<li><strong>Thinking token</strong> — If <code>thinking: true</code>, the <code>&lt;|think|&gt;</code> token is prepended.</li>
+<li><strong>SOUL.md</strong> — Always loaded from <code>~/.nexo/nexo-storage/SOUL.md</code> (if it exists). Defines the agent’s personality and persistent instructions.</li>
+<li><strong>Prefill collection</strong> — If the session has a <code>prefill_collection_id</code>, the gateway resolves it from <code>PREFILL/collections.json</code>, reads each referenced markdown file, and concatenates them.</li>
+<li><strong>Tool descriptions</strong> — A structured description of all available tools (both node-registered and gateway-native).</li>
+</ol>
+<p>If none of these produce content, a default “You are a helpful assistant.” prompt is used.</p>
+<h2 id="gateway-native-tools"><a class="header" href="#gateway-native-tools">Gateway-native tools</a></h2>
+<p>Some tools execute directly on the gateway rather than being forwarded to a node. These are registered at startup and appear in the tool catalog alongside node tools (with <code>source: "gateway"</code>).</p>
+<p>Current gateway-native tools:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>notes.create</code></td><td>Create a timestamped note in git storage</td></tr>
+<tr><td><code>notes.list</code></td><td>List all note filenames</td></tr>
+<tr><td><code>notes.read</code></td><td>Read a specific note</td></tr>
+<tr><td><code>notes.update_summary</code></td><td>Write the notes summary</td></tr>
+</tbody>
+</table>
+</div>
+<p>When the agent loop encounters a tool call, it checks gateway tools first. If a match is found, the tool executes locally without any node involvement. Otherwise, the call is forwarded to the appropriate node.</p>
+<h2 id="context-assembly"><a class="header" href="#context-assembly">Context assembly</a></h2>
+<p>Before each inference call, the brain loads the full conversation history from the
+<code>messages</code> table for the current session, ordered chronologically. The system prompt
+(see above) is prepended as a system message.</p>
+<p>The context window includes messages with roles:</p>
+<ul>
+<li><code>user</code> — user prompts</li>
+<li><code>assistant</code> — model responses</li>
+<li><code>tool</code> — tool execution results</li>
+<li><code>system</code> — context injections</li>
+</ul>
 
                     </main>
 
@@ -214,22 +478,6 @@
         <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
         <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
 
-        <!-- Livereload script (if served using the cli tool) -->
-        <script>
-            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
-            const socket = new WebSocket(wsAddress);
-            socket.onmessage = function (event) {
-                if (event.data === "reload") {
-                    socket.close();
-                    location.reload();
-                }
-            };
-
-            window.onbeforeunload = function() {
-                socket.close();
-            }
-        </script>
 
 
         <script>

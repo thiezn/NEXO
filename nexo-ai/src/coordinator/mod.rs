@@ -1,13 +1,15 @@
+pub mod factory;
 pub mod load;
 pub mod unload;
 
+use crate::api::model_traits::ModelInfo;
+use crate::api::types::ModelCategory;
 use crate::config::CoordinatorConfig;
-use crate::shared::model_traits::ModelInfo;
-use crate::shared::types::ModelCategory;
 use crate::statistics::StatsCollector;
 use std::collections::HashMap;
+
 #[cfg(feature = "mlx")]
-use std::sync::Arc;
+use crate::servers::ManagedProviderServers;
 
 pub struct ModelSlot {
     model: Box<dyn ModelInfo>,
@@ -41,7 +43,7 @@ pub struct Coordinator {
     active_models: HashMap<ModelCategory, String>,
     stats: StatsCollector,
     #[cfg(feature = "mlx")]
-    mlx_server: Option<Arc<tokio::sync::Mutex<crate::remote_models::mlx_server::MlxServer>>>,
+    provider_servers: ManagedProviderServers,
 }
 
 impl Coordinator {
@@ -63,7 +65,7 @@ impl Coordinator {
             active_models,
             stats: StatsCollector::new(),
             #[cfg(feature = "mlx")]
-            mlx_server: None,
+            provider_servers: ManagedProviderServers::default(),
         }
     }
 
@@ -123,7 +125,7 @@ impl Coordinator {
     pub fn model_mut(
         &mut self,
         name: &str,
-    ) -> Option<&mut dyn crate::shared::model_traits::ModelInfo> {
+    ) -> Option<&mut dyn crate::api::model_traits::ModelInfo> {
         self.slots.get_mut(name).map(|s| s.model_mut())
     }
 

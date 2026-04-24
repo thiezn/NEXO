@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::extractor::common::audio_convert;
+use anyhow::Result;
 
 /// Extracted sound data.
 pub struct SoundResource {
@@ -202,4 +202,3 @@ fn try_convert_sol_to_wav(data: &[u8]) -> Option<Vec<u8>> {
 
     Some(audio_convert::pcm_to_wav(pcm_data, sample_rate))
 }
-

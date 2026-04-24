@@ -1,126 +1,84 @@
 ---
 name: nexo-ai-model-builder
-description: Use when adding a new AI model to the nexo-ai framework. Covers model trait implementation, registry registration, inference pipeline setup with Candle, and HuggingFace model inspection.
+description: Use when adding or updating a model family, runtime, or provider integration in nexo-ai. Covers manifest registration, factory wiring, Candle implementations, and OpenAI-compatible remote backends.
 ---
 
-# Adding a New Model to nexo-ai
+# Adding Models to nexo-ai
 
-## Model Categories
+This skill is intentionally thin. Read the reference that matches the work you are doing instead of loading everything into context at once.
 
-| Category | Trait | Input -> Output |
-|----------|-------|-----------------|
-| Chat | `ChatModel` | text -> text |
-| Tool | `ToolModel` | text + tool specs -> structured tool calls |
-| Image | `ImageModel` | image + text -> text |
-| Listen | `ListenModel` | audio -> text |
-| Talk | `TalkModel` | text -> audio |
-| Imagine | `ImagineModel` | text -> image |
+## Start Here
 
-Models serving multiple categories go under `models/multipurpose/`.
+- `references/architecture_and_registration.md` — family layout, manifest/runtime enums, coordinator/factory wiring
+- `references/openai_models.md` — OpenAI-compatible models, managed providers, speech vs chat adapters
+- `references/testing.md` — integration test targets, remote smoke tests, and commands
+- `references/conversation_and_templates.md` — `ChatTemplate`, `ConversationManager`, and family-local templates
+- `references/tool_use.md` — tool prompt formatting and tool-call parsing
+- `references/performance.md` — Candle and Metal performance pitfalls
+
+## Current Architecture Rules
+
+1. Work family-first, not category-first. Model code lives under `nexo-ai/src/models/<family>/`.
+2. Choose the runtime up front:
+  - `ModelRuntime::Candle(...)` for local inference.
+  - `ModelRuntime::OpenAi { provider, model_repo }` for managed remote servers.
+3. Keep family roots small. Put shared logic in `common/`; put backend-specific code in `candle/`, `openai/`, or established backend folders such as `gguf/` / `safetensors/`.
+4. Registration is incomplete until every relevant layer is wired:
+  - `nexo-ai/src/registry/manifest.rs`
+  - `nexo-ai/src/coordinator/factory.rs`
+  - `nexo-ai/src/models/mod.rs`
+  - tests
+5. Ignore older guidance that points at `models/multipurpose/...` or `shared/model_traits.rs`. That layout is stale.
 
 ## Workflow
 
-### 1. Inspect the HuggingFace repo
+1. Inspect the source model or provider.
+  - Use `.claude/skills/nexo-ai-model-builder/scripts/hf_downloader.py` for Hugging Face repos.
+  - For OpenAI-compatible backends, inspect both the repo id and the request model id the server expects.
+2. Pick the target family and runtime.
+  - Existing family + new backend: extend the existing family module.
+  - New family: add `nexo-ai/src/models/<family>/` and keep the folder small.
+3. Implement the model code.
+  - Candle/local: use `references/architecture_and_registration.md`.
+  - OpenAI chat/tool/image: use `references/openai_models.md`.
+  - OpenAI listen/talk: use `references/openai_models.md` and `nexo-ai/src/openai/speech.rs`.
+4. Register the manifest and factory branch.
+5. Add or update focused tests.
+6. Run the smallest relevant ignored tests before moving to larger variants.
 
-Use the bundled inspector script to understand the repo structure before writing any code:
+## Quick Checklist
+
+- Manifest added with the correct `family`, `runtime`, categories, and files
+- Family exported from `nexo-ai/src/models/mod.rs`
+- Factory dispatch added in `nexo-ai/src/coordinator/factory.rs`
+- Provider server support added if a new remote provider is involved
+- Templates or tool parsing updated if the family supports Chat or Tool
+- Integration tests added or updated
+- Skill references updated when the architecture surface changes
+
+## Hugging Face Inspection Commands
 
 ```bash
 SCRIPT=".claude/skills/nexo-ai-model-builder/scripts/hf_downloader.py"
 
-# Step 1: See directory structure (always start here)
-python3 $SCRIPT tree <repo_id> --pretty
+# 1. See directory structure first.
+python3 "$SCRIPT" tree <repo_id> --pretty
 
-# Step 2: Auto-detect components (transformer, vae, tokenizer, etc.)
-python3 $SCRIPT autodetect <repo_id> --pretty
+# 2. Auto-detect likely components.
+python3 "$SCRIPT" autodetect <repo_id> --pretty
 
-# Step 3: Get exact file sizes and SHA-256 hashes for manifest
-python3 $SCRIPT inspect <repo_id> --filter "*.safetensors" --sha256 --pretty
+# 3. Inspect exact files, sizes, and hashes.
+python3 "$SCRIPT" inspect <repo_id> --filter "*.safetensors" --sha256 --pretty
 
-# Step 4: Fetch model configs (architecture, tokenizer, preprocessing)
-python3 $SCRIPT config <repo_id> --all --pretty
+# 4. Read config/tokenizer/preprocessing files.
+python3 "$SCRIPT" config <repo_id> --all --pretty
 
-# Step 5: Generate Rust manifest code (supports globs)
-python3 $SCRIPT manifest <repo_id> \
-  --files "transformer/*.safetensors" "vae/*.safetensors" "tokenizer/tokenizer.json" \
+# 5. Generate manifest code when the runtime is local.
+python3 "$SCRIPT" manifest <repo_id> \
+  --files "transformer/*.safetensors" "tokenizer/tokenizer.json" \
   --component-enum AiComponent --sha256 --pretty
 ```
 
-**Token resolution order:** `HF_TOKEN` env var -> `hugging_token.txt` at project root -> `~/.nexo/hf_token.txt` -> huggingface-cli cached token.
+Token resolution order: `HF_TOKEN` -> `hugging_token.txt` at the repo root -> `~/.nexo/hf_token.txt` -> Hugging Face CLI cached token.
 
-Always run `tree` first. Model repos vary widely -- some use subdirectories, others put everything at the root. The `autodetect` command classifies files into components and suggests `AiComponent` mappings.
-
-### 2. Create the model directory
-
-```
-nexo-ai/src/models/<category>/<family>/
-  mod.rs         # Model struct, ModelInfo impl, category trait impl
-  pipeline.rs    # Inference pipeline (load, generate, sequential load-use-drop)
-  template.rs    # ChatTemplate impl (if model supports chat/tool categories)
-```
-
-Follow existing models as the reference implementation. Read 2-3 existing models during planning.
-
-### 3. Implement traits and register
-
-Follow this sequence -- read the existing code at each location:
-
-1. **Implement `ModelInfo` + category trait(s)** -- See `shared/model_traits.rs` and any existing model's `mod.rs`
-2. **Add manifest** -- In `registry/manifest.rs`, add to `build_all_manifests()` and update the test assertion count
-3. **Wire coordinator factory** -- In `coordinator/load.rs`, add family match in `create_model_slot()`
-4. **Register module** -- In `models/<category>/mod.rs`, add `pub mod <family>`
-
-### 4. Implement ChatTemplate (for chat/tool models)
-
-Models that support Chat or Tool categories **must** implement the `ChatTemplate` trait. This is how the framework formats conversation history into model-specific prompt strings and parses tool calls from output.
-
-See [references/conversation_and_templates.md](references/conversation_and_templates.md) for the full `ChatTemplate` trait API, `ReasoningMode` mapping, and how `ConversationManager` handles multi-turn conversation in the REPL.
-
-See [references/tool_use.md](references/tool_use.md) for implementing `format_with_tools` and `parse_tool_calls`.
-
-**Key files:**
-- Trait definition: `shared/templates/mod.rs`
-- Existing implementations: `models/multipurpose/qwen3/template.rs`, `models/multipurpose/gemma3/template.rs`
-
-### 5. Build the inference pipeline
-
-Check `candle-transformers` first -- it includes many architectures (parler_tts, whisper, t5, flux, llama, qwen3, siglip, etc.). Use them directly before porting from Python.
-
-**Non-obvious patterns:**
-- **Sequential load-use-drop** for multi-component pipelines: load encoder -> use -> `drop()` -> load main model. Minimizes peak memory on unified memory.
-- **CPU-seeded RNG for diffusion**: Never use `Tensor::randn()` on Metal -- it's non-deterministic. Generate noise on CPU with a seeded RNG, then `.to_device()`.
-- **Avoid `Clone` on weight structs**: An accidental `.clone()` silently duplicates gigabytes.
-
-### 6. Test
-
-Add integration tests in `tests/model_inference.rs`. Use the existing macros (`listen_test!`, `talk_test!`, `imagine_test!`, `chat_test!`, `tool_test!`, `perf_test!`). Every model must have a performance test.
-
-See [references/testing.md](references/testing.md) for the full testing guide including attribute ordering, download workflow, and test macros.
-
-### 7. Performance validation
-
-See [references/performance.md](references/performance.md) for common Metal pitfalls (BF16, `.contiguous()`, debug builds) and the per-model checklist.
-
-## Implemented Models
-
-| Model | Family | Category | Size |
-|-------|--------|----------|------|
-| `parler-mini` | parler | Talk | 3.5 GB |
-| `parler-large` | parler | Talk | 8.7 GB |
-| `whisper-large-v3` | whisper | Listen | 2.9 GB |
-| `whisper-large-v3-turbo` | whisper | Listen | 1.5 GB |
-| `distil-large-v3` | whisper | Listen | 1.4 GB |
-| `flux-2-klein-4b` | flux | Imagine | 22 GB |
-| `flux-2-klein-9b` | flux | Imagine | 49 GB |
-| `flux-2-dev` | flux | Imagine | 165 GB |
-| `z-image-turbo` | z_image | Imagine | 31 GB |
-| `gemma-3-4b-it` | gemma3 | Chat, Tool, Image | ~8 GB |
-| `gemma-3-12b-it` | gemma3 | Chat, Tool, Image | ~24 GB |
-| `gemma-3-27b-it` | gemma3 | Chat, Tool, Image | ~54 GB |
-| `qwen3-4b-q5km` | qwen3 | Chat, Tool | ~2.9 GB |
-| `qwen3-30b-a3b-q4km` | qwen3 | Chat, Tool | ~18.6 GB |
-| `qwen3-vl-4b` | qwen3 | Chat, Tool, Image | ~3.0 GB |
-
-## After Implementation
-
-- Run /simplify to ensure the codebase stays clean and maintainable.
-- Review this SKILL.md and make suggestions on improvements or clarifications for future model builders.
+For provider-managed remote models, inspect the repo for naming and metadata, but do not force the local manifest into a downloaded-file shape if the server owns downloads.

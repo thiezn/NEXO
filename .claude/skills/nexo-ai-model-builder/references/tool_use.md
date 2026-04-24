@@ -1,104 +1,55 @@
-# Tool Use Implementation
+# Tool Use
 
 ## Overview
 
-Tool use is handled within the `ChatTemplate` trait -- there is no separate tool-specific trait. Two methods are responsible:
+There is no separate tool-model templating trait. Tool use is driven by the same family-local prompt parser used for chat:
 
-- `format_with_tools()` -- embeds tool definitions into the prompt
-- `parse_tool_calls()` -- extracts structured tool calls from model output
+- `ChatTemplate::format_with_tools()`
+- `ChatTemplate::parse_tool_calls()`
 
-Tool definitions use `nexo_tool_spec::tool::ToolSpec` from the `nexo-tool-spec` crate. No changes to that crate are needed when adding a new model.
+Tool definitions still use `nexo_spec::tool::ToolSpec`.
 
-## Implementing `format_with_tools`
+## Current Reference Points
 
-The general pattern:
+- `nexo-ai/src/models/support/prompting.rs`
+- `nexo-ai/src/models/gemma4/common/template.rs`
+- `nexo-ai/src/models/gemma4/openai/mod.rs`
 
-1. Build a tool instruction string describing the available tools
-2. Merge it with any existing system message content
-3. Construct an augmented message list with the combined system message
-4. Delegate to `self.format_prompt()`
+Gemma4 is the main reference implementation for local tool prompting and parsing. The OpenAI-backed Gemma4 adapter shows how to combine provider-native tool-call data with family-local fallback parsing.
 
-### Shared Formatting Helpers
+## Local Family Pattern
 
-`shared/templates/mod.rs` provides two helpers:
+For local Candle families:
 
-```rust
-/// XML format: <tools>\n{json}\n{json}\n</tools>  (Qwen3 style)
-pub fn format_tools_xml(tools: &[ToolSpec]) -> String;
+1. Format tool declarations inside `format_with_tools()`.
+2. Handle `ChatRole::Tool` explicitly in `format_prompt()`.
+3. Parse structured tool calls in `parse_tool_calls()`.
+4. Return `(Vec<ToolCall>, Option<String>)`, preserving reasoning text when the family emits it.
 
-/// Pretty-printed JSON array  (Gemma3 style)
-pub fn format_tools_json(tools: &[ToolSpec]) -> String;
-```
+Do not assume XML or JSON helper functions are mandatory. `format_tools_xml()` and `format_tools_json()` are convenience helpers only.
 
-Choose the format that matches the model's official template. Most models use one or the other.
+## OpenAI-Backed Chat Families
 
-### Example: Qwen3 Pattern
+For provider-backed chat models using `nexo-ai/src/openai/model.rs`:
 
-```rust
-fn format_with_tools(&self, messages: &[ChatMessage], tools: &[ToolSpec], reasoning: &ReasoningMode) -> String {
-    let tools_section = format_tools_xml(tools);
-    let tool_instruction = format!("# Tools\n\nYou may call one or more functions...\n{tools_section}\n...");
+- Provider-native tool calls are normalized by `parse_wire_tool_calls()`.
+- Families can override `OpenAiFamilyAdapter::parse_tool_response()` when provider output is incomplete or family-specific parsing is better.
+- `nexo-ai/src/models/gemma4/openai/mod.rs` is the current reference. It prefers wire tool calls when present and falls back to the Gemma4 template parser when they are not.
 
-    // Single-pass: separate system messages from non-system, merge system with tool instruction
-    let mut system_parts = Vec::new();
-    let mut augmented = Vec::with_capacity(messages.len());
-    for msg in messages {
-        if msg.role == ChatRole::System {
-            system_parts.push(msg.content.as_str());
-        } else {
-            augmented.push(msg.clone());
-        }
-    }
+## Parsing Guidance
 
-    let full_system = if system_parts.is_empty() {
-        tool_instruction
-    } else {
-        format!("{}\n\n{tool_instruction}", system_parts.join("\n"))
-    };
+- Support the family's native tool-call syntax first.
+- Add a JSON-object fallback when the model may emit raw JSON instead of the ideal wrapper.
+- Strip end-of-turn markers before parsing fallback content.
+- Keep reasoning text separate from the structured `ToolCall` list when possible.
 
-    augmented.insert(0, ChatMessage { role: ChatRole::System, content: full_system });
-    self.format_prompt(&augmented, reasoning)
-}
-```
+## Testing
 
-## Implementing `parse_tool_calls`
+Use `tool_test!` in `nexo-ai/tests/model_inference.rs` for local chat/tool families.
 
-Returns `(Vec<ToolCall>, Option<String>)` -- the extracted calls and any reasoning text that preceded them.
+Also add unit tests in the family template file for:
 
-### Common Extraction Strategies
-
-**Tag-based (Qwen3):** Look for `<tool_call>...</tool_call>` XML tags, parse JSON content inside each.
-
-**JSON detection (Gemma3):** Try full-response JSON parse first, then fall back to brace-matching to find embedded JSON objects.
-
-Both implementations include a raw JSON fallback for when the model produces a bare JSON object without wrapper tags.
-
-### ToolCall Structure
-
-```rust
-pub struct ToolCall {
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-```
-
-The `arguments` field is a `serde_json::Value`, not a string. When serializing tool calls into prompts (for multi-turn tool use), check if arguments is already a Value before calling `serde_json::to_string`.
-
-## Tool Role in Conversations
-
-`ChatRole::Tool` represents tool response messages in the conversation. How these are formatted depends on the model family:
-
-- **Qwen3**: Tool messages are wrapped in `<tool_response>` tags inside a `user` turn. Consecutive tool messages are grouped into a single user turn.
-- **Gemma3**: Tool messages are treated as regular user turns.
-
-When implementing `format_prompt`, handle the `ChatRole::Tool` variant explicitly.
-
-## Testing Tool Use
-
-Use the `tool_test!` macro in `tests/model_inference.rs`:
-
-```rust
-tool_test!(test_my_model_tool, "my-model-name", nexo_ai::models::multipurpose::my_family::MyModel);
-```
-
-The macro provides a standard `get_weather` tool and validates the model produces at least one token. Add model-specific tests in the template's `#[cfg(test)]` module for parsing edge cases.
+- native tool-call syntax
+- JSON fallback parsing
+- reasoning + tool-call coexistence
+- `ChatRole::Tool` rendering back into the prompt

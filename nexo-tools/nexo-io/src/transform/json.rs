@@ -87,10 +87,7 @@ fn schema_value(value: &Value, depth: usize, max_depth: usize) -> String {
                     }
 
                     if i >= 15 {
-                        lines.push(format!(
-                            "{indent}  ... +{} more keys",
-                            keys.len() - i - 1
-                        ));
+                        lines.push(format!("{indent}  ... +{} more keys", keys.len() - i - 1));
                         break;
                     }
                 }
@@ -174,10 +171,7 @@ fn compact_value(value: &Value, depth: usize, max_depth: usize) -> String {
                     }
 
                     if i >= 20 {
-                        lines.push(format!(
-                            "{indent}  ... +{} more keys",
-                            keys.len() - i - 1
-                        ));
+                        lines.push(format!("{indent}  ... +{} more keys", keys.len() - i - 1));
                         break;
                     }
                 }

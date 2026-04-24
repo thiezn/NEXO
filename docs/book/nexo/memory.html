@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a9c2ee70.js";
+            window.path_to_searchindex_js = "../searchindex-b491b92b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a50eb69.js"></script>
+        <script src="../toc-aa7fd050.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -177,15 +177,104 @@
                         <h1 id="memory"><a class="header" href="#memory">Memory</a></h1>
 <h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
 <ul>
-<li>Markdown files (Unstructured storage, llm and user friendly)</li>
-<li>SQLite database (Structured storage, queryable, relational)</li>
-<li>In-memory (Volatile storage, fast access, temporary)</li>
+<li><strong>Git-backed storage</strong> — Persistent, versioned storage at <code>~/.nexo/nexo-storage</code> using a bare git repository with SSH remote sync</li>
+<li><strong>SQLite database</strong> — Structured storage for sessions, runs, messages, cron jobs</li>
+<li><strong>In-memory</strong> — Volatile storage, fast access, temporary (GatewayState)</li>
 </ul>
+<h2 id="git-storage-nexonexo-storage"><a class="header" href="#git-storage-nexonexo-storage">Git storage (<code>~/.nexo/nexo-storage</code>)</a></h2>
+<p>The git-backed storage repository holds user-facing persistent data. Every write triggers a pull → write → commit → push cycle, keeping all data versioned and portable.</p>
+<h3 id="repository-structure"><a class="header" href="#repository-structure">Repository structure</a></h3>
+<pre><code>~/.nexo/nexo-storage/
+├── SOUL.md                  # Agent personality (always prepended to system prompt)
+├── PREFILL/
+│   ├── collections.json     # Collection definitions
+│   ├── identity.md          # Example prefill markdown
+│   └── skills.md            # Example prefill markdown
+└── NOTES/
+    ├── SUMMARY.md           # Auto-generated summary of all notes
+    └── 2026-01-15T12-00-00.md  # Timestamped notes
+</code></pre>
+<h3 id="soulmd"><a class="header" href="#soulmd">SOUL.md</a></h3>
+<p>A markdown file whose content is always prepended to the agent’s system prompt. Use it to define personality, communication style, or persistent instructions.</p>
+<h3 id="prefill-system-prefill"><a class="header" href="#prefill-system-prefill">Prefill system (<code>PREFILL/</code>)</a></h3>
+<p>Composable context templates that can be attached to sessions:</p>
+<ul>
+<li><strong>Markdown files</strong> — Individual <code>.md</code> files stored in <code>PREFILL/</code></li>
+<li><strong>Collections</strong> — Named groups of markdown files defined in <code>PREFILL/collections.json</code></li>
+</ul>
+<p>When a session has a <code>prefill_collection_id</code>, the gateway resolves the collection at inference time: reads each referenced markdown file in order, concatenates them, and includes the result in the system prompt (after SOUL.md, before tool descriptions).</p>
+<p><code>collections.json</code> schema:</p>
+<pre><code class="language-json">{
+  "collections": [
+    {
+      "id": "default",
+      "name": "Default Identity",
+      "description": "Core personality",
+      "markdown_files": ["identity.md", "skills.md"]
+    }
+  ]
+}
+</code></pre>
+<h3 id="notes-system-notes"><a class="header" href="#notes-system-notes">Notes system (<code>NOTES/</code>)</a></h3>
+<p>Agent-accessible note storage with gateway-native tools:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>notes.create</code></td><td>Create a timestamped note</td></tr>
+<tr><td><code>notes.list</code></td><td>List all note filenames</td></tr>
+<tr><td><code>notes.read</code></td><td>Read a specific note</td></tr>
+<tr><td><code>notes.update_summary</code></td><td>Write <code>NOTES/SUMMARY.md</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>A default cron job (<code>notes-summary</code>, every 6 hours) prompts the agent to read all notes and generate an organized summary.</p>
+<h2 id="sqlite-schema"><a class="header" href="#sqlite-schema">SQLite schema</a></h2>
+<p>The gateway’s SQLite database stores structured operational state:</p>
+<h3 id="core-tables"><a class="header" href="#core-tables">Core tables</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Table</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>devices</code></td><td>Known devices (nodes + clients), with first/last seen timestamps</td></tr>
+<tr><td><code>users</code></td><td>Known users, linked to a device</td></tr>
+<tr><td><code>idempotency_keys</code></td><td>Deduplication cache for side-effecting methods</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="session--agent-tables"><a class="header" href="#session--agent-tables">Session &amp; agent tables</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Table</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>sessions</code></td><td>Conversation containers, linked to a user</td></tr>
+<tr><td><code>agent_runs</code></td><td>One row per agent invocation, tracks status and summary</td></tr>
+<tr><td><code>messages</code></td><td>Conversation messages (user, assistant, tool, system), ordered by time</td></tr>
+<tr><td><code>capability_locks</code></td><td>Advisory locks for tool/model exclusivity during agent runs</td></tr>
+<tr><td><code>cron_jobs</code></td><td>Scheduled agent tasks with cron expressions</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="data-flow"><a class="header" href="#data-flow">Data flow</a></h3>
+<pre><code>User prompt
+  → messages table (role: "user")
+  → context assembly (SELECT * FROM messages WHERE session_id ORDER BY created_at)
+  → LLM inference (via node)
+  → messages table (role: "assistant" or "tool")
+  → agent_runs table (status: "completed")
+</code></pre>
 <h2 id="categories"><a class="header" href="#categories">Categories</a></h2>
 <ul>
-<li>conversation / chat transcripts</li>
-<li>Daily / Session Summaries</li>
-<li>Core / Long term facts</li>
+<li><strong>Conversation / chat transcripts</strong> — stored in <code>messages</code> table per session</li>
+<li><strong>Daily / session summaries</strong> — stored as <code>agent_runs.summary</code></li>
+<li><strong>Core / long-term facts</strong> — SOUL.md and prefill markdown files in git storage</li>
+<li><strong>Notes</strong> — Timestamped agent-created notes in git storage</li>
 </ul>
 
                     </main>
@@ -223,22 +312,6 @@
         <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
         <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
 
-        <!-- Livereload script (if served using the cli tool) -->
-        <script>
-            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
-            const socket = new WebSocket(wsAddress);
-            socket.onmessage = function (event) {
-                if (event.data === "reload") {
-                    socket.close();
-                    location.reload();
-                }
-            };
-
-            window.onbeforeunload = function() {
-                socket.close();
-            }
-        </script>
 
 
         <script>

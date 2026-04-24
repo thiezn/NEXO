@@ -1,8 +1,10 @@
 use crate::server::state::SharedState;
-use nexo_ws_schema::{ErrorPayload, Frame, Method, Role, ToolsRegisterParams, ToolsRegisterResponse};
+use nexo_ws_schema::{
+    ErrorPayload, Frame, Method, Role, ToolsRegisterParams, ToolsRegisterResponse,
+};
 
 use super::base::{
-    forward_to_node, ok_or_internal_error, parse_params, ForwardErrorCodes, TOOL_EXECUTION_TIMEOUT,
+    ForwardErrorCodes, TOOL_EXECUTION_TIMEOUT, forward_to_node, ok_or_internal_error, parse_params,
 };
 
 pub(super) async fn handle_register(
@@ -43,15 +45,17 @@ pub(super) async fn handle_register(
         };
 
     let tool_count = register_params.tools.len();
-    let tool_names: Vec<String> = register_params.tools.iter().map(|t| t.name.clone()).collect();
+    let tool_names: Vec<String> = register_params
+        .tools
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
     let registered = {
         let mut state_write = state.write().await;
         state_write.register_tools(peer_id, register_params.tools)
     };
 
-    tracing::info!(
-        "Node {peer_id} registered {registered}/{tool_count} tool(s): {tool_names:?}",
-    );
+    tracing::info!("Node {peer_id} registered {registered}/{tool_count} tool(s): {tool_names:?}",);
 
     ok_or_internal_error(request_id, ToolsRegisterResponse { registered })
 }

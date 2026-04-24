@@ -1,19 +1,19 @@
-pub(crate) mod pipeline;
-mod quantized_transformer;
-pub(crate) mod transformer;
+pub mod candle;
+pub mod common;
+pub mod openai;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::shared::model_traits::{ImagineModel, ModelInfo};
-use crate::shared::types::{ImagineRequest, ImagineResponse, ModelCategory};
+use crate::api::model_traits::{ImagineModel, ModelInfo};
+use crate::api::types::{ImagineRequest, ImagineResponse, ModelCategory};
 
 pub struct ZImageModel {
     name: String,
     memory_bytes: u64,
     model_dir: PathBuf,
-    loaded: Option<pipeline::LoadedState>,
+    loaded: Option<candle::pipeline::LoadedState>,
 }
 
 impl ZImageModel {
@@ -52,7 +52,7 @@ impl ModelInfo for ZImageModel {
         if self.loaded.is_some() {
             return Ok(());
         }
-        self.loaded = Some(pipeline::load(&self.model_dir)?);
+        self.loaded = Some(candle::pipeline::load(&self.model_dir)?);
         Ok(())
     }
 
@@ -71,7 +71,7 @@ impl ImagineModel for ZImageModel {
             .loaded
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?;
-        pipeline::imagine(state, request)
+        candle::pipeline::imagine(state, request)
     }
 }
 

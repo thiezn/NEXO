@@ -22,6 +22,20 @@ pub struct NodeConfig {
     pub default_models: HashMap<String, String>,
     /// Per-model runtime settings (temperature, max_tokens, etc.).
     pub models: HashMap<String, ModelSettings>,
+    /// Managed MLX VLM server host override.
+    pub mlx_vlm_host: Option<String>,
+    /// Managed MLX VLM server port override.
+    pub mlx_vlm_port: Option<u16>,
+    /// Python venv path containing `mlx_vlm`.
+    pub mlx_vlm_venv_path: Option<String>,
+    /// Managed MLX Audio server host override.
+    pub mlx_audio_host: Option<String>,
+    /// Managed MLX Audio server port override.
+    pub mlx_audio_port: Option<u16>,
+    /// Python venv path containing `mlx_audio`.
+    pub mlx_audio_venv_path: Option<String>,
+    /// Hugging Face endpoint used by managed `mlx_audio` processes.
+    pub mlx_audio_hf_endpoint: Option<String>,
 }
 
 impl Default for NodeConfig {
@@ -37,6 +51,13 @@ impl Default for NodeConfig {
             startup_categories: vec!["chat".to_string(), "tool".to_string(), "image".to_string()],
             default_models: HashMap::new(),
             models: HashMap::new(),
+            mlx_vlm_host: None,
+            mlx_vlm_port: None,
+            mlx_vlm_venv_path: None,
+            mlx_audio_host: None,
+            mlx_audio_port: None,
+            mlx_audio_venv_path: None,
+            mlx_audio_hf_endpoint: None,
         }
     }
 }
@@ -48,6 +69,13 @@ impl NodeConfig {
             active_models: self.default_models.clone(),
             startup_categories: self.startup_categories.clone(),
             models: self.models.clone(),
+            mlx_vlm_host: self.mlx_vlm_host.clone(),
+            mlx_vlm_port: self.mlx_vlm_port,
+            mlx_vlm_venv_path: self.mlx_vlm_venv_path.clone(),
+            mlx_audio_host: self.mlx_audio_host.clone(),
+            mlx_audio_port: self.mlx_audio_port,
+            mlx_audio_venv_path: self.mlx_audio_venv_path.clone(),
+            mlx_audio_hf_endpoint: self.mlx_audio_hf_endpoint.clone(),
         }
     }
 }
@@ -84,6 +112,8 @@ mod tests {
         assert_eq!(config.startup_categories, vec!["chat", "tool", "image"]);
         assert!(config.default_models.is_empty());
         assert!(config.models.is_empty());
+        assert_eq!(config.mlx_vlm_host, None);
+        assert_eq!(config.mlx_audio_hf_endpoint, None);
     }
 
     #[test]
@@ -104,6 +134,8 @@ mod tests {
                 ..Default::default()
             },
         );
+        config.mlx_audio_port = Some(9000);
+        config.mlx_audio_hf_endpoint = Some("https://hf-mirror.com".into());
 
         let json = serde_json::to_string(&config).unwrap();
         let decoded: NodeConfig = serde_json::from_str(&json).unwrap();
@@ -116,6 +148,11 @@ mod tests {
         assert_eq!(
             decoded.models.get("gemma-4-e4b-it").unwrap().temperature,
             Some(0.7)
+        );
+        assert_eq!(decoded.mlx_audio_port, Some(9000));
+        assert_eq!(
+            decoded.mlx_audio_hf_endpoint.as_deref(),
+            Some("https://hf-mirror.com")
         );
     }
 
@@ -132,11 +169,18 @@ mod tests {
                 ..Default::default()
             },
         );
+        config.mlx_vlm_host = Some("127.0.0.2".into());
+        config.mlx_audio_hf_endpoint = Some("https://hf-mirror.com".into());
 
         let coord = config.to_coordinator_config();
         assert_eq!(coord.active_models.get("chat").unwrap(), "test-model");
         assert_eq!(coord.model_settings("test-model").temperature, Some(0.5));
         assert_eq!(coord.startup_categories, vec!["chat", "tool", "image"]);
+        assert_eq!(coord.mlx_vlm_host.as_deref(), Some("127.0.0.2"));
+        assert_eq!(
+            coord.mlx_audio_hf_endpoint.as_deref(),
+            Some("https://hf-mirror.com")
+        );
     }
 
     #[test]

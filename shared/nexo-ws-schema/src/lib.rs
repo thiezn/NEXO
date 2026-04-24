@@ -10,17 +10,16 @@ pub mod types;
 pub use connect::{ConnectParams, HelloOk, Policy};
 pub use error::{ErrorPayload, WsError};
 pub use events::{
-    AgentEventPayload, CronPayload, EventKind, HeartbeatPayload, PresencePayload, ShutdownPayload,
-    TickPayload,
+    AgentEventPayload, CronPayload, EventKind, HeartbeatPayload, MessagePayload, PresencePayload,
+    ShutdownPayload, TickPayload,
 };
 pub use frame::Frame;
-pub use nexo_spec::model::{LoadedModelInfo, ModelCategory};
 pub use methods::{
-    AgentParams, AgentResponse, AgentStatus, CollectionEntry, ConversationMessage, CronCreateParams,
-    CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry, CronListParams,
-    CronListResponse, HealthParams, HealthResponse, ImageAnalyzeParams, ImageAnalyzeResponse,
-    MarkdownFileEntry, Method, ModelLoadParams, ModelLoadResponse, ModelStatusParams,
-    ModelUnloadParams, ModelUnloadResponse, PrefillCollectionCreateParams,
+    AgentParams, AgentResponse, AgentStatus, CollectionEntry, ConversationMessage,
+    CronCreateParams, CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry,
+    CronListParams, CronListResponse, HealthParams, HealthResponse, ImageAnalyzeParams,
+    ImageAnalyzeResponse, MarkdownFileEntry, Method, ModelLoadParams, ModelLoadResponse,
+    ModelStatusParams, ModelUnloadParams, ModelUnloadResponse, PrefillCollectionCreateParams,
     PrefillCollectionCreateResponse, PrefillCollectionDeleteParams,
     PrefillCollectionDeleteResponse, PrefillCollectionListParams, PrefillCollectionListResponse,
     PrefillFetchParams, PrefillFetchResponse, PrefillMarkdownCreateParams,
@@ -32,6 +31,7 @@ pub use methods::{
     ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams, ToolsExecuteResponse,
     ToolsRegisterParams, ToolsRegisterResponse,
 };
+pub use nexo_spec::model::{LoadedModelInfo, ModelCategory};
 pub use schema::{SchemaSection, generate_schema, schema_json};
 pub use types::{ClientInfo, DeviceInfo, Platform, Role, Scope};
 

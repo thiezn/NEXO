@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a9c2ee70.js";
+            window.path_to_searchindex_js = "../searchindex-b491b92b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a50eb69.js"></script>
+        <script src="../toc-aa7fd050.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -275,10 +275,221 @@ handshake time.</p>
 <li>users may call <code>tools.catalog</code> (<code>user.read</code>) to fetch the runtime tool catalog for an
 agent. The response includes grouped tools and provenance metadata:
 <ul>
-<li><code>source</code>: <code>core</code>, <code>ai</code> or <code>plugin</code></li>
+<li><code>source</code>: <code>core</code>, <code>ai</code>, <code>node</code> or <code>plugin</code></li>
 </ul>
 </li>
 </ul>
+<h2 id="node-tool-registration-toolsregister"><a class="header" href="#node-tool-registration-toolsregister">Node tool registration (<code>tools.register</code>)</a></h2>
+<p>After connecting, nodes send a <code>tools.register</code> request to provide the gateway with
+full tool specifications (name, description, JSON Schema parameters). The gateway stores
+these in an in-memory registry and uses them to serve <code>tools.catalog</code> responses and route
+<code>tools.execute</code> requests.</p>
+<p>Node → Gateway:</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "tools.register",
+  "params": {
+    "tools": [
+      {
+        "name": "echo.run",
+        "description": "Echoes the input back as output",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "input": { "type": "string", "description": "The text to echo back" }
+          },
+          "required": ["input"]
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<p>Gateway → Node:</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": { "registered": 1 }
+}
+</code></pre>
+<p>Nodes may call <code>tools.register</code> multiple times to update their tool set. When a node
+disconnects, the gateway automatically deregisters all of its tools.</p>
+<h2 id="tool-execution-toolsexecute"><a class="header" href="#tool-execution-toolsexecute">Tool execution (<code>tools.execute</code>)</a></h2>
+<p>Users (or the agent) request tool execution via <code>tools.execute</code>. The gateway looks up the
+tool in its registry, forwards the request to the owning node, and relays the response
+back to the caller. Execution has a 30-second timeout.</p>
+<p>User → Gateway:</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "tools.execute",
+  "params": {
+    "tool": "echo.run",
+    "args": { "input": "hello" },
+    "idempotencyKey": "key-123"
+  }
+}
+</code></pre>
+<p>Gateway → User (relayed from node):</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": {
+    "success": true,
+    "output": "hello",
+    "error": null
+  }
+}
+</code></pre>
+<p>Error cases:</p>
+<ul>
+<li><code>tool_not_found</code>: the tool name is not in the registry</li>
+<li><code>tool_unavailable</code>: the node hosting the tool is disconnected</li>
+<li><code>timeout</code>: the node did not respond within 30 seconds</li>
+</ul>
+<h2 id="agent-agent"><a class="header" href="#agent-agent">Agent (<code>agent</code>)</a></h2>
+<p>Start an agent run. The gateway creates (or resumes) a session, acknowledges
+immediately with <code>status: "accepted"</code>, then streams <code>agent</code> events as the brain
+processes the request.</p>
+<p>Client → Gateway:</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "agent",
+  "params": {
+    "prompt": "Summarize today's news",
+    "idempotencyKey": "key-456",
+    "sessionId": "optional-session-id",
+    "context": { "files": ["notes.md"] },
+    "thinking": true,
+    "modelId": "gemma4-27b"
+  }
+}
+</code></pre>
+<p>Gateway → Client (immediate ack):</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": {
+    "runId": "run-uuid-v7",
+    "sessionId": "session-uuid-v7",
+    "status": "accepted"
+  }
+}
+</code></pre>
+<p>Gateway → Client (streaming events):</p>
+<pre><code class="language-json">{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run" } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
+{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
+</code></pre>
+<h3 id="agent-params"><a class="header" href="#agent-params">Agent params</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>prompt</code></td><td>string</td><td>yes</td><td>The user message</td></tr>
+<tr><td><code>idempotencyKey</code></td><td>string</td><td>yes</td><td>Deduplication key</td></tr>
+<tr><td><code>sessionId</code></td><td>string</td><td>no</td><td>Resume existing session</td></tr>
+<tr><td><code>context</code></td><td>object</td><td>no</td><td>Additional context blob</td></tr>
+<tr><td><code>thinking</code></td><td>bool</td><td>no</td><td>Enable extended thinking mode (default: false)</td></tr>
+<tr><td><code>modelId</code></td><td>string</td><td>no</td><td>Request a specific model</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="agent-event-payload"><a class="header" href="#agent-event-payload">Agent event payload</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runId</code></td><td>string</td><td>The run identifier</td></tr>
+<tr><td><code>sessionId</code></td><td>string</td><td>The session identifier</td></tr>
+<tr><td><code>status</code></td><td>string</td><td>Current status (see below)</td></tr>
+<tr><td><code>content</code></td><td>string?</td><td>Visible reply text (on <code>streaming</code>)</td></tr>
+<tr><td><code>thinkingContent</code></td><td>string?</td><td>Ephemeral thinking text (on <code>streaming</code>, when thinking enabled)</td></tr>
+<tr><td><code>toolName</code></td><td>string?</td><td>Tool being called (on <code>tool_call</code>)</td></tr>
+<tr><td><code>error</code></td><td>string?</td><td>Error message (on <code>failed</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="agent-status-values"><a class="header" href="#agent-status-values">Agent status values</a></h3>
+<p><code>accepted</code> → <code>thinking</code> → <code>streaming</code> → <code>completed</code>
+<code>accepted</code> → <code>thinking</code> → <code>tool_call</code> → <code>thinking</code> → … → <code>completed</code>
+Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-initiated).</p>
+<h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
+<h3 id="sessioncreate"><a class="header" href="#sessioncreate"><code>session.create</code></a></h3>
+<p>Create a new conversation session.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat" } }
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…" } }
+</code></pre>
+<h3 id="sessionlist"><a class="header" href="#sessionlist"><code>session.list</code></a></h3>
+<p>List all sessions for the current user.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.list", "params": {} }
+</code></pre>
+<pre><code class="language-json">{
+  "type": "response", "id": "…", "ok": true,
+  "payload": {
+    "sessions": [
+      { "sessionId": "…", "name": "My chat", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
+    ]
+  }
+}
+</code></pre>
+<h3 id="sessionget"><a class="header" href="#sessionget"><code>session.get</code></a></h3>
+<p>Retrieve a session with its full message history.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.get", "params": { "sessionId": "…" } }
+</code></pre>
+<pre><code class="language-json">{
+  "type": "response", "id": "…", "ok": true,
+  "payload": {
+    "sessionId": "…", "name": "My chat", "createdAt": "…",
+    "messages": [
+      { "id": "…", "role": "user", "content": "hello", "createdAt": "…" },
+      { "id": "…", "role": "assistant", "content": "hi back", "createdAt": "…" }
+    ]
+  }
+}
+</code></pre>
+<h3 id="sessionclear"><a class="header" href="#sessionclear"><code>session.clear</code></a></h3>
+<p>Delete a session and all associated data (messages, runs).</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.clear", "params": { "sessionId": "…" } }
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "cleared": true } }
+</code></pre>
+<h2 id="cron-jobs"><a class="header" href="#cron-jobs">Cron jobs</a></h2>
+<h3 id="croncreate"><a class="header" href="#croncreate"><code>cron.create</code></a></h3>
+<p>Create a scheduled agent task.</p>
+<pre><code class="language-json">{
+  "type": "request", "id": "…", "method": "cron.create",
+  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "prompt": "Summarize yesterday" }
+}
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "jobId": "…" } }
+</code></pre>
+<h3 id="cronlist"><a class="header" href="#cronlist"><code>cron.list</code></a></h3>
+<p>List all cron jobs.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "cron.list", "params": {} }
+</code></pre>
+<pre><code class="language-json">{
+  "type": "response", "id": "…", "ok": true,
+  "payload": { "jobs": [{ "jobId": "…", "name": "Daily summary", "schedule": "0 9 * * *", "enabled": true }] }
+}
+</code></pre>
+<h3 id="crondelete"><a class="header" href="#crondelete"><code>cron.delete</code></a></h3>
+<p>Delete a cron job.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "cron.delete", "params": { "jobId": "…" } }
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "deleted": true } }
+</code></pre>
 <h2 id="versioning"><a class="header" href="#versioning">Versioning</a></h2>
 <ul>
 <li>Clients send <code>minProtocol</code> + <code>maxProtocol</code>; the server rejects mismatches.</li>
@@ -326,22 +537,6 @@ agent. The response includes grouped tools and provenance metadata:
         <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
         <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
 
-        <!-- Livereload script (if served using the cli tool) -->
-        <script>
-            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
-            const socket = new WebSocket(wsAddress);
-            socket.onmessage = function (event) {
-                if (event.data === "reload") {
-                    socket.close();
-                    location.reload();
-                }
-            };
-
-            window.onbeforeunload = function() {
-                socket.close();
-            }
-        </script>
 
 
         <script>

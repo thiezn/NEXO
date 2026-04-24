@@ -1,8 +1,10 @@
-use anyhow::{Result, bail};
-use super::block::{Block, find_child, find_all_children, find_child_with_prefix, find_all_with_prefix};
+use super::block::{
+    Block, find_all_children, find_all_with_prefix, find_child, find_child_with_prefix,
+};
 use super::image_decode;
 use super::version::ScummVersion;
 use crate::extractor::common::output::PaletteImage;
+use anyhow::{Result, bail};
 
 #[derive(Clone, Copy)]
 pub struct Palette {
@@ -22,9 +24,15 @@ pub struct DecodedImage {
 }
 
 impl PaletteImage for DecodedImage {
-    fn width(&self) -> u16 { self.width }
-    fn height(&self) -> u16 { self.height }
-    fn pixels(&self) -> &[u8] { &self.pixels }
+    fn width(&self) -> u16 {
+        self.width
+    }
+    fn height(&self) -> u16 {
+        self.height
+    }
+    fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
     fn palette_color(&self, index: u8) -> (u8, u8, u8) {
         self.palette.colors[index as usize]
     }
@@ -48,7 +56,11 @@ pub struct ObjectMeta {
 }
 
 /// Extract the room background image from a ROOM block.
-pub fn extract_background(data: &[u8], room_block: &Block, version: ScummVersion) -> Result<Option<DecodedImage>> {
+pub fn extract_background(
+    data: &[u8],
+    room_block: &Block,
+    version: ScummVersion,
+) -> Result<Option<DecodedImage>> {
     let header = parse_room_header(data, room_block, version)?;
     let palette = extract_palette(data, room_block)?;
 
@@ -62,7 +74,12 @@ pub fn extract_background(data: &[u8], room_block: &Block, version: ScummVersion
         None => return Ok(None),
     };
 
-    let pixels = decode_image_block(data, &im_block, header.width as usize, header.height as usize)?;
+    let pixels = decode_image_block(
+        data,
+        &im_block,
+        header.width as usize,
+        header.height as usize,
+    )?;
 
     Ok(Some(DecodedImage {
         width: header.width,
@@ -73,7 +90,11 @@ pub fn extract_background(data: &[u8], room_block: &Block, version: ScummVersion
 }
 
 /// Extract all object images from a ROOM block.
-pub fn extract_objects(data: &[u8], room_block: &Block, version: ScummVersion) -> Result<Vec<ObjectImage>> {
+pub fn extract_objects(
+    data: &[u8],
+    room_block: &Block,
+    version: ScummVersion,
+) -> Result<Vec<ObjectImage>> {
     let obim_blocks = find_all_children(data, room_block, b"OBIM");
     if obim_blocks.is_empty() {
         return Ok(Vec::new());
@@ -93,7 +114,11 @@ pub fn extract_objects(data: &[u8], room_block: &Block, version: ScummVersion) -
 }
 
 /// Extract object metadata from OBIM and OBCD blocks.
-pub fn extract_object_metadata(data: &[u8], room_block: &Block, version: ScummVersion) -> Vec<ObjectMeta> {
+pub fn extract_object_metadata(
+    data: &[u8],
+    room_block: &Block,
+    version: ScummVersion,
+) -> Vec<ObjectMeta> {
     let obim_blocks = find_all_children(data, room_block, b"OBIM");
     let obcd_blocks = find_all_children(data, room_block, b"OBCD");
 
@@ -110,7 +135,9 @@ pub fn extract_object_metadata(data: &[u8], room_block: &Block, version: ScummVe
             // V5/V6 IMHD: obj_id(2) + image_count(2) + unk(2) + flags(1) + unk1(1) + unk2(4) + width(2) + height(2)
             let (obj_id, im_x, im_y) = match version {
                 ScummVersion::V7 => {
-                    if d.len() < 16 { continue; }
+                    if d.len() < 16 {
+                        continue;
+                    }
                     (
                         u16::from_le_bytes([d[4], d[5]]),
                         u16::from_le_bytes([d[8], d[9]]),
@@ -141,11 +168,15 @@ pub fn extract_object_metadata(data: &[u8], room_block: &Block, version: ScummVe
                     // V7 CDHD: version(4) + obj_id(2) + parent(1) + parentstate(1)
                     let cd_obj_id = match version {
                         ScummVersion::V7 => {
-                            if cd.len() < 8 { continue; }
+                            if cd.len() < 8 {
+                                continue;
+                            }
                             u16::from_le_bytes([cd[4], cd[5]])
                         }
                         _ => {
-                            if cd.len() < 2 { continue; }
+                            if cd.len() < 2 {
+                                continue;
+                            }
                             u16::from_le_bytes([cd[0], cd[1]])
                         }
                     };
@@ -211,7 +242,11 @@ pub fn extract_object_metadata(data: &[u8], room_block: &Block, version: ScummVe
 }
 
 /// Get room header info
-pub fn get_room_header(data: &[u8], room_block: &Block, version: ScummVersion) -> Result<RoomHeader> {
+pub fn get_room_header(
+    data: &[u8],
+    room_block: &Block,
+    version: ScummVersion,
+) -> Result<RoomHeader> {
     parse_room_header(data, room_block, version)
 }
 
@@ -226,9 +261,14 @@ pub fn get_palette_type(data: &[u8], room_block: &Block) -> &'static str {
     }
 }
 
-fn extract_object_images(data: &[u8], obim: &Block, palette: &Palette, version: ScummVersion) -> Result<Vec<ObjectImage>> {
-    let imhd = find_child(data, obim, b"IMHD")
-        .ok_or_else(|| anyhow::anyhow!("OBIM missing IMHD"))?;
+fn extract_object_images(
+    data: &[u8],
+    obim: &Block,
+    palette: &Palette,
+    version: ScummVersion,
+) -> Result<Vec<ObjectImage>> {
+    let imhd =
+        find_child(data, obim, b"IMHD").ok_or_else(|| anyhow::anyhow!("OBIM missing IMHD"))?;
 
     let d = &data[imhd.data_offset()..imhd.end_offset()];
     if d.len() < 16 {
@@ -276,7 +316,12 @@ fn extract_object_images(data: &[u8], obim: &Block, palette: &Palette, version: 
     Ok(results)
 }
 
-fn decode_image_block(data: &[u8], im_block: &Block, width: usize, height: usize) -> Result<Vec<u8>> {
+fn decode_image_block(
+    data: &[u8],
+    im_block: &Block,
+    width: usize,
+    height: usize,
+) -> Result<Vec<u8>> {
     // Try SMAP first, fall back to BOMP for V6/V7 objects
     let smap = match find_child(data, im_block, b"SMAP") {
         Some(s) => s,

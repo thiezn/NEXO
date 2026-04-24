@@ -1,12 +1,12 @@
 use super::block::{self, Block};
-use crate::extractor::common::audio_convert;
 use super::version::ScummVersion;
+use crate::extractor::common::audio_convert;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SoundType {
-    Digital,  // SBL - Sound Blaster / VOC
-    Adlib,    // ADL - AdLib MIDI
-    Roland,   // ROL - Roland MT-32
+    Digital,     // SBL - Sound Blaster / VOC
+    Adlib,       // ADL - AdLib MIDI
+    Roland,      // ROL - Roland MT-32
     GeneralMidi, // GMD - General MIDI
     PcSpeaker,   // SPK - PC Speaker
     Amiga,       // AMI - Amiga

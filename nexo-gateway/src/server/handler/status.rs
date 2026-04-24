@@ -1,6 +1,8 @@
 use crate::agent::{AgentCommand, AgentHandle};
 use crate::server::state::SharedState;
-use nexo_ws_schema::{Frame, HealthResponse, ModelStatusParams, StatusResponse, ToolsCatalogResponse};
+use nexo_ws_schema::{
+    Frame, HealthResponse, ModelStatusParams, StatusResponse, ToolsCatalogResponse,
+};
 
 use super::base::{ok_or_internal_error, parse_params};
 
@@ -44,11 +46,10 @@ pub(super) async fn handle_model_status(
     state: &SharedState,
     agent_handle: &AgentHandle,
 ) -> Frame {
-    let status_params: ModelStatusParams =
-        match parse_params(request_id, params, "model.status") {
-            Ok(p) => p,
-            Err(f) => return f,
-        };
+    let status_params: ModelStatusParams = match parse_params(request_id, params, "model.status") {
+        Ok(p) => p,
+        Err(f) => return f,
+    };
     tracing::info!(
         "Node {peer_id} model.status: loaded={:?}, available={:?}",
         status_params.loaded_models,
@@ -61,9 +62,7 @@ pub(super) async fn handle_model_status(
         sw.set_loaded_models(peer_id, status_params.loaded_models);
         sw.set_available_models(peer_id, status_params.available_models);
     }
-    if model_became_available
-        && let Err(e) = agent_handle.submit(AgentCommand::DrainQueue).await
-    {
+    if model_became_available && let Err(e) = agent_handle.submit(AgentCommand::DrainQueue).await {
         tracing::warn!("Failed to submit DrainQueue after ModelStatus: {e}");
     }
 

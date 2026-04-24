@@ -1,5 +1,5 @@
+use anyhow::{Context, Result};
 use std::collections::HashMap;
-use anyhow::{Result, Context};
 
 use super::decompress;
 use super::resource_map::{self, ResourceEntry, ResourceType};
@@ -18,11 +18,12 @@ pub struct ResourceManager {
 
 impl ResourceManager {
     pub fn new(game: &SciGameInfo) -> Result<Self> {
-        let entries = resource_map::parse_resource_map(game)
-            .context("Failed to parse resource map")?;
+        let entries =
+            resource_map::parse_resource_map(game).context("Failed to parse resource map")?;
 
         // Build index for O(1) lookup by (type, number)
-        let index: HashMap<(ResourceType, u16), usize> = entries.iter()
+        let index: HashMap<(ResourceType, u16), usize> = entries
+            .iter()
             .enumerate()
             .map(|(i, e)| ((e.res_type, e.number), i))
             .collect();
@@ -31,9 +32,7 @@ impl ResourceManager {
         let mut volumes = HashMap::new();
         for path in &game.volume_paths {
             // Extract volume number from filename extension (e.g., resource.001 -> 1)
-            let ext = path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("000");
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("000");
             let vol_num: u16 = ext.parse().unwrap_or(0);
 
             let data = std::fs::read(path)
@@ -51,46 +50,64 @@ impl ResourceManager {
 
     /// Get a decompressed resource by type and number.
     pub fn get_resource(&self, res_type: ResourceType, number: u16) -> Result<Vec<u8>> {
-        let entry_idx = self.index.get(&(res_type, number))
+        let entry_idx = self
+            .index
+            .get(&(res_type, number))
             .ok_or_else(|| anyhow::anyhow!("Resource {} {} not found", res_type.name(), number))?;
         let entry = &self.entries[*entry_idx];
 
-        let vol_data = self.volumes.get(&entry.volume)
+        let vol_data = self
+            .volumes
+            .get(&entry.volume)
             .ok_or_else(|| anyhow::anyhow!("Volume {} not loaded", entry.volume))?;
 
         let header = resource_volume::read_resource_header(
             vol_data,
             entry.offset as usize,
             self.game.vol_version,
-        ).with_context(|| format!("Failed to read header for {} {}", res_type.name(), number))?;
+        )
+        .with_context(|| format!("Failed to read header for {} {}", res_type.name(), number))?;
 
-        let raw_data = resource_volume::read_resource_data(
-            vol_data,
-            entry.offset as usize,
-            &header,
-        ).with_context(|| format!("Failed to read data for {} {}", res_type.name(), number))?;
+        let raw_data =
+            resource_volume::read_resource_data(vol_data, entry.offset as usize, &header)
+                .with_context(|| {
+                    format!("Failed to read data for {} {}", res_type.name(), number)
+                })?;
 
         if header.compression == 0 {
             Ok(raw_data.to_vec())
         } else {
             // Sanity check: unpacked_size shouldn't be unreasonably large
             if header.unpacked_size > 10_000_000 {
-                anyhow::bail!("Unreasonable unpacked_size {} for {} {}",
-                    header.unpacked_size, res_type.name(), number);
+                anyhow::bail!(
+                    "Unreasonable unpacked_size {} for {} {}",
+                    header.unpacked_size,
+                    res_type.name(),
+                    number
+                );
             }
             decompress::decompress(
                 raw_data,
                 header.unpacked_size,
                 header.compression,
                 self.game.version,
-            ).with_context(|| format!("Failed to decompress {} {} (comp={})",
-                res_type.name(), number, header.compression))
+            )
+            .with_context(|| {
+                format!(
+                    "Failed to decompress {} {} (comp={})",
+                    res_type.name(),
+                    number,
+                    header.compression
+                )
+            })
         }
     }
 
     /// List all resource numbers of a given type.
     pub fn list_resources(&self, res_type: ResourceType) -> Vec<u16> {
-        let mut numbers: Vec<u16> = self.entries.iter()
+        let mut numbers: Vec<u16> = self
+            .entries
+            .iter()
             .filter(|e| e.res_type == res_type)
             .map(|e| e.number)
             .collect();

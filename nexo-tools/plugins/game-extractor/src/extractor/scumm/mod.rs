@@ -1,5 +1,6 @@
 pub mod block;
 pub mod costume;
+mod extract;
 pub mod image_decode;
 pub mod index;
 pub mod monster_sou;
@@ -7,12 +8,11 @@ pub mod resource;
 pub mod room;
 pub mod sound;
 pub mod version;
-mod extract;
 
-use std::path::Path;
-use anyhow::Result;
 use crate::extractor::common::progress::ProgressBar;
 use crate::extractor::engine::{Engine, ExtractionSummary};
+use anyhow::Result;
+use std::path::Path;
 
 pub struct ScummEngine {
     game: version::GameInfo,
@@ -35,7 +35,11 @@ impl Engine for ScummEngine {
         &self.game.display_name
     }
 
-    fn extract(&self, output_root: &Path, progress: Option<&ProgressBar>) -> Result<ExtractionSummary> {
+    fn extract(
+        &self,
+        output_root: &Path,
+        progress: Option<&ProgressBar>,
+    ) -> Result<ExtractionSummary> {
         extract::extract_game(&self.game, output_root, progress)
     }
 }

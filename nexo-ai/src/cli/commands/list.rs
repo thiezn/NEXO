@@ -14,18 +14,19 @@ pub fn run() -> Result<()> {
 
     // Print header.
     println!(
-        "{:<25} {:<15} {:<15} {:<8} {:<12} DESCRIPTION",
-        "NAME", "FAMILY", "CATEGORIES", "SIZE", "DOWNLOADED"
+        "{:<25} {:<12} {:<18} {:<15} {:<8} {:<12} DESCRIPTION",
+        "NAME", "FAMILY", "BACKEND", "CATEGORIES", "SIZE", "DOWNLOADED"
     );
-    println!("{}", "-".repeat(95));
+    println!("{}", "-".repeat(116));
 
     for model in models {
         let cats: Vec<&str> = model.categories.iter().map(|c| c.as_str()).collect();
         let downloaded = if model.is_downloaded { "yes" } else { "no" };
         println!(
-            "{:<25} {:<15} {:<15} {:<8} {:<12} {}",
+            "{:<25} {:<12} {:<18} {:<15} {:<8} {:<12} {}",
             model.name,
             model.family,
+            model.backend,
             cats.join(","),
             format!("{:.1}G", model.size_gb),
             downloaded,

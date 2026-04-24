@@ -1,7 +1,7 @@
 use crate::server::state::SharedState;
 use nexo_ws_schema::{ErrorPayload, Frame, Method};
 
-use super::base::{forward_to_node, ForwardErrorCodes, IMAGE_ANALYSIS_TIMEOUT};
+use super::base::{ForwardErrorCodes, IMAGE_ANALYSIS_TIMEOUT, forward_to_node};
 
 /// Forward image.analyze to a vision-capable node without deserializing the
 /// (potentially multi-MB) base64 payload — the node validates the params.

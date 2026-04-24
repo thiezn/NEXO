@@ -15,9 +15,9 @@ use tracing::debug;
 pub enum DownloadError {
     #[error(
         "Model requires access approval on HuggingFace.\n\n  \
-        1. Visit: https://huggingface.co/{repo}\n  \
+        1. Visit: https://hf-mirror/{repo}\n  \
         2. Accept the license agreement\n  \
-        3. Create a token at: https://huggingface.co/settings/tokens\n  \
+        3. Create a token at: https://hf-mirror/settings/tokens\n  \
         4. Set: export HF_TOKEN=hf_...\n  \
         5. Retry the pull command"
     )]
@@ -25,7 +25,7 @@ pub enum DownloadError {
 
     #[error(
         "Authentication required for repository {repo}.\n\n  \
-        1. Create a token at: https://huggingface.co/settings/tokens\n     \
+        1. Create a token at: https://hf-mirror/settings/tokens\n     \
             (select at least \"Read\" access)\n  \
         2. Set: export HF_TOKEN=hf_...\n     \
             Or run: huggingface-cli login\n  \

@@ -9,11 +9,9 @@ pub fn overall_style() -> ProgressStyle {
 
 /// Style for a child / item-level progress bar (determinate).
 pub fn item_style() -> ProgressStyle {
-    ProgressStyle::with_template(
-        "  {prefix:.bold.green} [{bar:30.green/dim}] {pos}/{len} {msg}",
-    )
-    .unwrap()
-    .progress_chars("━╸─")
+    ProgressStyle::with_template("  {prefix:.bold.green} [{bar:30.green/dim}] {pos}/{len} {msg}")
+        .unwrap()
+        .progress_chars("━╸─")
 }
 
 /// Style for a spinner (indeterminate progress).

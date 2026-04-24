@@ -8,8 +8,7 @@ pub async fn run_init() -> utl_helpers::Result {
     let port: u16 = utl_helpers::interactive::number_input("Bind port", Some(6969u16))?;
 
     let log_levels = &["trace", "debug", "info", "warn", "error"];
-    let log_level_idx =
-        utl_helpers::interactive::select("Default log level", log_levels, Some(2))?;
+    let log_level_idx = utl_helpers::interactive::select("Default log level", log_levels, Some(2))?;
     let log_level = log_levels[log_level_idx];
 
     let tick_interval_ms: u64 =
@@ -24,10 +23,7 @@ pub async fn run_init() -> utl_helpers::Result {
     };
 
     config.save()?;
-    tracing::info!(
-        "Config saved to {}",
-        GatewayConfig::config_path().display()
-    );
+    tracing::info!("Config saved to {}", GatewayConfig::config_path().display());
 
     // Initialize the database
     let db_path = utl_helpers::resolve_path_str(&config.db_path)?;

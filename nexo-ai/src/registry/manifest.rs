@@ -1,6 +1,90 @@
+use crate::api::types::ModelCategory;
 use crate::download::{Component, ModelFile, ModelManifest};
-use crate::shared::types::ModelCategory;
 use std::sync::LazyLock;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFamily {
+    Whisper,
+    Voxtral,
+    Flux,
+    ZImage,
+    QwenImage,
+    Gemma4,
+}
+
+impl ModelFamily {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Whisper => "whisper",
+            Self::Voxtral => "voxtral",
+            Self::Flux => "flux",
+            Self::ZImage => "z_image",
+            Self::QwenImage => "qwen_image",
+            Self::Gemma4 => "gemma4",
+        }
+    }
+}
+
+impl std::fmt::Display for ModelFamily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CandleBackend {
+    Safetensors,
+    Gguf,
+}
+
+impl CandleBackend {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Safetensors => "candle-safetensors",
+            Self::Gguf => "candle-gguf",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenAiProvider {
+    MlxVlm,
+    MlxAudio,
+}
+
+impl OpenAiProvider {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MlxVlm => "mlx-vlm",
+            Self::MlxAudio => "mlx-audio",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelRuntime {
+    Candle(CandleBackend),
+    OpenAi {
+        provider: OpenAiProvider,
+        model_repo: String,
+    },
+}
+
+impl ModelRuntime {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Candle(backend) => backend.as_str(),
+            Self::OpenAi { provider, .. } => provider.as_str(),
+        }
+    }
+
+    pub fn remote_model_repo(&self) -> Option<&str> {
+        match self {
+            Self::OpenAi { model_repo, .. } => Some(model_repo.as_str()),
+            Self::Candle(_) => None,
+        }
+    }
+}
 
 /// Component types for AI model files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,9 +130,9 @@ impl Component for AiComponent {
 /// An AI model manifest with associated categories.
 pub struct AiModelManifest {
     pub manifest: ModelManifest<AiComponent>,
+    pub family: ModelFamily,
+    pub runtime: ModelRuntime,
     pub categories: Vec<ModelCategory>,
-    /// HuggingFace repo identifier for remote-served models (e.g. MLX).
-    pub hf_repo: Option<String>,
 }
 
 // ── Whisper ────────────────────────────────────────────────────────────────
@@ -58,7 +142,7 @@ fn whisper_large_v3_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "whisper-large-v3".to_string(),
-            family: "whisper".to_string(),
+            family: ModelFamily::Whisper.as_str().to_string(),
             description: "Whisper Large v3 — high accuracy transcription (~2.9 GB)".to_string(),
             size_gb: 2.9,
             files: vec![
@@ -90,8 +174,9 @@ fn whisper_large_v3_manifest() -> AiModelManifest {
                 },
             ],
         },
+        family: ModelFamily::Whisper,
+        runtime: ModelRuntime::Candle(CandleBackend::Safetensors),
         categories: vec![ModelCategory::Listen],
-        hf_repo: None,
     }
 }
 
@@ -100,7 +185,7 @@ fn whisper_large_v3_turbo_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "whisper-large-v3-turbo".to_string(),
-            family: "whisper".to_string(),
+            family: ModelFamily::Whisper.as_str().to_string(),
             description: "Whisper Large v3 Turbo — fast transcription, 4 decoder layers (~1.5 GB)"
                 .to_string(),
             size_gb: 1.5,
@@ -133,8 +218,349 @@ fn whisper_large_v3_turbo_manifest() -> AiModelManifest {
                 },
             ],
         },
+        family: ModelFamily::Whisper,
+        runtime: ModelRuntime::Candle(CandleBackend::Safetensors),
         categories: vec![ModelCategory::Listen],
-        hf_repo: None,
+    }
+}
+
+#[cfg(feature = "mlx")]
+fn mlx_whisper_large_v3_turbo_asr_fp16_manifest() -> AiModelManifest {
+    let repo = "mlx-community/whisper-large-v3-turbo-asr-fp16".to_string();
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "mlx-whisper-large-v3-turbo-asr-fp16".to_string(),
+            family: ModelFamily::Whisper.as_str().to_string(),
+            description: "Whisper Large v3 Turbo via MLX Audio — local nexo-managed files with MLX Audio serving inference (~1.5 GB)".to_string(),
+            size_gb: 1.5,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo.clone(),
+                    hf_filename: "config.json".to_string(),
+                    size_bytes: 1_301,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo.clone(),
+                    hf_filename: "generation_config.json".to_string(),
+                    size_bytes: 3_772,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model.safetensors.index.json".to_string(),
+                    size_bytes: 37_633,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo.clone(),
+                    hf_filename: "preprocessor_config.json".to_string(),
+                    size_bytes: 340,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "tokenizer.json".to_string(),
+                    size_bytes: 2_710_337,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "tokenizer_config.json".to_string(),
+                    size_bytes: 282_843,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "vocab.json".to_string(),
+                    size_bytes: 1_036_558,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "merges.txt".to_string(),
+                    size_bytes: 493_869,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "normalizer.json".to_string(),
+                    size_bytes: 52_666,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "special_tokens_map.json".to_string(),
+                    size_bytes: 2_186,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "added_tokens.json".to_string(),
+                    size_bytes: 34_648,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model.safetensors".to_string(),
+                    size_bytes: 1_613_977_443,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        family: ModelFamily::Whisper,
+        runtime: ModelRuntime::OpenAi {
+            provider: OpenAiProvider::MlxAudio,
+            model_repo: repo,
+        },
+        categories: vec![ModelCategory::Listen],
+    }
+}
+
+#[cfg(feature = "mlx")]
+fn mlx_voxtral_4b_tts_2603_bf16_manifest() -> AiModelManifest {
+    let repo = "mlx-community/Voxtral-4B-TTS-2603-mlx-bf16".to_string();
+    AiModelManifest {
+        manifest: ModelManifest {
+            name: "mlx-voxtral-4b-tts-2603-bf16".to_string(),
+            family: ModelFamily::Voxtral.as_str().to_string(),
+            description:
+                "Voxtral 4B TTS via MLX Audio — local nexo-managed files with MLX Audio serving inference (~8.0 GB)"
+                    .to_string(),
+            size_gb: 8.0,
+            files: vec![
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo.clone(),
+                    hf_filename: "config.json".to_string(),
+                    size_bytes: 4_140,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Config,
+                    hf_repo: repo.clone(),
+                    hf_filename: "params.json".to_string(),
+                    size_bytes: 3_482,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Tokenizer,
+                    hf_repo: repo.clone(),
+                    hf_filename: "tekken.json".to_string(),
+                    size_bytes: 14_894_731,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00001-of-00002.safetensors".to_string(),
+                    size_bytes: 5_347_995_246,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::ModelShard,
+                    hf_repo: repo.clone(),
+                    hf_filename: "model-00002-of-00002.safetensors".to_string(),
+                    size_bytes: 2_656_763_924,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/ar_male.safetensors".to_string(),
+                    size_bytes: 411_736,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/casual_female.safetensors".to_string(),
+                    size_bytes: 1_314_904,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/casual_male.safetensors".to_string(),
+                    size_bytes: 903_256,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/cheerful_female.safetensors".to_string(),
+                    size_bytes: 811_096,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/de_female.safetensors".to_string(),
+                    size_bytes: 903_256,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/de_male.safetensors".to_string(),
+                    size_bytes: 1_001_560,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/es_female.safetensors".to_string(),
+                    size_bytes: 847_960,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/es_male.safetensors".to_string(),
+                    size_bytes: 1_278_040,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/fr_female.safetensors".to_string(),
+                    size_bytes: 596_056,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/fr_male.safetensors".to_string(),
+                    size_bytes: 596_056,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/hi_female.safetensors".to_string(),
+                    size_bytes: 528_472,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/hi_male.safetensors".to_string(),
+                    size_bytes: 577_624,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/it_female.safetensors".to_string(),
+                    size_bytes: 1_056_856,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/it_male.safetensors".to_string(),
+                    size_bytes: 1_032_280,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/neutral_female.safetensors".to_string(),
+                    size_bytes: 1_339_480,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/neutral_male.safetensors".to_string(),
+                    size_bytes: 1_038_424,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/nl_female.safetensors".to_string(),
+                    size_bytes: 897_112,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/nl_male.safetensors".to_string(),
+                    size_bytes: 847_960,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/pt_female.safetensors".to_string(),
+                    size_bytes: 1_075_288,
+                    gated: false,
+                    sha256: None,
+                },
+                ModelFile {
+                    component: AiComponent::Model,
+                    hf_repo: repo.clone(),
+                    hf_filename: "voice_embedding/pt_male.safetensors".to_string(),
+                    size_bytes: 884_824,
+                    gated: false,
+                    sha256: None,
+                },
+            ],
+        },
+        family: ModelFamily::Voxtral,
+        runtime: ModelRuntime::OpenAi {
+            provider: OpenAiProvider::MlxAudio,
+            model_repo: repo,
+        },
+        categories: vec![ModelCategory::Talk],
     }
 }
 
@@ -143,7 +569,7 @@ fn distil_large_v3_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "distil-large-v3".to_string(),
-            family: "whisper".to_string(),
+            family: ModelFamily::Whisper.as_str().to_string(),
             description: "Distil-Whisper Large v3 — distilled, 2 decoder layers (~1.4 GB)"
                 .to_string(),
             size_gb: 1.4,
@@ -176,8 +602,9 @@ fn distil_large_v3_manifest() -> AiModelManifest {
                 },
             ],
         },
+        family: ModelFamily::Whisper,
+        runtime: ModelRuntime::Candle(CandleBackend::Safetensors),
         categories: vec![ModelCategory::Listen],
-        hf_repo: None,
     }
 }
 
@@ -188,7 +615,7 @@ fn flux_2_klein_4b_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "flux-2-klein-4b".to_string(),
-            family: "flux".to_string(),
+            family: ModelFamily::Flux.as_str().to_string(),
             description: "Flux.2 Klein 4B — fast 4-step image generation (~12 GB)".to_string(),
             size_gb: 12.0,
             files: vec![
@@ -235,15 +662,16 @@ fn flux_2_klein_4b_manifest() -> AiModelManifest {
                 ModelFile {
                     component: AiComponent::Tokenizer,
                     hf_repo: repo,
-                    hf_filename: "tokenizer.json".to_string(),
+                    hf_filename: "tokenizer/tokenizer.json".to_string(),
                     size_bytes: 11_422_654,
                     gated: false,
                     sha256: None,
                 },
             ],
         },
+        family: ModelFamily::Flux,
+        runtime: ModelRuntime::Candle(CandleBackend::Safetensors),
         categories: vec![ModelCategory::Imagine],
-        hf_repo: None,
     }
 }
 
@@ -252,7 +680,7 @@ fn flux_2_klein_9b_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "flux-2-klein-9b".to_string(),
-            family: "flux".to_string(),
+            family: ModelFamily::Flux.as_str().to_string(),
             description: "Flux.2 Klein 9B — high quality 4-step image generation (~35 GB)"
                 .to_string(),
             size_gb: 34.7,
@@ -339,8 +767,9 @@ fn flux_2_klein_9b_manifest() -> AiModelManifest {
                 },
             ],
         },
+        family: ModelFamily::Flux,
+        runtime: ModelRuntime::Candle(CandleBackend::Safetensors),
         categories: vec![ModelCategory::Imagine],
-        hf_repo: None,
     }
 }
 
@@ -349,7 +778,7 @@ fn flux_2_dev_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "flux-2-dev".to_string(),
-            family: "flux".to_string(),
+            family: ModelFamily::Flux.as_str().to_string(),
             description: "Flux.2 Dev — full precision image generation (~165 GB)".to_string(),
             size_gb: 165.0,
             files: vec![
@@ -550,8 +979,9 @@ fn flux_2_dev_manifest() -> AiModelManifest {
                 },
             ],
         },
+        family: ModelFamily::Flux,
+        runtime: ModelRuntime::Candle(CandleBackend::Safetensors),
         categories: vec![ModelCategory::Imagine],
-        hf_repo: None,
     }
 }
 
@@ -563,7 +993,7 @@ fn z_image_turbo_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "z-image-turbo".to_string(),
-            family: "z_image".to_string(),
+            family: ModelFamily::ZImage.as_str().to_string(),
             description:
                 "Z-Image Turbo — 6B text-to-image, Q4_K_M quantized for Apple Silicon (~12 GB)"
                     .to_string(),
@@ -621,8 +1051,9 @@ fn z_image_turbo_manifest() -> AiModelManifest {
                 },
             ],
         },
+        family: ModelFamily::ZImage,
+        runtime: ModelRuntime::Candle(CandleBackend::Gguf),
         categories: vec![ModelCategory::Imagine],
-        hf_repo: None,
     }
 }
 
@@ -772,13 +1203,14 @@ fn qwen_image_bf16_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "qwen-image-bf16".to_string(),
-            family: "qwen_image".to_string(),
+            family: ModelFamily::QwenImage.as_str().to_string(),
             description: "Qwen-Image BF16 — full precision text-to-image (~54 GB)".to_string(),
             size_gb: 53.7,
             files,
         },
+        family: ModelFamily::QwenImage,
+        runtime: ModelRuntime::Candle(CandleBackend::Safetensors),
         categories: vec![ModelCategory::Imagine],
-        hf_repo: None,
     }
 }
 
@@ -795,14 +1227,15 @@ fn qwen_image_q8_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "qwen-image-q8".to_string(),
-            family: "qwen_image".to_string(),
+            family: ModelFamily::QwenImage.as_str().to_string(),
             description: "Qwen-Image Q8_0 — high quality quantized text-to-image (~38 GB)"
                 .to_string(),
             size_gb: 36.0,
             files,
         },
+        family: ModelFamily::QwenImage,
+        runtime: ModelRuntime::Candle(CandleBackend::Gguf),
         categories: vec![ModelCategory::Imagine],
-        hf_repo: None,
     }
 }
 
@@ -819,13 +1252,14 @@ fn qwen_image_q6_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "qwen-image-q6".to_string(),
-            family: "qwen_image".to_string(),
+            family: ModelFamily::QwenImage.as_str().to_string(),
             description: "Qwen-Image Q6_K — balanced quantized text-to-image (~33 GB)".to_string(),
             size_gb: 31.3,
             files,
         },
+        family: ModelFamily::QwenImage,
+        runtime: ModelRuntime::Candle(CandleBackend::Gguf),
         categories: vec![ModelCategory::Imagine],
-        hf_repo: None,
     }
 }
 
@@ -842,13 +1276,14 @@ fn qwen_image_q4_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "qwen-image-q4".to_string(),
-            family: "qwen_image".to_string(),
+            family: ModelFamily::QwenImage.as_str().to_string(),
             description: "Qwen-Image Q4_K_S — fast quantized text-to-image (~29 GB)".to_string(),
             size_gb: 27.0,
             files,
         },
+        family: ModelFamily::QwenImage,
+        runtime: ModelRuntime::Candle(CandleBackend::Gguf),
         categories: vec![ModelCategory::Imagine],
-        hf_repo: None,
     }
 }
 
@@ -881,17 +1316,18 @@ fn gemma4_manifest(
     AiModelManifest {
         manifest: ModelManifest {
             name: name.to_string(),
-            family: "gemma4".to_string(),
+            family: ModelFamily::Gemma4.as_str().to_string(),
             description: description.to_string(),
             size_gb,
             files,
         },
+        family: ModelFamily::Gemma4,
+        runtime: ModelRuntime::Candle(CandleBackend::Safetensors),
         categories: vec![
             ModelCategory::Chat,
             ModelCategory::Tool,
             ModelCategory::Image,
         ],
-        hf_repo: None,
     }
 }
 
@@ -1087,7 +1523,7 @@ fn gemma_4_e2b_it_q5_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "gemma-4-e2b-it-q5".to_string(),
-            family: "gemma4".to_string(),
+            family: ModelFamily::Gemma4.as_str().to_string(),
             description:
                 "Gemma 4 E2B IT Q5_K_M — quantized multimodal chat, tool & vision (~4.1 GB)"
                     .to_string(),
@@ -1128,13 +1564,14 @@ fn gemma_4_e2b_it_q5_manifest() -> AiModelManifest {
                 },
             ],
         },
+        family: ModelFamily::Gemma4,
+        runtime: ModelRuntime::Candle(CandleBackend::Gguf),
         categories: vec![
             ModelCategory::Chat,
             ModelCategory::Tool,
             ModelCategory::Image,
             ModelCategory::Listen,
         ],
-        hf_repo: None,
     }
 }
 
@@ -1144,7 +1581,7 @@ fn gemma_4_26b_a4b_it_q4_manifest() -> AiModelManifest {
     AiModelManifest {
         manifest: ModelManifest {
             name: "gemma-4-26b-a4b-it-q4".to_string(),
-            family: "gemma4".to_string(),
+            family: ModelFamily::Gemma4.as_str().to_string(),
             description:
                 "Gemma 4 26B-A4B IT UD-Q4_K_M — quantized MoE multimodal chat, tool & vision (~17.0 GB)"
                     .to_string(),
@@ -1185,12 +1622,13 @@ fn gemma_4_26b_a4b_it_q4_manifest() -> AiModelManifest {
                 },
             ],
         },
+        family: ModelFamily::Gemma4,
+        runtime: ModelRuntime::Candle(CandleBackend::Gguf),
         categories: vec![
             ModelCategory::Chat,
             ModelCategory::Tool,
             ModelCategory::Image,
         ],
-        hf_repo: None,
     }
 }
 
@@ -1236,6 +1674,17 @@ fn mlx_manifest(
         });
     }
 
+    if let Some(size) = config_sizes.chat_template {
+        files.push(ModelFile {
+            component: AiComponent::Config,
+            hf_repo: repo.to_string(),
+            hf_filename: "chat_template.jinja".to_string(),
+            size_bytes: size,
+            gated: false,
+            sha256: None,
+        });
+    }
+
     files.push(ModelFile {
         component: AiComponent::Tokenizer,
         hf_repo: repo.to_string(),
@@ -1248,17 +1697,21 @@ fn mlx_manifest(
     AiModelManifest {
         manifest: ModelManifest {
             name: name.to_string(),
-            family: "mlx".to_string(),
+            family: ModelFamily::Gemma4.as_str().to_string(),
             description: description.to_string(),
             size_gb,
             files,
+        },
+        family: ModelFamily::Gemma4,
+        runtime: ModelRuntime::OpenAi {
+            provider: OpenAiProvider::MlxVlm,
+            model_repo: repo.to_string(),
         },
         categories: vec![
             ModelCategory::Chat,
             ModelCategory::Tool,
             ModelCategory::Image,
         ],
-        hf_repo: Some(repo.to_string()),
     }
 }
 
@@ -1270,6 +1723,7 @@ struct MlxConfigSizes {
     tokenizer_config: u64,
     generation: u64,
     tokenizer: u64,
+    chat_template: Option<u64>,
 }
 
 #[cfg(feature = "mlx")]
@@ -1287,6 +1741,7 @@ fn mlx_gemma_4_e2b_it_8bit_manifest() -> AiModelManifest {
             tokenizer_config: 2_685,
             generation: 208,
             tokenizer: 32_169_626,
+            chat_template: Some(16_317),
         },
     )
 }
@@ -1306,6 +1761,7 @@ fn mlx_gemma_4_26b_a4b_4bit_manifest() -> AiModelManifest {
             tokenizer_config: 1_498,
             generation: 181,
             tokenizer: 32_170_070,
+            chat_template: None,
         },
     )
 }
@@ -1325,6 +1781,7 @@ fn mlx_gemma_4_31b_it_4bit_manifest() -> AiModelManifest {
             tokenizer_config: 2_685,
             generation: 208,
             tokenizer: 32_169_626,
+            chat_template: Some(16_448),
         },
     )
 }
@@ -1364,6 +1821,8 @@ fn build_all_manifests() -> Vec<AiModelManifest> {
     // MLX models (served via mlx_vlm server)
     #[cfg(feature = "mlx")]
     {
+        all.push(mlx_whisper_large_v3_turbo_asr_fp16_manifest());
+        all.push(mlx_voxtral_4b_tts_2603_bf16_manifest());
         all.push(mlx_gemma_4_e2b_it_8bit_manifest());
         all.push(mlx_gemma_4_26b_a4b_4bit_manifest());
         all.push(mlx_gemma_4_31b_it_4bit_manifest());
@@ -1427,7 +1886,7 @@ mod tests {
 
     #[test]
     fn known_manifests_count() {
-        let expected = if cfg!(feature = "mlx") { 24 } else { 21 };
+        let expected = if cfg!(feature = "mlx") { 26 } else { 21 };
         assert_eq!(known_manifests().len(), expected);
     }
 
@@ -1449,6 +1908,12 @@ mod tests {
                 .iter()
                 .any(|m| m.manifest.name == "distil-large-v3")
         );
+        #[cfg(feature = "mlx")]
+        assert!(
+            manifests
+                .iter()
+                .any(|m| m.manifest.name == "mlx-whisper-large-v3-turbo-asr-fp16")
+        );
     }
 
     #[test]
@@ -1459,7 +1924,20 @@ mod tests {
             "distil-large-v3",
         ] {
             let m = find_manifest(name).unwrap();
-            assert_eq!(m.manifest.family, "whisper");
+            assert_eq!(m.family, ModelFamily::Whisper);
+            assert_eq!(m.runtime.as_str(), "candle-safetensors");
+            assert!(m.categories.contains(&ModelCategory::Listen));
+        }
+
+        #[cfg(feature = "mlx")]
+        {
+            let m = find_manifest("mlx-whisper-large-v3-turbo-asr-fp16").unwrap();
+            assert_eq!(m.family, ModelFamily::Whisper);
+            assert_eq!(m.runtime.as_str(), "mlx-audio");
+            assert_eq!(
+                m.runtime.remote_model_repo(),
+                Some("mlx-community/whisper-large-v3-turbo-asr-fp16")
+            );
             assert!(m.categories.contains(&ModelCategory::Listen));
         }
     }
@@ -1467,7 +1945,8 @@ mod tests {
     #[test]
     fn manifests_for_listen_contains_whisper() {
         let listen = manifests_for_category(ModelCategory::Listen);
-        assert_eq!(listen.len(), 4); // 3 whisper + 1 gemma-4-e2b-it-q5
+        let expected = if cfg!(feature = "mlx") { 5 } else { 4 };
+        assert_eq!(listen.len(), expected); // local whisper + gemma + optional mlx whisper
         assert!(
             listen
                 .iter()
@@ -1477,6 +1956,72 @@ mod tests {
             listen
                 .iter()
                 .any(|m| m.manifest.name == "gemma-4-e2b-it-q5")
+        );
+        #[cfg(feature = "mlx")]
+        assert!(
+            listen
+                .iter()
+                .any(|m| m.manifest.name == "mlx-whisper-large-v3-turbo-asr-fp16")
+        );
+    }
+
+    #[cfg(feature = "mlx")]
+    #[test]
+    fn manifests_for_listen_contains_mlx_whisper() {
+        let listen = manifests_for_category(ModelCategory::Listen);
+        assert!(
+            listen
+                .iter()
+                .any(|m| m.manifest.name == "mlx-whisper-large-v3-turbo-asr-fp16")
+        );
+        let m = find_manifest("mlx-whisper-large-v3-turbo-asr-fp16").unwrap();
+        assert_eq!(m.runtime.as_str(), "mlx-audio");
+        assert_eq!(
+            m.runtime.remote_model_repo(),
+            Some("mlx-community/whisper-large-v3-turbo-asr-fp16")
+        );
+        assert!(
+            m.manifest
+                .files
+                .iter()
+                .any(|file| file.hf_filename == "model.safetensors")
+        );
+        assert!(
+            m.manifest
+                .files
+                .iter()
+                .any(|file| file.hf_filename == "tokenizer.json")
+        );
+    }
+
+    #[cfg(feature = "mlx")]
+    #[test]
+    fn manifests_for_talk_contains_voxtral() {
+        let talk = manifests_for_category(ModelCategory::Talk);
+        assert!(
+            talk.iter()
+                .any(|m| m.manifest.name == "mlx-voxtral-4b-tts-2603-bf16")
+        );
+        let voxtral = find_manifest("mlx-voxtral-4b-tts-2603-bf16").unwrap();
+        assert_eq!(voxtral.family, ModelFamily::Voxtral);
+        assert_eq!(voxtral.runtime.as_str(), "mlx-audio");
+        assert_eq!(
+            voxtral.runtime.remote_model_repo(),
+            Some("mlx-community/Voxtral-4B-TTS-2603-mlx-bf16")
+        );
+        assert!(
+            voxtral
+                .manifest
+                .files
+                .iter()
+                .any(|file| file.hf_filename == "tekken.json")
+        );
+        assert!(
+            voxtral
+                .manifest
+                .files
+                .iter()
+                .any(|file| file.hf_filename == "voice_embedding/neutral_male.safetensors")
         );
     }
 
@@ -1505,7 +2050,8 @@ mod tests {
     fn flux_manifests_are_imagine_category() {
         for name in ["flux-2-klein-4b", "flux-2-klein-9b", "flux-2-dev"] {
             let m = find_manifest(name).unwrap();
-            assert_eq!(m.manifest.family, "flux");
+            assert_eq!(m.family, ModelFamily::Flux);
+            assert_eq!(m.runtime.as_str(), "candle-safetensors");
             assert!(m.categories.contains(&ModelCategory::Imagine));
         }
     }
@@ -1531,7 +2077,8 @@ mod tests {
     #[test]
     fn z_image_turbo_manifest_has_all_components() {
         let m = find_manifest("z-image-turbo").unwrap();
-        assert_eq!(m.manifest.family, "z_image");
+        assert_eq!(m.family, ModelFamily::ZImage);
+        assert_eq!(m.runtime.as_str(), "candle-gguf");
         assert!(m.categories.contains(&ModelCategory::Imagine));
         assert!(
             m.manifest
@@ -1590,7 +2137,7 @@ mod tests {
             "qwen-image-q4",
         ] {
             let m = find_manifest(name).unwrap();
-            assert_eq!(m.manifest.family, "qwen_image");
+            assert_eq!(m.family, ModelFamily::QwenImage);
             assert!(m.categories.contains(&ModelCategory::Imagine));
         }
     }
@@ -1671,7 +2218,8 @@ mod tests {
             "gemma-4-31b-it",
         ] {
             let m = find_manifest(name).unwrap();
-            assert_eq!(m.manifest.family, "gemma4");
+            assert_eq!(m.family, ModelFamily::Gemma4);
+            assert_eq!(m.runtime.as_str(), "candle-safetensors");
             assert!(m.categories.contains(&ModelCategory::Chat));
             assert!(m.categories.contains(&ModelCategory::Tool));
             assert!(m.categories.contains(&ModelCategory::Image));
@@ -1693,7 +2241,8 @@ mod tests {
     fn gemma4_gguf_manifests_have_multimodal_categories() {
         // E2B GGUF: Chat + Tool + Image + Listen
         let e2b = find_manifest("gemma-4-e2b-it-q5").unwrap();
-        assert_eq!(e2b.manifest.family, "gemma4");
+        assert_eq!(e2b.family, ModelFamily::Gemma4);
+        assert_eq!(e2b.runtime.as_str(), "candle-gguf");
         assert!(e2b.categories.contains(&ModelCategory::Chat));
         assert!(e2b.categories.contains(&ModelCategory::Tool));
         assert!(e2b.categories.contains(&ModelCategory::Image));
@@ -1701,11 +2250,30 @@ mod tests {
 
         // 26B GGUF: Chat + Tool + Image (no audio)
         let big = find_manifest("gemma-4-26b-a4b-it-q4").unwrap();
-        assert_eq!(big.manifest.family, "gemma4");
+        assert_eq!(big.family, ModelFamily::Gemma4);
+        assert_eq!(big.runtime.as_str(), "candle-gguf");
         assert!(big.categories.contains(&ModelCategory::Chat));
         assert!(big.categories.contains(&ModelCategory::Tool));
         assert!(big.categories.contains(&ModelCategory::Image));
         assert!(!big.categories.contains(&ModelCategory::Listen));
+    }
+
+    #[cfg(feature = "mlx")]
+    #[test]
+    fn mlx_gemma4_manifests_use_openai_runtime() {
+        let m = find_manifest("mlx-gemma-4-e2b-it-8bit").unwrap();
+        assert_eq!(m.family, ModelFamily::Gemma4);
+        assert_eq!(m.runtime.as_str(), "mlx-vlm");
+        assert_eq!(
+            m.runtime.remote_model_repo(),
+            Some("mlx-community/gemma-4-E2B-it-8bit")
+        );
+        assert!(
+            m.manifest
+                .files
+                .iter()
+                .any(|f| f.hf_filename == "chat_template.jinja")
+        );
     }
 
     #[test]

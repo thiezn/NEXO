@@ -54,10 +54,7 @@ pub fn write_result(
 
     let json_path = output_dir.join("book.json");
     let file = std::fs::File::create(&json_path).map_err(|e| {
-        utl_helpers::Error::Io(format!(
-            "Failed to create '{}': {e}",
-            json_path.display()
-        ))
+        utl_helpers::Error::Io(format!("Failed to create '{}': {e}", json_path.display()))
     })?;
     serde_json::to_writer_pretty(BufWriter::new(file), &result.output)
         .map_err(|e| utl_helpers::Error::Other(format!("JSON serialization: {e}")))?;

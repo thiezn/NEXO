@@ -1,18 +1,18 @@
-pub mod version;
+pub mod decompress;
+pub mod extract;
+pub mod palette;
+pub mod picture;
+pub mod resource;
 pub mod resource_map;
 pub mod resource_volume;
-pub mod decompress;
-pub mod resource;
-pub mod palette;
-pub mod view;
-pub mod picture;
 pub mod sound;
-pub mod extract;
+pub mod version;
+pub mod view;
 
-use std::path::Path;
+use crate::extractor::common::progress::ProgressBar;
 use crate::extractor::engine::{Engine, ExtractionSummary};
 use anyhow::Result;
-use crate::extractor::common::progress::ProgressBar;
+use std::path::Path;
 
 pub struct SciEngine {
     game: version::SciGameInfo,
@@ -27,9 +27,17 @@ impl SciEngine {
 }
 
 impl Engine for SciEngine {
-    fn name(&self) -> &str { "SCI" }
-    fn game_name(&self) -> &str { &self.game.display_name }
-    fn extract(&self, output_root: &Path, progress: Option<&ProgressBar>) -> Result<ExtractionSummary> {
+    fn name(&self) -> &str {
+        "SCI"
+    }
+    fn game_name(&self) -> &str {
+        &self.game.display_name
+    }
+    fn extract(
+        &self,
+        output_root: &Path,
+        progress: Option<&ProgressBar>,
+    ) -> Result<ExtractionSummary> {
         extract::extract_game(&self.game, output_root, progress)
     }
 }

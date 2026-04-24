@@ -18,6 +18,8 @@ tracing = "0"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 base64 = "0"
+ratatui = { version = "0", features = ["crossterm"] }
+crossterm = "0"
 
 [lints]
 workspace = true

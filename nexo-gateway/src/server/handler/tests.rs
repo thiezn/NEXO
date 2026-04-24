@@ -1,10 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
-use crate::agent::{AgentHandle};
+use crate::agent::AgentHandle;
 use crate::server::state::{GatewayState, PeerInfo, dummy_sender};
-use nexo_ws_schema::{Frame, Method, Role};
+use nexo_ws_schema::{EventKind, Frame, Method, Role};
 use sqlx::SqlitePool;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
 fn make_state() -> SharedState {
@@ -248,6 +249,166 @@ async fn dispatch_tools_execute_tool_not_found(pool: SqlitePool) {
     if let Frame::Response { ok, error, .. } = resp {
         assert!(!ok);
         assert_eq!(error.unwrap().code, "tool_not_found");
+    } else {
+        panic!("Expected error response");
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn dispatch_send_routes_message_to_target_user(pool: SqlitePool) {
+    let state = make_state();
+    let ah = make_agent_handle(&state, &pool);
+    let (target_tx, mut target_rx) = mpsc::channel(1);
+
+    {
+        let mut s = state.write().await;
+        s.add_peer(
+            PeerInfo {
+                id: "sender-peer".into(),
+                client_id: "user-a".into(),
+                role: Role::User,
+                scopes: vec![],
+                capabilities: vec![],
+                commands: vec![],
+                device_id: None,
+                connected_at: chrono::Utc::now(),
+            },
+            dummy_sender(),
+        );
+        s.add_peer(
+            PeerInfo {
+                id: "target-peer".into(),
+                client_id: "user-b".into(),
+                role: Role::User,
+                scopes: vec![],
+                capabilities: vec![],
+                commands: vec![],
+                device_id: None,
+                connected_at: chrono::Utc::now(),
+            },
+            target_tx,
+        );
+    }
+
+    let resp = dispatch(
+        "req-1",
+        &Method::Send,
+        serde_json::json!({
+            "target": "user-b",
+            "payload": {"text": "hello"},
+            "idempotencyKey": "k1"
+        }),
+        "sender-peer",
+        &state,
+        &pool,
+        &ah,
+    )
+    .await;
+
+    if let Frame::Response { ok, payload, .. } = resp {
+        assert!(ok);
+        assert_eq!(payload.unwrap()["delivered"], true);
+    } else {
+        panic!("Expected response");
+    }
+
+    match target_rx.recv().await {
+        Some(Frame::Event { event, payload, .. }) => {
+            assert_eq!(event, EventKind::Message);
+            assert_eq!(payload["from"], "user-a");
+            assert_eq!(payload["target"], "user-b");
+            assert_eq!(payload["payload"]["text"], "hello");
+            assert!(payload["messageId"].as_str().is_some());
+        }
+        other => panic!("Expected message event, got {other:?}"),
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn dispatch_send_to_unknown_target_reports_not_delivered(pool: SqlitePool) {
+    let state = make_state();
+    let ah = make_agent_handle(&state, &pool);
+
+    {
+        let mut s = state.write().await;
+        s.add_peer(
+            PeerInfo {
+                id: "sender-peer".into(),
+                client_id: "user-a".into(),
+                role: Role::User,
+                scopes: vec![],
+                capabilities: vec![],
+                commands: vec![],
+                device_id: None,
+                connected_at: chrono::Utc::now(),
+            },
+            dummy_sender(),
+        );
+    }
+
+    let resp = dispatch(
+        "req-1",
+        &Method::Send,
+        serde_json::json!({
+            "target": "user-b",
+            "payload": {"text": "hello"},
+            "idempotencyKey": "k1"
+        }),
+        "sender-peer",
+        &state,
+        &pool,
+        &ah,
+    )
+    .await;
+
+    if let Frame::Response { ok, payload, .. } = resp {
+        assert!(ok);
+        assert_eq!(payload.unwrap()["delivered"], false);
+    } else {
+        panic!("Expected response");
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn dispatch_send_from_node_rejected(pool: SqlitePool) {
+    let state = make_state();
+    let ah = make_agent_handle(&state, &pool);
+
+    {
+        let mut s = state.write().await;
+        s.add_peer(
+            PeerInfo {
+                id: "node-peer".into(),
+                client_id: "node-a".into(),
+                role: Role::Node,
+                scopes: vec![],
+                capabilities: vec![],
+                commands: vec![],
+                device_id: None,
+                connected_at: chrono::Utc::now(),
+            },
+            dummy_sender(),
+        );
+    }
+
+    let resp = dispatch(
+        "req-1",
+        &Method::Send,
+        serde_json::json!({
+            "target": "user-b",
+            "payload": {"text": "hello"},
+            "idempotencyKey": "k1"
+        }),
+        "node-peer",
+        &state,
+        &pool,
+        &ah,
+    )
+    .await;
+
+    if let Frame::Response { ok, error, .. } = resp {
+        assert!(!ok);
+        assert_eq!(error.unwrap().code, "forbidden");
     } else {
         panic!("Expected error response");
     }

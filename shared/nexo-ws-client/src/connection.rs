@@ -79,9 +79,7 @@ impl NexoConnection {
 
     /// Send a raw JSON string (for testing/debugging).
     pub(crate) async fn send_raw(&mut self, json: &str) -> Result<()> {
-        self.ws
-            .send(Message::Text(json.to_string().into()))
-            .await?;
+        self.ws.send(Message::Text(json.to_string().into())).await?;
         Ok(())
     }
 
@@ -157,10 +155,7 @@ mod tests {
     #[test]
     fn host_from_url_parses_correctly() {
         assert_eq!(host_from_url("ws://127.0.0.1:6969"), "127.0.0.1:6969");
-        assert_eq!(
-            host_from_url("wss://example.com/path"),
-            "example.com"
-        );
+        assert_eq!(host_from_url("wss://example.com/path"), "example.com");
         assert_eq!(host_from_url("localhost:8080"), "localhost:8080");
     }
 }

@@ -1,5 +1,5 @@
-use crate::shared::model_traits::*;
-use crate::shared::types::*;
+use crate::api::model_traits::*;
+use crate::api::types::*;
 use anyhow::Result;
 
 pub struct StubModel {

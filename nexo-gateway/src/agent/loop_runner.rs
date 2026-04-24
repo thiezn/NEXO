@@ -179,8 +179,13 @@ pub async fn run(
                     None,
                     None,
                 );
-                let _ = super::session::finish_run(db, run_id, AgentStatus::Completed, Some(&visible_text))
-                    .await;
+                let _ = super::session::finish_run(
+                    db,
+                    run_id,
+                    AgentStatus::Completed,
+                    Some(&visible_text),
+                )
+                .await;
                 super::locks::release_all_for_run(db, run_id).await.ok();
                 return;
             }
@@ -779,7 +784,9 @@ fn emit_queued_event(event_tx: &broadcast::Sender<Frame>, run_id: &str, session_
         run_id,
         session_id,
         AgentStatus::Queued,
-        Some("No inference node is currently available. Your request has been queued and will be processed as soon as a node becomes available."),
+        Some(
+            "No inference node is currently available. Your request has been queued and will be processed as soon as a node becomes available.",
+        ),
         None,
         None,
     );
@@ -800,7 +807,9 @@ fn emit_event(
     content: Option<&str>,
     tool_name: Option<&str>,
 ) {
-    emit_event_with_thinking(event_tx, run_id, session_id, status, content, tool_name, None);
+    emit_event_with_thinking(
+        event_tx, run_id, session_id, status, content, tool_name, None,
+    );
 }
 
 fn emit_event_with_thinking(
@@ -832,7 +841,6 @@ fn emit_event_with_thinking(
 /// Gemma 4 emits thinking content between `<|channel>thought\n` and `<channel|>` markers.
 /// Returns `(visible_text, Option<thinking_content>)`.
 fn strip_thinking_content(raw: &str) -> (String, Option<String>) {
-
     let mut visible = String::new();
     let mut thinking = String::new();
     let mut rest = raw;

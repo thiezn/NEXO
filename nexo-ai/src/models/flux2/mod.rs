@@ -1,22 +1,21 @@
-pub(crate) mod config;
-pub(crate) mod pipeline;
-pub(crate) mod quantized_transformer;
-pub(crate) mod sampling;
-pub(crate) mod transformer;
-pub(crate) mod vae;
+pub mod candle;
+pub mod common;
+pub mod openai;
+
+pub use common::config;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::shared::model_traits::{ImagineModel, ModelInfo};
-use crate::shared::types::{ImagineRequest, ImagineResponse, ModelCategory};
+use crate::api::model_traits::{ImagineModel, ModelInfo};
+use crate::api::types::{ImagineRequest, ImagineResponse, ModelCategory};
 
 pub struct FluxModel {
     name: String,
     memory_bytes: u64,
     model_dir: PathBuf,
-    loaded: Option<pipeline::LoadedState>,
+    loaded: Option<candle::pipeline::LoadedState>,
 }
 
 impl FluxModel {
@@ -56,7 +55,7 @@ impl ModelInfo for FluxModel {
             return Ok(());
         }
         let variant = config::FluxVariant::from_name(&self.name);
-        self.loaded = Some(pipeline::load(&self.model_dir, variant)?);
+        self.loaded = Some(candle::pipeline::load(&self.model_dir, variant)?);
         Ok(())
     }
 
@@ -75,7 +74,7 @@ impl ImagineModel for FluxModel {
             .loaded
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?;
-        pipeline::imagine(state, request)
+        candle::pipeline::imagine(state, request)
     }
 }
 

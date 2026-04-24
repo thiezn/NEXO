@@ -92,13 +92,34 @@ mod tests {
 
     #[test]
     fn model_category_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&ModelCategory::Chat).unwrap(), "\"chat\"");
-        assert_eq!(serde_json::to_string(&ModelCategory::Tool).unwrap(), "\"tool\"");
-        assert_eq!(serde_json::to_string(&ModelCategory::Image).unwrap(), "\"image\"");
-        assert_eq!(serde_json::to_string(&ModelCategory::Listen).unwrap(), "\"listen\"");
-        assert_eq!(serde_json::to_string(&ModelCategory::Talk).unwrap(), "\"talk\"");
-        assert_eq!(serde_json::to_string(&ModelCategory::Imagine).unwrap(), "\"imagine\"");
-        assert_eq!(serde_json::to_string(&ModelCategory::Embed).unwrap(), "\"embed\"");
+        assert_eq!(
+            serde_json::to_string(&ModelCategory::Chat).unwrap(),
+            "\"chat\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelCategory::Tool).unwrap(),
+            "\"tool\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelCategory::Image).unwrap(),
+            "\"image\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelCategory::Listen).unwrap(),
+            "\"listen\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelCategory::Talk).unwrap(),
+            "\"talk\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelCategory::Imagine).unwrap(),
+            "\"imagine\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelCategory::Embed).unwrap(),
+            "\"embed\""
+        );
     }
 
     #[test]
@@ -138,7 +159,11 @@ mod tests {
     fn loaded_model_info_serde_roundtrip() {
         let info = LoadedModelInfo {
             model_id: "gemma-4-e4b-it".into(),
-            categories: vec![ModelCategory::Chat, ModelCategory::Tool, ModelCategory::Image],
+            categories: vec![
+                ModelCategory::Chat,
+                ModelCategory::Tool,
+                ModelCategory::Image,
+            ],
         };
         let json = serde_json::to_string(&info).unwrap();
         let parsed: LoadedModelInfo = serde_json::from_str(&json).unwrap();

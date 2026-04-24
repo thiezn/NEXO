@@ -2,8 +2,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use candle_core::{DType, Device};
-use nexo_ai::shared::model_traits::KvCacheable;
+use nexo_ai::api::model_traits::KvCacheable;
 
 use super::disk;
 
@@ -33,31 +32,9 @@ impl SessionCacheManager {
 
     /// Save the current in-memory session cache to disk.
     /// Called before switching to a different session.
-    pub fn save_current_session(
-        &self,
-        model_name: &str,
-        model: &dyn KvCacheable,
-    ) -> Result<()> {
-        let Some(session_id) = model.current_session_id() else {
-            tracing::debug!("KV cache: no current session to save");
-            return Ok(());
-        };
-
-        if model.kv_cache_seq_len() == 0 {
-            tracing::debug!("KV cache: empty cache for session {session_id}, skipping save");
-            return Ok(());
-        }
-
+    pub fn save_current_session(&self, model_name: &str, model: &dyn KvCacheable) -> Result<()> {
         let dir = self.cache_dir.join(model_name);
-        let snapshots = model.save_kv_cache()?;
-
-        disk::save_to_disk(
-            &dir,
-            session_id,
-            model_name,
-            &snapshots,
-            model.processed_tokens(),
-        )?;
+        let _ = disk::save_to_disk(&dir, model_name, model)?;
 
         Ok(())
     }
@@ -69,40 +46,65 @@ impl SessionCacheManager {
         session_id: &str,
         model_name: &str,
         model: &mut dyn KvCacheable,
-        device: &Device,
-        dtype: DType,
     ) -> Result<bool> {
         let dir = self.cache_dir.join(model_name);
 
-        let Some((snapshots, metadata)) = disk::load_from_disk(&dir, session_id, device, dtype)?
-        else {
+        let Some(metadata) = disk::load_from_disk(&dir, session_id, model)? else {
             tracing::debug!("KV cache: no disk cache found for session {session_id}");
             return Ok(false);
         };
 
-        // Restore KV cache into the model
-        model.restore_kv_cache(&snapshots)?;
-        model.set_session_state(
-            Some(metadata.session_id),
-            metadata.processed_tokens,
-        );
-
         tracing::debug!(
             "KV cache: restored session {session_id} from disk ({} layers, {} tokens)",
-            snapshots.len(),
+            metadata.layer_count,
             model.processed_tokens().len(),
         );
 
         Ok(true)
     }
 
-    /// Called before model unload — save current session so it can be
-    /// restored later if the model is reloaded.
-    pub fn on_model_unload(
+    /// Switch the in-memory model cache to the target session.
+    ///
+    /// This handles persisting the current session, restoring a target session
+    /// if available, or clearing state when starting fresh / going stateless.
+    pub fn switch_session(
         &self,
         model_name: &str,
-        model: &dyn KvCacheable,
+        model: &mut dyn KvCacheable,
+        target_session_id: Option<&str>,
     ) -> Result<()> {
+        let current_session_id = model.current_session_id().map(str::to_owned);
+        if current_session_id.as_deref() == target_session_id {
+            return Ok(());
+        }
+
+        if current_session_id.is_some() {
+            self.save_current_session(model_name, model)?;
+        }
+
+        match target_session_id {
+            Some(session_id) => {
+                if !self.load_session(session_id, model_name, model)? {
+                    model.clear_kv_cache();
+                    model.set_session_state(Some(session_id.to_string()), Vec::new());
+                    tracing::debug!(
+                        "KV cache: no disk cache for session {session_id}, starting fresh"
+                    );
+                }
+            }
+            None => {
+                model.clear_kv_cache();
+                model.set_session_state(None, Vec::new());
+                tracing::debug!("KV cache: cleared in-memory state for sessionless request");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Called before model unload — save current session so it can be
+    /// restored later if the model is reloaded.
+    pub fn on_model_unload(&self, model_name: &str, model: &dyn KvCacheable) -> Result<()> {
         self.save_current_session(model_name, model)
     }
 
@@ -138,11 +140,159 @@ impl SessionCacheManager {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use candle_core::{DType, Device, Tensor};
+    use nexo_ai::api::types::LayerKvSnapshot;
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "nexo-node-kv-cache-{label}-{}-{unique}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    struct FakeKvModel {
+        session_id: Option<String>,
+        processed_tokens: Vec<u32>,
+        seq_len: usize,
+        clear_count: usize,
+        device: Device,
+    }
+
+    impl FakeKvModel {
+        fn new(session_id: Option<&str>, processed_tokens: Vec<u32>, seq_len: usize) -> Self {
+            Self {
+                session_id: session_id.map(str::to_owned),
+                processed_tokens,
+                seq_len,
+                clear_count: 0,
+                device: Device::Cpu,
+            }
+        }
+    }
+
+    impl KvCacheable for FakeKvModel {
+        fn kv_cache_seq_len(&self) -> usize {
+            self.seq_len
+        }
+
+        fn save_kv_cache(&self) -> Result<Vec<LayerKvSnapshot>> {
+            let tensor = Tensor::zeros((1, 1, self.seq_len.max(1), 1), DType::F32, &self.device)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            Ok(vec![LayerKvSnapshot {
+                layer_idx: 0,
+                is_sliding: false,
+                k_data: Some(tensor.clone()),
+                v_data: Some(tensor),
+                offset: 0,
+                current_seq_len: self.seq_len,
+            }])
+        }
+
+        fn restore_kv_cache(&mut self, snapshots: &[LayerKvSnapshot]) -> Result<()> {
+            self.seq_len = snapshots
+                .first()
+                .map(|snap| snap.current_seq_len)
+                .unwrap_or(0);
+            Ok(())
+        }
+
+        fn clear_kv_cache(&mut self) {
+            self.clear_count += 1;
+            self.seq_len = 0;
+        }
+
+        fn processed_tokens(&self) -> &[u32] {
+            &self.processed_tokens
+        }
+
+        fn current_session_id(&self) -> Option<&str> {
+            self.session_id.as_deref()
+        }
+
+        fn set_session_state(&mut self, session_id: Option<String>, tokens: Vec<u32>) {
+            self.session_id = session_id;
+            self.processed_tokens = tokens;
+        }
+
+        fn device(&self) -> &Device {
+            &self.device
+        }
+
+        fn dtype(&self) -> DType {
+            DType::F32
+        }
+    }
 
     #[test]
     fn new_creates_manager() {
         let mgr = SessionCacheManager::new(PathBuf::from("/tmp/test_kv_cache"));
         assert_eq!(mgr.max_disk_entries, DEFAULT_MAX_DISK_ENTRIES);
         assert_eq!(mgr.max_cache_age, DEFAULT_MAX_CACHE_AGE);
+    }
+
+    #[test]
+    fn switch_session_to_none_clears_state() {
+        let tmp = TempDir::new("clear-none");
+        let mgr = SessionCacheManager::new(tmp.path.clone());
+        let mut model = FakeKvModel::new(Some("session-a"), vec![1, 2, 3], 3);
+
+        mgr.switch_session("test-model", &mut model, None).unwrap();
+
+        assert_eq!(model.current_session_id(), None);
+        assert!(model.processed_tokens().is_empty());
+        assert_eq!(model.kv_cache_seq_len(), 0);
+        assert_eq!(model.clear_count, 1);
+    }
+
+    #[test]
+    fn switch_session_to_missing_entry_starts_fresh() {
+        let tmp = TempDir::new("missing-session");
+        let mgr = SessionCacheManager::new(tmp.path.clone());
+        let mut model = FakeKvModel::new(Some("session-a"), vec![1, 2, 3], 3);
+
+        mgr.switch_session("test-model", &mut model, Some("session-b"))
+            .unwrap();
+
+        assert_eq!(model.current_session_id(), Some("session-b"));
+        assert!(model.processed_tokens().is_empty());
+        assert_eq!(model.kv_cache_seq_len(), 0);
+        assert_eq!(model.clear_count, 1);
+    }
+
+    #[test]
+    fn switch_session_restores_saved_cache() {
+        let tmp = TempDir::new("restore-session");
+        let mgr = SessionCacheManager::new(tmp.path.clone());
+        let mut model = FakeKvModel::new(Some("session-a"), vec![1, 2, 3], 3);
+
+        mgr.save_current_session("test-model", &model).unwrap();
+        model.set_session_state(Some("session-b".to_string()), vec![9]);
+        model.seq_len = 1;
+
+        mgr.switch_session("test-model", &mut model, Some("session-a"))
+            .unwrap();
+
+        assert_eq!(model.current_session_id(), Some("session-a"));
+        assert_eq!(model.processed_tokens(), &[1, 2, 3]);
+        assert_eq!(model.kv_cache_seq_len(), 3);
+        assert_eq!(model.clear_count, 1);
     }
 }

@@ -77,8 +77,7 @@ pub async fn start_test_gateway() -> TestGateway {
                     }
                 };
 
-                let Ok(ws_stream) =
-                    tokio_tungstenite::accept_hdr_async(stream, callback).await
+                let Ok(ws_stream) = tokio_tungstenite::accept_hdr_async(stream, callback).await
                 else {
                     return;
                 };

@@ -1,6 +1,6 @@
-use std::path::Path;
-use anyhow::Result;
 use crate::extractor::common::progress::ProgressBar;
+use anyhow::Result;
+use std::path::Path;
 
 /// Summary of what was extracted from a single game.
 pub struct ExtractionSummary {
@@ -21,5 +21,9 @@ pub trait Engine: Send + Sync {
     fn game_name(&self) -> &str;
 
     /// Run full extraction to the given output root directory.
-    fn extract(&self, output_root: &Path, progress: Option<&ProgressBar>) -> Result<ExtractionSummary>;
+    fn extract(
+        &self,
+        output_root: &Path,
+        progress: Option<&ProgressBar>,
+    ) -> Result<ExtractionSummary>;
 }

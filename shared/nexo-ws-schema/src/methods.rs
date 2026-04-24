@@ -602,8 +602,14 @@ mod tests {
 
     #[test]
     fn method_serialization() {
-        assert_eq!(serde_json::to_string(&Method::Connect).unwrap(), "\"connect\"");
-        assert_eq!(serde_json::to_string(&Method::Health).unwrap(), "\"health\"");
+        assert_eq!(
+            serde_json::to_string(&Method::Connect).unwrap(),
+            "\"connect\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Method::Health).unwrap(),
+            "\"health\""
+        );
         assert_eq!(
             serde_json::to_string(&Method::SystemPresence).unwrap(),
             "\"system-presence\""

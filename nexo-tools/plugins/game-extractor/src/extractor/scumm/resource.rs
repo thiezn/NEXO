@@ -1,5 +1,5 @@
-use anyhow::{Result, Context};
-use super::block::{parse_block, find_child, iter_children};
+use super::block::{find_child, iter_children, parse_block};
+use anyhow::{Context, Result};
 
 use super::index::RoomDirEntry;
 use std::path::Path;
@@ -12,8 +12,7 @@ pub struct LflfEntry {
 
 /// Parse the data file (.001) and return all LFLF blocks.
 pub fn parse_data_file(data: &[u8]) -> Result<Vec<LflfEntry>> {
-    let lecf = parse_block(data, 0)
-        .context("parsing LECF block")?;
+    let lecf = parse_block(data, 0).context("parsing LECF block")?;
 
     if &lecf.tag != b"LECF" {
         anyhow::bail!("Expected LECF block, found '{}'", lecf.tag_str());
@@ -29,9 +28,8 @@ pub fn parse_data_file(data: &[u8]) -> Result<Vec<LflfEntry>> {
                 let base = 1 + i * 5;
                 if base + 5 <= d.len() {
                     let room_num = d[base];
-                    let offset = u32::from_le_bytes([
-                        d[base + 1], d[base + 2], d[base + 3], d[base + 4],
-                    ]);
+                    let offset =
+                        u32::from_le_bytes([d[base + 1], d[base + 2], d[base + 3], d[base + 4]]);
                     room_offsets.push((room_num, offset));
                 }
             }
@@ -70,7 +68,10 @@ pub fn parse_data_file(data: &[u8]) -> Result<Vec<LflfEntry>> {
 /// Parse V3/V4 game data from individual LFL room files.
 /// Each room_id maps to its own NN.LFL file.
 /// V3/V4 LFL files are NOT encrypted.
-pub fn parse_v3_rooms(game_dir: &Path, room_entries: &[RoomDirEntry]) -> Result<Vec<(u8, Vec<u8>)>> {
+pub fn parse_v3_rooms(
+    game_dir: &Path,
+    room_entries: &[RoomDirEntry],
+) -> Result<Vec<(u8, Vec<u8>)>> {
     let mut rooms = Vec::new();
 
     for entry in room_entries {
@@ -83,8 +84,7 @@ pub fn parse_v3_rooms(game_dir: &Path, room_entries: &[RoomDirEntry]) -> Result<
         let path = game_dir.join(&filename);
 
         let data = if path.exists() {
-            std::fs::read(&path)
-                .with_context(|| format!("Failed to read {}", path.display()))?
+            std::fs::read(&path).with_context(|| format!("Failed to read {}", path.display()))?
         } else {
             let path_lower = game_dir.join(format!("{:02}.lfl", room_id));
             if !path_lower.exists() {

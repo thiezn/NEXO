@@ -15,8 +15,8 @@ use ntest::timeout;
 use serial_test::serial;
 
 use common::resolve_model;
-use nexo_ai::shared::model_traits::ModelInfo;
-use nexo_ai::shared::types::*;
+use nexo_ai::api::model_traits::ModelInfo;
+use nexo_ai::api::types::*;
 
 /// Load the test speech WAV file and return PCM samples + sample rate.
 fn load_test_audio() -> (Vec<f32>, u32) {

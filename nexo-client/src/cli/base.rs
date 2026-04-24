@@ -20,15 +20,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Connect to a NEXO Gateway (raw protocol mode)
-    Connect {
-        /// Gateway URL (e.g. ws://127.0.0.1:6969)
-        #[arg(long)]
-        url: Option<String>,
-    },
-
-    /// Interactive chat session with the gateway agent
-    Chat {
+    /// Start the interactive NEXO terminal UI
+    Start {
         /// Gateway URL (e.g. ws://127.0.0.1:6969)
         #[arg(long)]
         url: Option<String>,
@@ -44,17 +37,6 @@ pub enum Command {
         /// Model ID to use for inference
         #[arg(long)]
         model: Option<String>,
-    },
-
-    /// Analyze an image using the NEXO Gateway
-    ImageAnalyze {
-        /// Path to the image file
-        #[arg(long)]
-        image_path: String,
-
-        /// Prompt for the image analysis
-        #[arg(long)]
-        prompt: String,
     },
 
     /// Generate JSON schemas for the WebSocket protocol

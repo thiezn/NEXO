@@ -1,6 +1,4 @@
-use git2::{
-    Cred, FetchOptions, ObjectType, PushOptions, RemoteCallbacks, Repository, Signature,
-};
+use git2::{Cred, FetchOptions, ObjectType, PushOptions, RemoteCallbacks, Repository, Signature};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -289,9 +287,7 @@ fn default_signature(repo: &Repository) -> anyhow::Result<Signature<'_>> {
 }
 
 fn head_commit(repo: &Repository) -> Option<git2::Commit<'_>> {
-    repo.head()
-        .ok()
-        .and_then(|h| h.peel_to_commit().ok())
+    repo.head().ok().and_then(|h| h.peel_to_commit().ok())
 }
 
 fn add_commit_push(repo: &Repository, paths: &[&str], message: &str) -> anyhow::Result<()> {

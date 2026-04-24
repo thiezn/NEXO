@@ -21,10 +21,7 @@ mod tests {
 
     #[test]
     fn strips_multiple_codes() {
-        assert_eq!(
-            strip_ansi("\x1b[1m\x1b[32mOK\x1b[0m done"),
-            "OK done"
-        );
+        assert_eq!(strip_ansi("\x1b[1m\x1b[32mOK\x1b[0m done"), "OK done");
     }
 
     #[test]

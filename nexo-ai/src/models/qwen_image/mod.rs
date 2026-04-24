@@ -1,21 +1,19 @@
-mod pipeline;
-pub(crate) mod quantized_transformer;
-pub(crate) mod sampling;
-pub(crate) mod transformer;
-mod vae;
+pub mod candle;
+pub mod common;
+pub mod openai;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::shared::model_traits::{ImagineModel, ModelInfo};
-use crate::shared::types::{ImagineRequest, ImagineResponse, ModelCategory};
+use crate::api::model_traits::{ImagineModel, ModelInfo};
+use crate::api::types::{ImagineRequest, ImagineResponse, ModelCategory};
 
 pub struct QwenImageModel {
     name: String,
     memory_bytes: u64,
     model_dir: PathBuf,
-    loaded: Option<pipeline::LoadedState>,
+    loaded: Option<candle::pipeline::LoadedState>,
 }
 
 impl QwenImageModel {
@@ -54,7 +52,7 @@ impl ModelInfo for QwenImageModel {
         if self.loaded.is_some() {
             return Ok(());
         }
-        self.loaded = Some(pipeline::load(&self.model_dir)?);
+        self.loaded = Some(candle::pipeline::load(&self.model_dir)?);
         Ok(())
     }
 
@@ -73,7 +71,7 @@ impl ImagineModel for QwenImageModel {
             .loaded
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?;
-        pipeline::generate(state, &self.model_dir, request)
+        candle::pipeline::generate(state, &self.model_dir, request)
     }
 }
 

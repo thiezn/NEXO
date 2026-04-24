@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum EventKind {
     Tick,
     Agent,
+    Message,
     Presence,
     Shutdown,
     Heartbeat,
@@ -51,6 +52,16 @@ pub struct PresencePayload {
     pub status: String,
 }
 
+/// Payload for `message` events delivered by the gateway.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePayload {
+    pub message_id: String,
+    pub from: String,
+    pub target: String,
+    pub payload: serde_json::Value,
+}
+
 /// Payload for `shutdown` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ShutdownPayload {
@@ -78,6 +89,10 @@ mod tests {
     fn event_kind_serialization() {
         assert_eq!(serde_json::to_string(&EventKind::Tick).unwrap(), "\"tick\"");
         assert_eq!(
+            serde_json::to_string(&EventKind::Message).unwrap(),
+            "\"message\""
+        );
+        assert_eq!(
             serde_json::to_string(&EventKind::Heartbeat).unwrap(),
             "\"heartbeat\""
         );
@@ -89,6 +104,7 @@ mod tests {
         for kind in [
             EventKind::Tick,
             EventKind::Agent,
+            EventKind::Message,
             EventKind::Presence,
             EventKind::Shutdown,
             EventKind::Heartbeat,
@@ -119,6 +135,19 @@ mod tests {
         };
         let json = serde_json::to_string(&payload).unwrap();
         let decoded: PresencePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload, decoded);
+    }
+
+    #[test]
+    fn message_payload_roundtrip() {
+        let payload = MessagePayload {
+            message_id: "msg-1".into(),
+            from: "user-a".into(),
+            target: "user-b".into(),
+            payload: serde_json::json!({"text": "hello"}),
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let decoded: MessagePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(payload, decoded);
     }
 

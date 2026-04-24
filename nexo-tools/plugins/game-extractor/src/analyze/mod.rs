@@ -5,9 +5,9 @@ mod prompt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::extractor::common::progress::{MultiProgress, ProgressBar};
 use anyhow::Result;
 use clap::ValueEnum;
-use crate::extractor::common::progress::{MultiProgress, ProgressBar};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -58,10 +58,7 @@ pub async fn run(args: &AnalyzeArgs) -> Result<()> {
 
     if subdatasets.is_empty() {
         let dirs: Vec<_> = args.paths.iter().map(|d| d.display().to_string()).collect();
-        anyhow::bail!(
-            "No lora_training subdatasets found in {}",
-            dirs.join(", ")
-        );
+        anyhow::bail!("No lora_training subdatasets found in {}", dirs.join(", "));
     }
 
     let mp = MultiProgress::new();
@@ -73,9 +70,21 @@ pub async fn run(args: &AnalyzeArgs) -> Result<()> {
     let client = Arc::new(api::LmClient::new(&args.endpoint, &args.model));
 
     for subdataset in &subdatasets {
-        let name = subdataset.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let name = subdataset
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         overall.set_message(name.clone());
-        if let Err(e) = process_subdataset(&client, subdataset, args.parallel, &args.output_mode, args.force, &mp).await
+        if let Err(e) = process_subdataset(
+            &client,
+            subdataset,
+            args.parallel,
+            &args.output_mode,
+            args.force,
+            &mp,
+        )
+        .await
         {
             overall.suspend(|| eprintln!("Error processing {}: {e}", subdataset.display()));
         }
@@ -162,7 +171,11 @@ async fn process_subdataset(
         return Ok(());
     }
 
-    let name = subdataset_path.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let name = subdataset_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let pb = mp.add(ProgressBar::new(to_process.len() as u64));
     pb.set_style(progress::game_style());
     pb.set_prefix(name);
@@ -179,19 +192,21 @@ async fn process_subdataset(
 
         join_set.spawn(async move {
             let _permit = sem.acquire().await.unwrap();
-            let filename = image_path.file_name().unwrap().to_string_lossy().to_string();
+            let filename = image_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
             pb.set_message(filename.clone());
 
             let result = client.describe_image(&image_path).await;
             let rel_path = format!("images/{filename}");
 
             let entry = match result {
-                Ok(description) => {
-                    Some(LoraEntry {
-                        image: rel_path,
-                        text: description,
-                    })
-                }
+                Ok(description) => Some(LoraEntry {
+                    image: rel_path,
+                    text: description,
+                }),
                 Err(_) => None,
             };
             pb.inc(1);

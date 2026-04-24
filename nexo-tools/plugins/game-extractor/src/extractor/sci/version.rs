@@ -1,5 +1,5 @@
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use anyhow::{Result, Context};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SciVersion {
@@ -92,8 +92,7 @@ pub fn detect_game(dir: &Path) -> Result<SciGameInfo> {
             anyhow::bail!("Found RESOURCE.MAP but no volume files");
         }
 
-        let map_data = std::fs::read(&map_path)
-            .context("Failed to read resource map")?;
+        let map_data = std::fs::read(&map_path).context("Failed to read resource map")?;
 
         let map_version = detect_map_version(&map_data)?;
         let vol_version = detect_vol_version(&volume_paths[0], &map_version)?;
@@ -132,7 +131,8 @@ fn detect_map_version(data: &[u8]) -> Result<ResMapVersion> {
     // Check for SCI0/SCI01 terminator: last 6 bytes should have 0xFFFFFFFF offset
     let len = data.len();
     if len >= 6 {
-        let last_offset = u32::from_le_bytes([data[len-4], data[len-3], data[len-2], data[len-1]]);
+        let last_offset =
+            u32::from_le_bytes([data[len - 4], data[len - 3], data[len - 2], data[len - 1]]);
         if last_offset == 0xFFFFFFFF {
             // SCI0 or SCI1Middle format — both use 6-byte entries with 0xFFFFFFFF terminator
             // Distinguish by volume bit scheme:
@@ -144,7 +144,12 @@ fn detect_map_version(data: &[u8]) -> Result<ResMapVersion> {
             let mut vols_sci1m = std::collections::BTreeSet::new();
             let mut pos = 0;
             while pos + 6 <= len {
-                let offset = u32::from_le_bytes([data[pos+2], data[pos+3], data[pos+4], data[pos+5]]);
+                let offset = u32::from_le_bytes([
+                    data[pos + 2],
+                    data[pos + 3],
+                    data[pos + 4],
+                    data[pos + 5],
+                ]);
                 if offset == 0xFFFFFFFF {
                     break;
                 }
@@ -181,7 +186,7 @@ fn detect_map_version(data: &[u8]) -> Result<ResMapVersion> {
     let mut type_entries: Vec<(u8, u16)> = Vec::new();
     while pos + 3 <= len {
         let type_byte = data[pos];
-        let offset = u16::from_le_bytes([data[pos+1], data[pos+2]]);
+        let offset = u16::from_le_bytes([data[pos + 1], data[pos + 2]]);
 
         let res_type = type_byte & 0x1F;
         type_entries.push((type_byte, offset));
@@ -199,7 +204,9 @@ fn detect_map_version(data: &[u8]) -> Result<ResMapVersion> {
 
     // Check if any type byte has high bit set (>= 0x80) — indicates SCI1
     // SCI2 uses raw type values (0-31)
-    let has_high_types = type_entries.iter().any(|(t, _)| *t >= 0x80 && (*t & 0x1F) != 0x1F);
+    let has_high_types = type_entries
+        .iter()
+        .any(|(t, _)| *t >= 0x80 && (*t & 0x1F) != 0x1F);
 
     if !has_high_types {
         // Could be SCI2 or SCI1 with low types
@@ -236,18 +243,30 @@ fn detect_map_version(data: &[u8]) -> Result<ResMapVersion> {
                 let mut six_ok = true;
                 for j in 0..num_test {
                     let ep = fo + j * 6;
-                    if ep + 6 > data.len() { six_ok = false; break; }
-                    let num = u16::from_le_bytes([data[ep], data[ep+1]]);
-                    if num > 5000 { six_ok = false; break; }
+                    if ep + 6 > data.len() {
+                        six_ok = false;
+                        break;
+                    }
+                    let num = u16::from_le_bytes([data[ep], data[ep + 1]]);
+                    if num > 5000 {
+                        six_ok = false;
+                        break;
+                    }
                 }
 
                 // Under 5-byte: check that numbers after first are still reasonable
                 let mut five_ok = true;
                 for j in 0..num_test {
                     let ep = fo + j * 5;
-                    if ep + 5 > data.len() { five_ok = false; break; }
-                    let num = u16::from_le_bytes([data[ep], data[ep+1]]);
-                    if num > 5000 { five_ok = false; break; }
+                    if ep + 5 > data.len() {
+                        five_ok = false;
+                        break;
+                    }
+                    let num = u16::from_le_bytes([data[ep], data[ep + 1]]);
+                    if num > 5000 {
+                        five_ok = false;
+                        break;
+                    }
                 }
 
                 // If both look OK, check if 5-byte gives non-sequential numbers
@@ -259,10 +278,10 @@ fn detect_map_version(data: &[u8]) -> Result<ResMapVersion> {
                         let ep5 = fo + j * 5;
                         let ep6 = fo + j * 6;
                         if ep5 + 5 <= data.len() {
-                            nums_5.push(u16::from_le_bytes([data[ep5], data[ep5+1]]));
+                            nums_5.push(u16::from_le_bytes([data[ep5], data[ep5 + 1]]));
                         }
                         if ep6 + 6 <= data.len() {
-                            nums_6.push(u16::from_le_bytes([data[ep6], data[ep6+1]]));
+                            nums_6.push(u16::from_le_bytes([data[ep6], data[ep6 + 1]]));
                         }
                     }
                     // Check which has more sequential/sorted entries
@@ -292,8 +311,8 @@ fn detect_map_version(data: &[u8]) -> Result<ResMapVersion> {
 
 /// Detect volume version by probing the first resource header.
 fn detect_vol_version(vol_path: &Path, map_version: &ResMapVersion) -> Result<ResVolVersion> {
-    let data = std::fs::read(vol_path)
-        .context("Failed to read volume file for version detection")?;
+    let data =
+        std::fs::read(vol_path).context("Failed to read volume file for version detection")?;
 
     if data.len() < 13 {
         anyhow::bail!("Volume file too small");
@@ -364,7 +383,8 @@ fn find_volume_files(dir: &Path, prefix: &str) -> Vec<PathBuf> {
 
 /// Guess a display name from the directory name.
 fn guess_display_name(dir: &Path) -> String {
-    let dir_name = dir.file_name()
+    let dir_name = dir
+        .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Unknown SCI Game".to_string());
 
@@ -379,7 +399,9 @@ fn guess_display_name(dir: &Path) -> String {
         "lsl7" => "Leisure Suit Larry 7".to_string(),
         _ => {
             // Convert underscores/hyphens to spaces and title-case
-            dir_name.replace('_', " ").replace('-', " ")
+            dir_name
+                .replace('_', " ")
+                .replace('-', " ")
                 .split_whitespace()
                 .map(|word| {
                     let mut chars = word.chars();

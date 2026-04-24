@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScummVersion {
@@ -46,10 +46,16 @@ fn known_display_name(stem: &str) -> Option<&'static str> {
 
 fn find_sound_file(dir: &Path) -> Option<PathBuf> {
     let candidates = [
-        "MONSTER.SOU", "monster.sou", "Monster.sou",
-        "MONSTER.SOF", "monster.sof", "Monster.sof",
-        "MONSTER.SO3", "monster.so3",
-        "MONSTER.SOG", "monster.sog",
+        "MONSTER.SOU",
+        "monster.sou",
+        "Monster.sou",
+        "MONSTER.SOF",
+        "monster.sof",
+        "Monster.sof",
+        "MONSTER.SO3",
+        "monster.so3",
+        "MONSTER.SOG",
+        "monster.sog",
     ];
     for name in &candidates {
         let p = dir.join(name);
@@ -90,9 +96,7 @@ fn distinguish_v5_v6(index_path: &Path, xor_key: u8) -> Result<ScummVersion> {
 
 /// Detect game files in a directory.
 pub fn detect_game(dir: &Path) -> Result<GameInfo> {
-    let entries: Vec<_> = std::fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let entries: Vec<_> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
 
     // Check for V7: .LA0/.LA1 pairs
     for entry in &entries {
@@ -105,9 +109,7 @@ pub fn detect_game(dir: &Path) -> Result<GameInfo> {
                     // Try lowercase
                     let data_path2 = dir.join(format!("{}.la1", stem));
                     if data_path2.exists() {
-                        let display = known_display_name(&stem)
-                            .unwrap_or(&stem)
-                            .to_string();
+                        let display = known_display_name(&stem).unwrap_or(&stem).to_string();
                         return Ok(GameInfo {
                             version: ScummVersion::V7,
                             xor_key: 0x00,
@@ -120,9 +122,7 @@ pub fn detect_game(dir: &Path) -> Result<GameInfo> {
                         });
                     }
                 } else {
-                    let display = known_display_name(&stem)
-                        .unwrap_or(&stem)
-                        .to_string();
+                    let display = known_display_name(&stem).unwrap_or(&stem).to_string();
                     return Ok(GameInfo {
                         version: ScummVersion::V7,
                         xor_key: 0x00,
@@ -150,15 +150,17 @@ pub fn detect_game(dir: &Path) -> Result<GameInfo> {
                 }
                 // If RESOURCE.MAP exists, these .000/.001 files are SCI resource
                 // volumes, not SCUMM data files (e.g. KQ4SG.000 in King's Quest 4)
-                if entries.iter().any(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("resource.map")) {
+                if entries.iter().any(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case("resource.map")
+                }) {
                     continue;
                 }
                 let data_path = dir.join(format!("{}.001", stem));
                 if data_path.exists() {
                     let version = distinguish_v5_v6(&path, 0x69)?;
-                    let display = known_display_name(&stem)
-                        .unwrap_or(&stem)
-                        .to_string();
+                    let display = known_display_name(&stem).unwrap_or(&stem).to_string();
                     return Ok(GameInfo {
                         version,
                         xor_key: version.xor_key(),
@@ -180,7 +182,8 @@ pub fn detect_game(dir: &Path) -> Result<GameInfo> {
         // Try lowercase
         let lfl_index2 = dir.join("00.lfl");
         if lfl_index2.exists() {
-            let dir_name = dir.file_name()
+            let dir_name = dir
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             let display = display_name_for_v3_dir(&dir_name);
@@ -196,7 +199,8 @@ pub fn detect_game(dir: &Path) -> Result<GameInfo> {
             });
         }
     } else {
-        let dir_name = dir.file_name()
+        let dir_name = dir
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".to_string());
         let display = display_name_for_v3_dir(&dir_name);

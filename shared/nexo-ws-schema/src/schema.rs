@@ -77,7 +77,10 @@ mod tests {
             SchemaSection::Errors,
         ] {
             let schema = generate_schema(section);
-            assert!(schema.is_object(), "Section {section:?} should be an object");
+            assert!(
+                schema.is_object(),
+                "Section {section:?} should be an object"
+            );
             let obj = schema.as_object().unwrap();
             // All JSON Schema objects should have a title or definitions
             assert!(

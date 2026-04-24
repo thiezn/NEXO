@@ -30,9 +30,7 @@ pub fn text_input_required(prompt: &str) -> Result<String> {
 
 /// Prompt user to select one item from a list. Returns the selected index.
 pub fn select(prompt: &str, items: &[&str], default: Option<usize>) -> Result<usize> {
-    let mut sel = dialoguer::Select::new()
-        .with_prompt(prompt)
-        .items(items);
+    let mut sel = dialoguer::Select::new().with_prompt(prompt).items(items);
     if let Some(d) = default {
         sel = sel.default(d);
     }

@@ -7,6 +7,7 @@ use crate::agent::AgentHandle;
 use crate::agent::gateway_tools::GatewayToolExecutor;
 use crate::config::GatewayConfig;
 use crate::memory::git::GitStorage;
+use tracing::{debug, info, warn};
 
 const CRON_NOTES_SUMMARY: &str = "notes-summary";
 use state::{GatewayState, SharedState};
@@ -16,21 +17,17 @@ use tokio::sync::RwLock;
 
 /// Start the gateway WebSocket server.
 pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
-    tracing::info!(
+    info!(
         "Gateway config: host={}, port={}, tick_interval={}ms, db={}, storage={}",
-        config.host,
-        config.port,
-        config.tick_interval_ms,
-        config.db_path,
-        config.storage_root,
+        config.host, config.port, config.tick_interval_ms, config.db_path, config.storage_root,
     );
 
     let db_path = utl_helpers::resolve_path_str(&config.db_path)?;
     let db = crate::memory::persistent::connect(&db_path).await?;
-    tracing::info!("Database connected: {}", db_path.display());
+    info!("Database connected: {}", db_path.display());
 
     let storage_root = utl_helpers::resolve_path_str(&config.storage_root)?;
-    tracing::info!("Storage root: {}", storage_root.display());
+    info!("Storage root: {}", storage_root.display());
 
     // Open git-backed storage (optional — allows gateway to run without persistent storage)
     let git_storage = match utl_helpers::resolve_path_str(&config.nexo_storage_path) {
@@ -38,18 +35,27 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
             Ok(gs) => {
                 let gs = Arc::new(gs);
                 let gs_pull = gs.clone();
-                if let Err(e) = tokio::task::spawn_blocking(move || gs_pull.pull()).await {
-                    tracing::warn!("Git pull on startup failed: {e}");
-                }
+                tokio::task::spawn_blocking(move || {
+                    info!(
+                        "Performing git pull on startup for storage at {}",
+                        path.display()
+                    );
+                    if let Err(e) = gs_pull.pull() {
+                        warn!("Git pull on startup failed: {e}");
+                    }
+                });
                 Some(gs)
             }
             Err(e) => {
-                tracing::warn!("Could not open nexo-storage at {}: {e}", config.nexo_storage_path);
+                warn!(
+                    "Could not open nexo-storage at {}: {e}",
+                    config.nexo_storage_path
+                );
                 None
             }
         },
         Err(e) => {
-            tracing::warn!("Could not resolve nexo_storage_path: {e}");
+            warn!("Could not resolve nexo_storage_path: {e}");
             None
         }
     };
@@ -67,7 +73,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
         gateway_tools.register(tool);
     }
 
-    tracing::info!(
+    info!(
         "Registered {} gateway tool(s)",
         gateway_tools.tool_entries().len(),
     );
@@ -85,14 +91,16 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
     {
         let seed_db = db.clone();
         tokio::spawn(async move {
-            let jobs = crate::agent::cron::list_jobs(&seed_db).await.unwrap_or_default();
+            let jobs = crate::agent::cron::list_jobs(&seed_db)
+                .await
+                .unwrap_or_default();
             if !jobs.iter().any(|j| j.name == CRON_NOTES_SUMMARY) {
                 let _ = crate::agent::cron::create_job(
                     &seed_db,
                     CRON_NOTES_SUMMARY,
                     "0 */6 * * *",
                     "Read all notes using notes.list and notes.read. \
-                     Write an organized summary using notes.update_summary.",
+                    Write an organized summary using notes.update_summary.",
                     None,
                 )
                 .await;
@@ -120,7 +128,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
         .await
         .map_err(|e| utl_helpers::Error::Network(format!("Failed to bind {addr}: {e}")))?;
 
-    tracing::info!("NEXO Gateway listening on ws://{addr}");
+    info!("NEXO Gateway listening on ws://{addr}");
 
     let auth_token: Arc<str> = config.auth_token.as_str().into();
 
@@ -130,7 +138,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
             .await
             .map_err(|e| utl_helpers::Error::Network(format!("Accept failed: {e}")))?;
 
-        tracing::debug!("New TCP connection from {peer_addr}");
+        debug!("New TCP connection from {peer_addr}");
 
         let state = state.clone();
         let db = db.clone();
@@ -147,7 +155,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
                     if auth::validate_auth(req.headers(), &auth_token) {
                         Ok(resp)
                     } else {
-                        tracing::warn!("Auth failed from {peer_addr}");
+                        warn!("Auth failed from {peer_addr}");
                         Err(http::Response::builder()
                             .status(401)
                             .body(Some("Unauthorized".into()))
@@ -158,7 +166,7 @@ pub async fn run(config: &GatewayConfig) -> utl_helpers::Result {
             let ws_stream = match tokio_tungstenite::accept_hdr_async(stream, callback).await {
                 Ok(ws) => ws,
                 Err(e) => {
-                    tracing::warn!("WS handshake failed from {peer_addr}: {e}");
+                    warn!("WS handshake failed from {peer_addr}: {e}");
                     return;
                 }
             };

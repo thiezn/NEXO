@@ -1,6 +1,6 @@
 use super::aggregates::{ModelStats, RunningStat};
 use super::metrics::{InferenceRecord, LifecycleRecord};
-use crate::shared::types::ModelCategory;
+use crate::api::types::ModelCategory;
 use std::collections::{HashMap, VecDeque};
 
 /// Abstraction over statistics storage.

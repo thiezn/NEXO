@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod tui;
 
 use clap::Parser;
 use cli::base::Cli;

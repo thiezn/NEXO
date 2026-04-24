@@ -1,29 +1,41 @@
-pub mod config;
-pub mod generation;
-pub mod gguf;
-pub mod safetensors;
-pub mod template;
+#[cfg(feature = "candle")]
+pub mod candle;
+pub mod common;
+#[cfg(feature = "mlx")]
+pub mod openai;
 
+#[cfg(feature = "candle")]
+pub use candle::{gguf, safetensors};
+pub use common::template;
+#[cfg(feature = "candle")]
+pub use common::{config, generation};
+
+#[cfg(feature = "candle")]
 use std::path::PathBuf;
 
+#[cfg(feature = "candle")]
 use anyhow::Result;
 
-use crate::shared::model_traits::{
+#[cfg(feature = "candle")]
+use crate::api::model_traits::{
     AudioAnalysisModel, ChatModel, ImageModel, KvCacheable, ModelInfo, ToolModel,
 };
-use crate::shared::types::{
+#[cfg(feature = "candle")]
+use crate::api::types::{
     AudioAnalysisRequest, AudioAnalysisResponse, ChatRequest, ChatResponse, ImageAnalysisRequest,
     ImageAnalysisResponse, LayerKvSnapshot, ModelCategory, ToolCallRequest, ToolCallResponse,
 };
 
 // ── Loaded variant ────────────────────────────────────────────────────────
 
+#[cfg(feature = "candle")]
 enum LoadedVariant {
-    Safetensors(safetensors::pipeline::LoadedState),
-    Gguf(gguf::pipeline::LoadedState),
+    Safetensors(candle::safetensors::pipeline::LoadedState),
+    Gguf(candle::gguf::pipeline::LoadedState),
 }
 
 /// Macro to dispatch a method call to the inner variant, reducing match-arm boilerplate.
+#[cfg(feature = "candle")]
 macro_rules! dispatch {
     ($self:expr, $method:ident $(, $arg:expr)*) => {
         match $self {
@@ -35,6 +47,7 @@ macro_rules! dispatch {
 
 // ── Categories ────────────────────────────────────────────────────────────
 
+#[cfg(feature = "candle")]
 const CATEGORIES_ALL: &[ModelCategory] = &[
     ModelCategory::Chat,
     ModelCategory::Tool,
@@ -42,6 +55,7 @@ const CATEGORIES_ALL: &[ModelCategory] = &[
     ModelCategory::Listen,
 ];
 
+#[cfg(feature = "candle")]
 const CATEGORIES_CHAT_TOOL_IMAGE: &[ModelCategory] = &[
     ModelCategory::Chat,
     ModelCategory::Tool,
@@ -51,6 +65,7 @@ const CATEGORIES_CHAT_TOOL_IMAGE: &[ModelCategory] = &[
 /// Determine categories for a Gemma 4 model based on its name.
 /// - E2B/E4B/31B (safetensors & GGUF): Chat, Tool, Image, Listen
 /// - 26B-A4B: Chat, Tool, Image (no audio tower)
+#[cfg(feature = "candle")]
 fn model_categories(name: &str) -> &'static [ModelCategory] {
     if name.contains("26b") {
         CATEGORIES_CHAT_TOOL_IMAGE
@@ -61,6 +76,7 @@ fn model_categories(name: &str) -> &'static [ModelCategory] {
 
 // ── Gemma4Model ───────────────────────────────────────────────────────────
 
+#[cfg(feature = "candle")]
 pub struct Gemma4Model {
     name: String,
     memory_bytes: u64,
@@ -70,6 +86,7 @@ pub struct Gemma4Model {
     is_gguf: bool,
 }
 
+#[cfg(feature = "candle")]
 impl Gemma4Model {
     pub fn new(name: String, memory_bytes: u64, model_dir: PathBuf) -> Self {
         Self {
@@ -95,6 +112,7 @@ impl Gemma4Model {
     }
 }
 
+#[cfg(feature = "candle")]
 impl ModelInfo for Gemma4Model {
     fn name(&self) -> &str {
         &self.name
@@ -121,15 +139,14 @@ impl ModelInfo for Gemma4Model {
             return Ok(());
         }
         if self.is_gguf {
-            self.loaded = Some(LoadedVariant::Gguf(gguf::pipeline::load(
+            self.loaded = Some(LoadedVariant::Gguf(candle::gguf::pipeline::load(
                 &self.model_dir,
                 self.max_context_tokens,
             )?));
         } else {
-            self.loaded = Some(LoadedVariant::Safetensors(safetensors::pipeline::load(
-                &self.model_dir,
-                self.max_context_tokens,
-            )?));
+            self.loaded = Some(LoadedVariant::Safetensors(
+                candle::safetensors::pipeline::load(&self.model_dir, self.max_context_tokens)?,
+            ));
         }
         Ok(())
     }
@@ -167,6 +184,7 @@ impl ModelInfo for Gemma4Model {
     }
 }
 
+#[cfg(feature = "candle")]
 impl ChatModel for Gemma4Model {
     fn chat(&mut self, request: &ChatRequest) -> Result<ChatResponse> {
         match self
@@ -174,12 +192,15 @@ impl ChatModel for Gemma4Model {
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?
         {
-            LoadedVariant::Safetensors(state) => safetensors::pipeline::chat(state, request),
-            LoadedVariant::Gguf(state) => gguf::pipeline::chat(state, request),
+            LoadedVariant::Safetensors(state) => {
+                candle::safetensors::pipeline::chat(state, request)
+            }
+            LoadedVariant::Gguf(state) => candle::gguf::pipeline::chat(state, request),
         }
     }
 }
 
+#[cfg(feature = "candle")]
 impl ToolModel for Gemma4Model {
     fn call_tools(&mut self, request: &ToolCallRequest) -> Result<ToolCallResponse> {
         match self
@@ -187,12 +208,15 @@ impl ToolModel for Gemma4Model {
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?
         {
-            LoadedVariant::Safetensors(state) => safetensors::pipeline::call_tools(state, request),
-            LoadedVariant::Gguf(state) => gguf::pipeline::call_tools(state, request),
+            LoadedVariant::Safetensors(state) => {
+                candle::safetensors::pipeline::call_tools(state, request)
+            }
+            LoadedVariant::Gguf(state) => candle::gguf::pipeline::call_tools(state, request),
         }
     }
 }
 
+#[cfg(feature = "candle")]
 impl KvCacheable for Gemma4Model {
     fn kv_cache_seq_len(&self) -> usize {
         self.loaded
@@ -261,6 +285,7 @@ impl KvCacheable for Gemma4Model {
     }
 }
 
+#[cfg(feature = "candle")]
 impl ImageModel for Gemma4Model {
     fn analyze_image(&mut self, request: &ImageAnalysisRequest) -> Result<ImageAnalysisResponse> {
         let model_dir = self.model_dir.clone();
@@ -270,13 +295,16 @@ impl ImageModel for Gemma4Model {
             .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?
         {
             LoadedVariant::Safetensors(state) => {
-                safetensors::pipeline::analyze_image(state, request, &model_dir)
+                candle::safetensors::pipeline::analyze_image(state, request, &model_dir)
             }
-            LoadedVariant::Gguf(state) => gguf::pipeline::analyze_image(state, request, &model_dir),
+            LoadedVariant::Gguf(state) => {
+                candle::gguf::pipeline::analyze_image(state, request, &model_dir)
+            }
         }
     }
 }
 
+#[cfg(feature = "candle")]
 impl AudioAnalysisModel for Gemma4Model {
     fn analyze_audio(&mut self, request: &AudioAnalysisRequest) -> Result<AudioAnalysisResponse> {
         let model_dir = self.model_dir.clone();
@@ -286,14 +314,16 @@ impl AudioAnalysisModel for Gemma4Model {
             .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?
         {
             LoadedVariant::Safetensors(state) => {
-                safetensors::pipeline::analyze_audio(state, request, &model_dir)
+                candle::safetensors::pipeline::analyze_audio(state, request, &model_dir)
             }
-            LoadedVariant::Gguf(state) => gguf::pipeline::analyze_audio(state, request, &model_dir),
+            LoadedVariant::Gguf(state) => {
+                candle::gguf::pipeline::analyze_audio(state, request, &model_dir)
+            }
         }
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "candle"))]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;

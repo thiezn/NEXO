@@ -37,6 +37,7 @@ pub enum Platform {
     Ios,
     Linux,
     Windows,
+    Mortimmy,
 }
 
 impl Platform {
@@ -47,6 +48,7 @@ impl Platform {
             "ios" => Self::Ios,
             "linux" => Self::Linux,
             "windows" => Self::Windows,
+            "mortimmy" => Self::Mortimmy,
             _ => Self::Macos,
         }
     }
@@ -107,7 +109,13 @@ mod tests {
 
     #[test]
     fn platform_roundtrip() {
-        for platform in [Platform::Macos, Platform::Ios, Platform::Linux, Platform::Windows] {
+        for platform in [
+            Platform::Macos,
+            Platform::Ios,
+            Platform::Linux,
+            Platform::Windows,
+            Platform::Mortimmy,
+        ] {
             let json = serde_json::to_string(&platform).unwrap();
             let decoded: Platform = serde_json::from_str(&json).unwrap();
             assert_eq!(platform, decoded);

@@ -1,7 +1,7 @@
+use crate::api::types::ModelCategory;
 use crate::cli::repl;
 use crate::config::AiConfig;
 use crate::coordinator::Coordinator;
-use crate::shared::types::ModelCategory;
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

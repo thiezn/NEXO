@@ -1,5 +1,5 @@
-use anyhow::Result;
 use super::version::SciVersion;
+use anyhow::Result;
 
 /// Decompress SCI resource data based on the compression type.
 /// ScummVM dispatches comp 1/2 based on getSciVersion() <= SCI_VERSION_01.
@@ -111,7 +111,11 @@ fn decompress_lzw_sci0(input: &[u8], unpacked_size: usize) -> Result<Vec<u8>> {
                 if output.len() >= unpacked_size {
                     break;
                 }
-                let byte = if off + i < output.len() { output[off + i] } else { output[off] };
+                let byte = if off + i < output.len() {
+                    output[off + i]
+                } else {
+                    output[off]
+                };
                 output.push(byte);
             }
         }
@@ -183,7 +187,11 @@ fn decompress_lzw_sci1(input: &[u8], unpacked_size: usize) -> Result<Vec<u8>> {
                 if output.len() >= unpacked_size {
                     break;
                 }
-                let byte = if off + i < output.len() { output[off + i] } else { output[off] };
+                let byte = if off + i < output.len() {
+                    output[off + i]
+                } else {
+                    output[off]
+                };
                 output.push(byte);
             }
         }
@@ -405,8 +413,11 @@ fn decompress_dcl(input: &[u8], unpacked_size: usize) -> Result<Vec<u8>> {
             } + 1;
 
             if token_offset > output.len() {
-                anyhow::bail!("DCL: back-reference before stream start (offset={}, written={})",
-                    token_offset, output.len());
+                anyhow::bail!(
+                    "DCL: back-reference before stream start (offset={}, written={})",
+                    token_offset,
+                    output.len()
+                );
             }
 
             let dict_base = (dict_pos.wrapping_sub(token_offset)) & dict_mask;
@@ -482,7 +493,11 @@ fn decompress_lzs(input: &[u8], unpacked_size: usize) -> Result<Vec<u8>> {
             let length = lzs_get_comp_len(&mut reader)?;
 
             if offset == 0 || offset > output.len() {
-                anyhow::bail!("LZS: invalid offset {} (buffer size {})", offset, output.len());
+                anyhow::bail!(
+                    "LZS: invalid offset {} (buffer size {})",
+                    offset,
+                    output.len()
+                );
             }
 
             let src_start = output.len() - offset;
@@ -637,7 +652,10 @@ fn reorder_view(src: &[u8]) -> Vec<u8> {
 
                 // Build cel headers
                 for c in 0..cc {
-                    if celindex + c < cel_total && seeker + 7 <= src.len() && writer + 8 <= dest.len() {
+                    if celindex + c < cel_total
+                        && seeker + 7 <= src.len()
+                        && writer + 8 <= dest.len()
+                    {
                         dest[writer..writer + 6].copy_from_slice(&src[seeker..seeker + 6]);
                         seeker += 6;
                         let w_val = src[seeker] as u16;
@@ -669,7 +687,14 @@ fn reorder_view(src: &[u8]) -> Vec<u8> {
     let mut rle_pos = rle_start;
     for c in 0..cel_total {
         if cc_pos[c] + 8 <= dest.len() {
-            let (new_rle, new_pix) = decode_rle(src, rle_pos, pix_pos, &mut dest, cc_pos[c] + 8, cc_lengths[c]);
+            let (new_rle, new_pix) = decode_rle(
+                src,
+                rle_pos,
+                pix_pos,
+                &mut dest,
+                cc_pos[c] + 8,
+                cc_lengths[c],
+            );
             rle_pos = new_rle;
             pix_pos = new_pix;
         }
@@ -691,7 +716,8 @@ fn reorder_view(src: &[u8]) -> Vec<u8> {
         let pal_src = if seeker >= 4 { seeker - 4 } else { seeker };
         let pal_data_len = (4 * 256 + 4).min(src.len().saturating_sub(pal_src));
         if writer + pal_data_len <= dest.len() {
-            dest[writer..writer + pal_data_len].copy_from_slice(&src[pal_src..pal_src + pal_data_len]);
+            dest[writer..writer + pal_data_len]
+                .copy_from_slice(&src[pal_src..pal_src + pal_data_len]);
         }
     }
 
@@ -728,7 +754,14 @@ fn get_rle_size(data: &[u8], mut pos: usize, dsize: usize) -> usize {
 
 /// Decode RLE + pixel data into output buffer
 /// Returns (new_rle_pos, new_pix_pos)
-fn decode_rle(src: &[u8], mut rle_pos: usize, mut pix_pos: usize, dest: &mut [u8], mut out_pos: usize, size: usize) -> (usize, usize) {
+fn decode_rle(
+    src: &[u8],
+    mut rle_pos: usize,
+    mut pix_pos: usize,
+    dest: &mut [u8],
+    mut out_pos: usize,
+    size: usize,
+) -> (usize, usize) {
     let mut decoded = 0usize;
 
     while decoded < size {
@@ -857,7 +890,8 @@ fn reorder_pic(src: &[u8], dsize: usize) -> Vec<u8> {
         let avail = src.len().saturating_sub(seeker);
         let copy_len = trailing_size.min(avail);
         if copy_len > 0 && trailing_start + copy_len <= dest.len() {
-            dest[trailing_start..trailing_start + copy_len].copy_from_slice(&src[seeker..seeker + copy_len]);
+            dest[trailing_start..trailing_start + copy_len]
+                .copy_from_slice(&src[seeker..seeker + copy_len]);
         }
         seeker += copy_len;
     }

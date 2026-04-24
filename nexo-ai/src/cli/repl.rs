@@ -1,7 +1,7 @@
+use crate::api::types::{ChatMessage, ChatRole, ModelCategory};
 use crate::coordinator::Coordinator;
+use crate::models::support::conversation::ConversationManager;
 use crate::registry::{find_manifest, known_manifests};
-use crate::shared::templates::conversation::ConversationManager;
-use crate::shared::types::{ChatMessage, ChatRole, ModelCategory};
 use crate::statistics::display as stats_display;
 use anyhow::Result;
 use rustyline::completion::{Completer, Pair};
@@ -1223,7 +1223,7 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str, conversation: &mut Con
     });
 
     let settings = coordinator.config().model_settings(&model_name);
-    let request = crate::shared::types::ChatRequest {
+    let request = crate::api::types::ChatRequest {
         messages: conversation.messages().to_vec(),
         max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
         temperature: settings.temperature.unwrap_or(DEFAULT_CHAT_TEMPERATURE),
@@ -1277,7 +1277,7 @@ fn handle_tool(coordinator: &mut Coordinator, text: &str) {
     };
 
     let settings = coordinator.config().model_settings(&model_name);
-    let request = crate::shared::types::ToolCallRequest {
+    let request = crate::api::types::ToolCallRequest {
         messages: vec![ChatMessage {
             role: ChatRole::User,
             content: text.to_string(),
@@ -1344,7 +1344,7 @@ fn handle_talk(coordinator: &mut Coordinator, text: &str) {
     };
 
     let settings = coordinator.config().model_settings(&model_name);
-    let request = crate::shared::types::TalkRequest {
+    let request = crate::api::types::TalkRequest {
         text: text.to_string(),
         voice_description: settings
             .voice_description
@@ -1433,7 +1433,7 @@ fn handle_listen(coordinator: &mut Coordinator, file: Option<&str>) {
     println!("  [listen via {model_name}] transcribing...");
 
     let audio_duration_ms = (audio.duration_secs() * 1000.0) as u64;
-    let request = crate::shared::types::ListenRequest {
+    let request = crate::api::types::ListenRequest {
         pcm_samples: audio.samples,
         sample_rate: audio.sample_rate,
         language: None,
@@ -1480,13 +1480,13 @@ fn handle_imagine(coordinator: &mut Coordinator, prompt: &str) {
 
     // Derive sensible defaults from model family rather than coupling to a specific model type.
     let (family_steps, family_guidance) = find_manifest(&model_name)
-        .map(|m| match m.manifest.family.as_str() {
-            "flux" => (4u32, 0.0f64),
+        .map(|m| match m.family {
+            crate::registry::ModelFamily::Flux => (4u32, 0.0f64),
             _ => (20, 7.5),
         })
         .unwrap_or((20, 7.5));
 
-    let request = crate::shared::types::ImagineRequest {
+    let request = crate::api::types::ImagineRequest {
         prompt: prompt.to_string(),
         width: settings.default_width.unwrap_or(512),
         height: settings.default_height.unwrap_or(512),
@@ -1571,7 +1571,7 @@ fn handle_image(coordinator: &mut Coordinator, path: &str, prompt: &str) {
     };
 
     let settings = coordinator.config().model_settings(&model_name);
-    let request = crate::shared::types::ImageAnalysisRequest {
+    let request = crate::api::types::ImageAnalysisRequest {
         image_data,
         prompt: prompt.to_string(),
         max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
@@ -1617,7 +1617,7 @@ fn handle_embed(coordinator: &mut Coordinator, text: &str) {
         return;
     };
 
-    let request = crate::shared::types::EmbedRequest {
+    let request = crate::api::types::EmbedRequest {
         texts: vec![text.to_string()],
     };
 

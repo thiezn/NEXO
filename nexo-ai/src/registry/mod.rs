@@ -2,7 +2,8 @@ pub mod manifest;
 pub mod models;
 
 pub use manifest::{
-    AiComponent, AiModelManifest, find_manifest, known_manifests, manifests_for_category,
+    AiComponent, AiModelManifest, CandleBackend, ModelFamily, ModelRuntime, OpenAiProvider,
+    find_manifest, known_manifests, manifests_for_category,
 };
 pub use models::{ModelEntry, list_models};
 
@@ -18,6 +19,10 @@ pub fn detect_available_models() -> Vec<String> {
     known_manifests()
         .par_iter()
         .filter_map(|m| {
+            if m.manifest.files.is_empty() {
+                return None;
+            }
+
             let files_valid = m.manifest.files.par_iter().all(|f| {
                 let path = mdir.join(storage_path(&m.manifest, f));
                 if !path.exists() {

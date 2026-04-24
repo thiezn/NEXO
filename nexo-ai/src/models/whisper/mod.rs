@@ -1,21 +1,29 @@
-pub mod decode;
-pub mod mel;
-pub mod pipeline;
+#[cfg(feature = "candle")]
+pub mod candle;
+pub mod common;
+#[cfg(feature = "mlx")]
+pub mod openai;
 
+#[cfg(feature = "candle")]
 use std::path::PathBuf;
 
+#[cfg(feature = "candle")]
 use anyhow::Result;
 
-use crate::shared::model_traits::{ListenModel, ModelInfo};
-use crate::shared::types::{ListenRequest, ListenResponse, ModelCategory};
+#[cfg(feature = "candle")]
+use crate::api::model_traits::{ListenModel, ModelInfo};
+#[cfg(feature = "candle")]
+use crate::api::types::{ListenRequest, ListenResponse, ModelCategory};
 
+#[cfg(feature = "candle")]
 pub struct WhisperModel {
     name: String,
     memory_bytes: u64,
     model_dir: PathBuf,
-    loaded: Option<pipeline::LoadedState>,
+    loaded: Option<candle::pipeline::LoadedState>,
 }
 
+#[cfg(feature = "candle")]
 impl WhisperModel {
     pub fn new(name: String, memory_bytes: u64, model_dir: PathBuf) -> Self {
         Self {
@@ -27,6 +35,7 @@ impl WhisperModel {
     }
 }
 
+#[cfg(feature = "candle")]
 impl ModelInfo for WhisperModel {
     fn name(&self) -> &str {
         &self.name
@@ -52,7 +61,7 @@ impl ModelInfo for WhisperModel {
         if self.loaded.is_some() {
             return Ok(());
         }
-        self.loaded = Some(pipeline::load(&self.model_dir)?);
+        self.loaded = Some(candle::pipeline::load(&self.model_dir)?);
         Ok(())
     }
 
@@ -65,17 +74,19 @@ impl ModelInfo for WhisperModel {
     }
 }
 
+#[cfg(feature = "candle")]
 impl ListenModel for WhisperModel {
     fn transcribe(&mut self, request: &ListenRequest) -> Result<ListenResponse> {
         let state = self
             .loaded
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("model not loaded — call load() first"))?;
-        pipeline::transcribe(state, request)
+        candle::pipeline::transcribe(state, request)
     }
 }
 
 #[cfg(test)]
+#[cfg(feature = "candle")]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;

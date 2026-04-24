@@ -1,1 +1,5 @@
 mlx-vlm
+mflux
+mlx-audio
+rich
+soundfile

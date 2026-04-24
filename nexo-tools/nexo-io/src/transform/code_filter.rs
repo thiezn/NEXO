@@ -1,4 +1,3 @@
-
 /// Programming language classification for comment-aware filtering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
@@ -34,9 +33,7 @@ impl Language {
             "sh" | "bash" | "zsh" => Self::Shell,
             "swift" => Self::Swift,
             "json" | "jsonc" | "json5" | "yaml" | "yml" | "toml" | "xml" | "csv" | "tsv"
-            | "graphql" | "gql" | "sql" | "md" | "markdown" | "txt" | "env" | "lock" => {
-                Self::Data
-            }
+            | "graphql" | "gql" | "sql" | "md" | "markdown" | "txt" | "env" | "lock" => Self::Data,
             _ => Self::Unknown,
         }
     }
@@ -308,10 +305,19 @@ mod tests {
     fn all_languages_have_comment_patterns() {
         // Ensure no panic when calling comment_patterns on every variant
         let langs = [
-            Language::Rust, Language::Python, Language::JavaScript,
-            Language::TypeScript, Language::Go, Language::C, Language::Cpp,
-            Language::Java, Language::Ruby, Language::Shell, Language::Swift,
-            Language::Data, Language::Unknown,
+            Language::Rust,
+            Language::Python,
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::Go,
+            Language::C,
+            Language::Cpp,
+            Language::Java,
+            Language::Ruby,
+            Language::Shell,
+            Language::Swift,
+            Language::Data,
+            Language::Unknown,
         ];
         for lang in &langs {
             let _ = lang.comment_patterns();

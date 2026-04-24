@@ -68,7 +68,10 @@ impl Tool for IoRead {
             .ok_or_else(|| anyhow::anyhow!("missing required parameter: path"))?
             .to_string();
         let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let limit = args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
 
         tokio::task::spawn_blocking(move || {
             let content = match std::fs::read_to_string(&path) {
@@ -165,9 +168,18 @@ impl Tool for IoEdit {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing required parameter: path"))?
             .to_string();
-        let old_string = args.get("old_string").and_then(|v| v.as_str()).map(String::from);
-        let new_string = args.get("new_string").and_then(|v| v.as_str()).map(String::from);
-        let content = args.get("content").and_then(|v| v.as_str()).map(String::from);
+        let old_string = args
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let new_string = args
+            .get("new_string")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let content = args
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         tokio::task::spawn_blocking(move || {
             let p = std::path::Path::new(&path);

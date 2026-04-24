@@ -10,12 +10,12 @@ use super::multimodal::Model;
 use super::text::{LayerKvSnapshot, TextModel};
 use crate::models::gemma4::config::{Gemma4Config, Gemma4TextConfig, Gemma4VisionConfig};
 
-use crate::models::shared::weights::find_safetensor_files;
-use crate::shared::templates::{ChatTemplate, ReasoningMode};
-use crate::shared::types::{
+use crate::api::types::{
     AudioAnalysisRequest, AudioAnalysisResponse, ChatRequest, ChatResponse, ImageAnalysisRequest,
     ImageAnalysisResponse, ToolCallRequest, ToolCallResponse,
 };
+use crate::models::support::weights::find_safetensor_files;
+use crate::shared::templates::{ChatTemplate, ReasoningMode};
 
 use crate::models::gemma4::generation::{self, TextForward};
 use crate::models::gemma4::template::Gemma4Template;

@@ -1,4 +1,4 @@
-use crate::shared::types::ModelCategory;
+use crate::api::types::ModelCategory;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 

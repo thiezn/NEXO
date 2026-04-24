@@ -38,11 +38,6 @@ impl ClientConfig {
     pub fn load() -> utl_helpers::Result<Self> {
         utl_helpers::config::load_or_create(&Self::config_path())
     }
-
-    /// TODO: Create a init command
-    pub fn save(&self) -> utl_helpers::Result {
-        utl_helpers::config::save(self, &Self::config_path())
-    }
 }
 
 #[cfg(test)]

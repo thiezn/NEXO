@@ -87,6 +87,9 @@ Gateway → Client:
 
 Side-effecting methods require **idempotency keys** (see schema).
 
+There is no peer-to-peer transport between clients. Any client-to-client traffic is
+routed through the gateway over the same WebSocket protocol.
+
 ## Roles + scopes
 
 ### Roles
@@ -116,7 +119,67 @@ The Gateway treats these as **claims** and enforces server-side allowlists.
 
 - users may call `tools.catalog` (`user.read`) to fetch the runtime tool catalog for an
   agent. The response includes grouped tools and provenance metadata:
-  - `source`: `core`, `ai`, `node` or `plugin`
+  - `source`: `gateway` or `node`
+
+### User routing identity
+
+For `role: "user"` connections, the gateway currently uses `client.id` as the routing
+identity for directed client messaging and session ownership. If multiple user peers are
+connected with the same `client.id`, all matching peers receive directed `message` events.
+`device.id` still identifies the concrete device connection.
+
+## Client messaging (`send`)
+
+Clients send directed messages to other connected clients via the gateway. The request is
+acknowledged immediately, and the recipient receives a `message` event. Delivery is
+`true` when at least one connected recipient peer matched the target identity.
+
+Client → Gateway:
+
+```json
+{
+  "type": "request",
+  "id": "…",
+  "method": "send",
+  "params": {
+    "target": "bob",
+    "payload": { "text": "hello" },
+    "idempotencyKey": "key-789"
+  }
+}
+```
+
+Gateway → Client (ack):
+
+```json
+{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": { "delivered": true }
+}
+```
+
+Gateway → Target client:
+
+```json
+{
+  "type": "event",
+  "event": "message",
+  "payload": {
+    "messageId": "…",
+    "from": "alice",
+    "target": "bob",
+    "payload": { "text": "hello" }
+  }
+}
+```
+
+Notes:
+
+- `target` matches the recipient user routing identity (`client.id` for `role: "user"`)
+- the gateway does not create a client-to-client return channel; replies are separate `send` requests
+- a successful response with `delivered: false` means no connected recipient matched the target
 
 ## Node tool registration (`tools.register`)
 

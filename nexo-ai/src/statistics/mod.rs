@@ -6,7 +6,7 @@ pub mod metrics;
 use backend::{InMemoryBackend, StatsBackend};
 use metrics::{InferenceDetail, InferenceRecord, LifecycleEvent, LifecycleRecord};
 
-use crate::shared::types::ModelCategory;
+use crate::api::types::ModelCategory;
 use std::time::SystemTime;
 
 /// Central statistics facade. Owns a backend and provides

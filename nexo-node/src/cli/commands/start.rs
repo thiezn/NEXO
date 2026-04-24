@@ -1,8 +1,8 @@
 use crate::config::NodeConfig;
 use crate::registry::ToolRegistry;
+use nexo_ai::api::types::ModelCategory;
 use nexo_ai::coordinator::Coordinator;
 use nexo_ai::registry::{detect_available_models, find_manifest, manifests_for_category};
-use nexo_ai::shared::types::ModelCategory;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 

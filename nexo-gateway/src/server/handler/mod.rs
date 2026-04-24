@@ -3,6 +3,7 @@ mod base;
 mod cron;
 mod image_analyze;
 mod prefill;
+mod send;
 mod status;
 mod tools;
 
@@ -215,7 +216,12 @@ async fn wait_for_connect<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpi
 
     tracing::info!(
         "Peer connected: id={}, client={}, role={:?}, capabilities={:?}, commands={:?}, available_models={:?}",
-        peer.id, peer.client_id, peer.role, peer.capabilities, peer.commands, models,
+        peer.id,
+        peer.client_id,
+        peer.role,
+        peer.capabilities,
+        peer.commands,
+        models,
     );
 
     // Create per-peer directed channel
@@ -342,9 +348,7 @@ async fn dispatch_method(
         Method::PrefillCollectionCreate => {
             prefill::handle_collection_create(request_id, params, state).await
         }
-        Method::PrefillCollectionList => {
-            prefill::handle_collection_list(request_id, state).await
-        }
+        Method::PrefillCollectionList => prefill::handle_collection_list(request_id, state).await,
         Method::PrefillCollectionDelete => {
             prefill::handle_collection_delete(request_id, params, state).await
         }
@@ -354,9 +358,7 @@ async fn dispatch_method(
         Method::SystemPresence => {
             ok_or_internal_error(request_id, serde_json::json!({"acknowledged": true}))
         }
-        Method::Send => {
-            ok_or_internal_error(request_id, nexo_ws_schema::SendResponse { delivered: true })
-        }
+        Method::Send => send::handle_send(request_id, params, peer_id, state).await,
 
         Method::ModelLoad | Method::ModelUnload => Frame::error_response(
             request_id,

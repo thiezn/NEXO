@@ -37,11 +37,7 @@ pub struct AgentHandle {
 
 impl AgentHandle {
     /// Spawn the background agent task and return a handle.
-    pub fn spawn(
-        db: SqlitePool,
-        state: SharedState,
-        event_tx: broadcast::Sender<Frame>,
-    ) -> Self {
+    pub fn spawn(db: SqlitePool, state: SharedState, event_tx: broadcast::Sender<Frame>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
         tokio::spawn(agent_task(cmd_rx, db, state, event_tx));
         Self { cmd_tx }
@@ -76,7 +72,9 @@ async fn agent_task(
                 prefill_collection_id,
                 thinking,
             } => {
-                tracing::info!("Starting agent run {run_id} (session={session_id}, thinking={thinking})");
+                tracing::info!(
+                    "Starting agent run {run_id} (session={session_id}, thinking={thinking})"
+                );
                 loop_runner::run(
                     &run_id,
                     &session_id,

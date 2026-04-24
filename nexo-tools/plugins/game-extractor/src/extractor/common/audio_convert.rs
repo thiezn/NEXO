@@ -115,9 +115,8 @@ pub fn parse_voc_blocks(data: &[u8]) -> Result<VocInfo> {
                 if size < 12 || pos + size > data.len() {
                     break;
                 }
-                sample_rate = u32::from_le_bytes([
-                    data[pos], data[pos + 1], data[pos + 2], data[pos + 3],
-                ]);
+                sample_rate =
+                    u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
                 let _bits_per_sample = data[pos + 4];
                 let _channels = data[pos + 5];
                 // Skip 6 bytes of format info, rest is PCM data
@@ -141,7 +140,10 @@ pub fn parse_voc_blocks(data: &[u8]) -> Result<VocInfo> {
         bail!("No PCM audio data found in VOC blocks");
     }
 
-    Ok(VocInfo { sample_rate, pcm_data })
+    Ok(VocInfo {
+        sample_rate,
+        pcm_data,
+    })
 }
 
 /// Convert PCM audio data to a WAV file (unsigned 8-bit mono PCM).
@@ -163,7 +165,7 @@ pub fn pcm_to_wav(pcm_data: &[u8], sample_rate: u32) -> Vec<u8> {
     // fmt chunk
     wav.extend_from_slice(b"fmt ");
     wav.extend_from_slice(&16u32.to_le_bytes()); // chunk size
-    wav.extend_from_slice(&1u16.to_le_bytes());  // PCM format
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM format
     wav.extend_from_slice(&channels.to_le_bytes());
     wav.extend_from_slice(&sample_rate.to_le_bytes());
     wav.extend_from_slice(&byte_rate.to_le_bytes());

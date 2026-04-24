@@ -1,95 +1,97 @@
 # Testing Models
 
-## Integration Tests
+## Test Targets
 
-All model integration tests live in `tests/model_inference.rs`. They are `#[ignore]` by default since they require downloaded models and hardware.
+- `nexo-ai/tests/model_inference.rs` — local Candle model integration tests. Run this target with `--features candle`.
+- `nexo-ai/tests/mlx_audio_remote.rs` — coordinator-based end-to-end tests for MLX Audio Whisper and Voxtral.
+- `nexo-ai/tests/mlx_server.rs` — MLX VLM provider/server lifecycle and API tests.
+- Family unit tests live next to the implementation files, especially templates and request builders.
 
-### Attribute Order
+Choose the narrowest surface that still proves the change.
 
-`#[timeout]` from ntest wraps the test function and **must** come after `#[test]`:
+## Helpers
+
+Shared helpers live in `nexo-ai/tests/common/mod.rs`:
+
+- `init_tracing()`
+- `resolve_model(name)`
+- `create_test_png()`
+
+`resolve_model()` is for local manifests with real downloaded files. Do not use it for provider-managed remote manifests whose `files` list is empty.
+
+`load_test_audio()` is currently defined inside the test targets that need it.
+
+## Attribute Order
+
+For sync ignored tests, keep the attribute order as:
 
 ```rust
 #[test]
 #[ignore]
 #[serial]
 #[timeout(600_000)]
-fn test_my_model() { ... }
+fn test_name() { ... }
 ```
 
-### Test Macros
+For async provider tests, use `#[tokio::test(flavor = "multi_thread")]` before `#[ignore]`, `#[serial]`, and `#[timeout(...)]`.
 
-Use the existing macros as templates. Each takes a test name, model name, and (for some) a model type path:
+## Macros in `model_inference.rs`
 
-| Macro | Category | Usage |
-|-------|----------|-------|
-| `listen_test!` | Listen | `listen_test!(test_name, "model-name")` |
-| `talk_test!` | Talk | `talk_test!(test_name, "model-name", timeout_ms)` |
-| `imagine_test!` | Imagine | `imagine_test!(test_name, "model-name", model::Type)` |
-| `imagine_file_test!` | Imagine (file output) | `imagine_file_test!(test_name, "model-name", model::Type, "prompt", "output.png", steps)` |
-| `chat_test!` | Chat | `chat_test!(test_name, "model-name", model::Type)` or with optional `max_tokens` |
-| `tool_test!` | Tool | `tool_test!(test_name, "model-name", model::Type)` or with optional `max_tokens` |
-| `perf_test!` | Performance | `perf_test!(test_name, "model-name", min_tok_per_sec, model::Type)` |
-| `talk_perf_test!` | Talk perf | `talk_perf_test!(test_name, "model-name", max_seconds)` |
+Current local-model macros are:
 
-**Every model must have a performance test** using `perf_test!` (for chat models) or `talk_perf_test!` (for talk models). Set conservative minimum thresholds that catch severe regressions without being flaky across hardware variations.
+- `listen_test!`
+- `imagine_test!`
+- `imagine_file_test!`
+- `chat_test!`
+- `perf_test!`
+- `tool_test!`
+- `gguf_chat_test!`
+- `gguf_image_test!`
+- `gguf_audio_test!`
+- `image_test!`
 
-### What the Macros Do
+Do not document or rely on macros that are not actually present in the file.
 
-Each macro follows the same pattern:
+## Remote Provider Pattern
 
-1. Call `resolve_model(name)` to get the model directory and memory estimate
-2. Construct the model struct and call `model.load()`
-3. Downcast to the category trait (`as_chat()`, `as_tool()`, etc.)
-4. Run inference with a standard request
-5. Assert non-empty output
-6. `model.unload()` and verify
+For provider-backed manifests, prefer coordinator-level tests over directly calling the adapter constructors.
 
-Performance macros add: warmup inference (to prime Metal shaders), measurement of tok/s or realtime factor, and assertion against a minimum threshold.
+Pattern:
 
-### Helper Functions
+1. Build a `Coordinator` with provider-specific config.
+2. Call `coordinator.load_model(model_name)`.
+3. Get the typed capability through `model_mut(model_name)` and `as_listen()` / `as_talk()`.
+4. Assert on the real response.
+5. Call `unload_all()` and verify cleanup.
 
-- `resolve_model(name)` -- Looks up the manifest, checks the model is downloaded, verifies all files exist. Panics with a clear box showing the exact download command if anything is missing.
-- `load_test_audio()` -- Loads the test WAV file from `datasets/audio/monkeyinmypocket.wav`.
-- `create_test_image()` -- Creates a small solid-red 64x64 PNG in memory.
-- `init_tracing()` -- Sets up tracing with `with_test_writer()` so output appears in test captures.
+Why this path matters: it exercises manifest lookup, factory dispatch, provider server startup, and the transport adapter together.
 
-## Running Integration Tests
+Remote speech tests also need a Tokio multi-thread runtime because `nexo-ai/src/openai/model.rs` and `nexo-ai/src/openai/speech.rs` call `Handle::current().block_on(...)` internally.
 
-### Download the model first
+## Commands
+
+Local Candle model tests:
 
 ```bash
-cargo run -p nexo-ai --features cli -- pull <model-name>
+cargo test -p nexo-ai --features candle --test model_inference -- --ignored test_<name> --nocapture
 ```
 
-If the model is gated (requires authentication), ask the user to download it.
-
-### Run specific tests
+MLX Audio remote end-to-end tests:
 
 ```bash
-cargo test -p nexo-ai --test model_inference -- --ignored test_<model_name> 2>&1
+cargo test -p nexo-ai --test mlx_audio_remote -- --ignored --nocapture
 ```
 
-Always capture stderr (`2>&1`) -- model loading info and perf metrics are printed there.
+MLX VLM server tests:
 
-### Common issues
+```bash
+cargo test -p nexo-ai --test mlx_server -- --ignored --nocapture
+```
 
-- **"MODEL NOT DOWNLOADED"** panic: Download the model with `pull` and retry.
-- **"MODEL INCOMPLETE"** panic: Re-download with `--force`:
-  ```bash
-  cargo run -p nexo-ai --features cli -- pull <model-name> --force
-  ```
-- **Start with the smallest model** in a family to iterate faster. Fix bugs there before testing larger variants.
-- **Examine perf test output** -- look for `PERF:` lines in stderr showing tok/s.
+## Common Issues
 
-## Unit Tests for Templates
-
-Add template-specific unit tests in the `#[cfg(test)]` module of your `template.rs` file. Test at minimum:
-
-- Single user message formatting
-- System message handling
-- Multi-turn conversation
-- Tool call parsing (with and without reasoning)
-- End-of-turn markers
-- ReasoningMode behavior (if applicable)
-
-See `models/multipurpose/qwen3/template.rs` and `models/multipurpose/gemma3/template.rs` for comprehensive test examples.
+- Local model missing: run `cargo run -p nexo-ai --features cli -- pull <model-name>`.
+- Local model incomplete: re-download with `--force`.
+- Remote provider venv missing dependencies: install them in the interpreter pointed at by the provider config.
+- Provider-managed models may lazily download weights on the first request, so the first ignored test run can take much longer than later runs.
+- Remote `load()` should only guarantee server readiness. Do not assume warm weights or preloaded tokenizers unless the provider guarantees it.

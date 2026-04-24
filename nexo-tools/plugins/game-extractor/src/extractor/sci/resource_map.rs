@@ -1,5 +1,5 @@
-use anyhow::{Result, Context};
 use super::version::{ResMapVersion, SciGameInfo};
+use anyhow::{Context, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -89,11 +89,10 @@ pub struct ResourceEntry {
 
 /// Parse the resource map file and return all resource entries.
 pub fn parse_resource_map(game: &SciGameInfo) -> Result<Vec<ResourceEntry>> {
-    let data = std::fs::read(&game.map_path)
-        .context("Failed to read resource map")?;
+    let data = std::fs::read(&game.map_path).context("Failed to read resource map")?;
 
     match game.map_version {
-        ResMapVersion::Sci0 => parse_map_sci0(&data, 26),      // 6-bit volume, 26-bit offset
+        ResMapVersion::Sci0 => parse_map_sci0(&data, 26), // 6-bit volume, 26-bit offset
         ResMapVersion::Sci1Middle => parse_map_sci0(&data, 28), // 4-bit volume, 28-bit offset
         ResMapVersion::Sci1Late => parse_map_sci1(&data, 6),
         ResMapVersion::Sci11 => parse_map_sci1(&data, 5),
@@ -111,7 +110,8 @@ fn parse_map_sci0(data: &[u8], vol_shift: u32) -> Result<Vec<ResourceEntry>> {
 
     while pos + 6 <= data.len() {
         let id = u16::from_le_bytes([data[pos], data[pos + 1]]);
-        let offset_raw = u32::from_le_bytes([data[pos + 2], data[pos + 3], data[pos + 4], data[pos + 5]]);
+        let offset_raw =
+            u32::from_le_bytes([data[pos + 2], data[pos + 3], data[pos + 4], data[pos + 5]]);
 
         if offset_raw == 0xFFFFFFFF {
             break;
@@ -187,7 +187,12 @@ fn parse_map_sci1(data: &[u8], entry_size: usize) -> Result<Vec<ResourceEntry>> 
 
             if entry_size == 6 {
                 // SCI1Late: number(2) + vol_offset(4)
-                let vol_offset = u32::from_le_bytes([data[epos+2], data[epos+3], data[epos+4], data[epos+5]]);
+                let vol_offset = u32::from_le_bytes([
+                    data[epos + 2],
+                    data[epos + 3],
+                    data[epos + 4],
+                    data[epos + 5],
+                ]);
                 let volume = (vol_offset >> 28) as u16;
                 let offset = vol_offset & 0x0FFFFFFF;
 
@@ -263,7 +268,12 @@ fn parse_map_sci2(data: &[u8]) -> Result<Vec<ResourceEntry>> {
         let mut epos = start_offset;
         while epos + 6 <= end_offset {
             let number = u16::from_le_bytes([data[epos], data[epos + 1]]);
-            let offset = u32::from_le_bytes([data[epos+2], data[epos+3], data[epos+4], data[epos+5]]);
+            let offset = u32::from_le_bytes([
+                data[epos + 2],
+                data[epos + 3],
+                data[epos + 4],
+                data[epos + 5],
+            ]);
 
             entries.push(ResourceEntry {
                 res_type,

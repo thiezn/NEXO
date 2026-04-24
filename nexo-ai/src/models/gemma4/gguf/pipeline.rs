@@ -19,12 +19,12 @@ use crate::models::gemma4::safetensors::multimodal::broadcast_embed_to_mask;
 use crate::models::gemma4::safetensors::multimodal_embedding::MultimodalEmbedder;
 use crate::models::gemma4::safetensors::vision::VisionTower;
 use crate::models::gemma4::template::Gemma4Template;
-use crate::models::shared::weights::{find_gguf_file, load_gguf};
-use crate::shared::templates::{ChatTemplate, ReasoningMode};
-use crate::shared::types::{
+use crate::api::types::{
     AudioAnalysisRequest, AudioAnalysisResponse, ChatRequest, ChatResponse, ImageAnalysisRequest,
     ImageAnalysisResponse, LayerKvSnapshot, ToolCallRequest, ToolCallResponse,
 };
+use crate::models::support::weights::{find_gguf_file, load_gguf};
+use crate::shared::templates::{ChatTemplate, ReasoningMode};
 
 // ── Multimodal towers (lazily loaded from safetensors) ───────────────────
 

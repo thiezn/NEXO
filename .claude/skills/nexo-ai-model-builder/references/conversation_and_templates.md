@@ -1,120 +1,83 @@
-# Conversation Management and Chat Templates
+# Conversation and Templates
 
-## Architecture Overview
+## Current Paths
 
-```
-shared/templates/
-  mod.rs           -- ChatTemplate trait, ReasoningMode enum, shared formatting helpers
-  conversation.rs  -- ConversationManager (history, formatting, context windowing)
-  kv_cache.rs      -- KvCacheState trait (prefix caching abstraction)
+Shared prompting primitives live in:
 
-models/multipurpose/qwen3/template.rs  -- Qwen3Template implements ChatTemplate
-models/multipurpose/gemma3/template.rs -- Gemma3Template implements ChatTemplate
-```
+- `nexo-ai/src/models/support/prompting.rs`
+- `nexo-ai/src/models/support/conversation.rs`
 
-Model-specific template implementations live in their model folders, not in `shared/templates/`.
+Family-specific templates belong next to the family, usually in `nexo-ai/src/models/<family>/common/template.rs`.
 
-## ChatTemplate Trait
+Current reference implementation:
 
-Every model that supports Chat or Tool categories must implement `ChatTemplate` (in `shared/templates/mod.rs`):
+- `nexo-ai/src/models/gemma4/common/template.rs`
+
+Do not move template logic into `models/support/`. `models/support/` is only for traits, shared helpers, and conversation scaffolding.
+
+## `ChatTemplate`
+
+`ChatTemplate` is the contract for Chat and Tool-capable families:
 
 ```rust
 pub trait ChatTemplate: Send {
-    /// Format conversation messages into a model-ready prompt string.
     fn format_prompt(&self, messages: &[ChatMessage], reasoning: &ReasoningMode) -> String;
-
-    /// Format conversation with tool definitions embedded.
     fn format_with_tools(
         &self,
         messages: &[ChatMessage],
-        tools: &[ToolSpec],
+        tools: &[nexo_spec::tool::ToolSpec],
         reasoning: &ReasoningMode,
     ) -> String;
-
-    /// Clean raw model output (strip thinking blocks, control tokens, etc.).
     fn parse_response(&self, raw: &str) -> String;
-
-    /// Extract tool calls from raw model output.
-    /// Returns (tool_calls, optional_reasoning).
     fn parse_tool_calls(&self, raw: &str) -> (Vec<ToolCall>, Option<String>);
-
-    /// End-of-turn marker strings for this template family.
     fn end_of_turn_markers(&self) -> &[&str];
 }
 ```
 
-### Implementation Checklist
+Use it to keep prompt formatting and raw-output parsing family-local. Local Candle backends and OpenAI-backed family adapters can share the same template behavior.
 
-1. **`format_prompt`** -- Convert `&[ChatMessage]` into the model's native prompt format. Handle all `ChatRole` variants: `System`, `User`, `Assistant`, `Tool`.
-2. **`format_with_tools`** -- Inject tool definitions into the system message, then delegate to `format_prompt`. Use the shared helpers: `format_tools_xml()` for XML-style (Qwen3) or `format_tools_json()` for JSON-style (Gemma3).
-3. **`parse_response`** -- Strip thinking blocks, control tokens, or other non-content output. For models without thinking support, return the input unchanged.
-4. **`parse_tool_calls`** -- Extract structured `ToolCall` objects from raw output. Return any reasoning text that preceded the tool calls.
-5. **`end_of_turn_markers`** -- Return the strings that signal end of the model's turn (used for stopping generation).
+## `ReasoningMode`
 
-### Reference Implementations
+`ReasoningMode` lives in `models/support/prompting.rs`.
 
-- **Qwen3** (`models/multipurpose/qwen3/template.rs`): `<|im_start|>/<|im_end|>` format, XML tool defs, `<tool_call>` tags, `<tool_response>` in user turns, rolling context management for `<think>` blocks.
-- **Gemma3** (`models/multipurpose/gemma3/template.rs`): `<start_of_turn>user/model` format, system prepended to first user turn, JSON tool defs, brace-matching JSON extraction for tool calls.
+- `Disabled`
+- `Auto`
+- `Effort(ReasoningEffort)`
 
-## ReasoningMode
+Treat it as a capability surface, not a guarantee that every family uses every mode. Current Gemma4 template ignores the value, which is fine for a family that does not expose reasoning controls.
 
-Controls how a model handles internal reasoning/thinking. Different model families map their capabilities onto these variants:
+## `ConversationManager`
 
-```rust
-pub enum ReasoningMode {
-    Disabled,                    // No reasoning output
-    Auto,                        // Model decides whether to reason (default)
-    Effort(ReasoningEffort),     // Explicit effort level
-}
+`ConversationManager` in `models/support/conversation.rs` owns message history and delegates formatting to a `ChatTemplate`.
 
-pub enum ReasoningEffort { Low, Medium, High, Max }
-```
+Important methods:
 
-**Model family mapping:**
+- `push(msg)`
+- `messages()`
+- `clear()`
+- `slide(keep_turns)`
+- `summarize_prefix(summary)`
+- `format(template)`
+- `format_with_tools(template, tools)`
+- `set_reasoning(mode)`
 
-| Family | Disabled | Auto | Effort |
-|--------|----------|------|--------|
-| Qwen3 / DeepSeek | Prefill empty `<think>` tags | Let model decide | Same as Auto |
-| Gemma3 | Ignored (no thinking support) | Ignored | Ignored |
-| OpenAI (future) | `reasoning_effort: low` | Default | Maps to `reasoning_effort` |
-| Claude (future) | Low effort | Default | Maps to effort level |
+Use it from the REPL or other long-running chat surfaces. Do not re-implement rolling history inside individual model families.
 
-When implementing `format_prompt`, check `reasoning` and act accordingly. Models without thinking support should ignore it entirely (see Gemma3 using `_reasoning`).
+## Family Guidance
 
-## ConversationManager
+- Keep templates in the family module, usually under `common/`.
+- Put reusable family helpers next to the template instead of in `models/support/`.
+- Provider-backed chat families can reuse local parsing. `nexo-ai/src/models/gemma4/openai/mod.rs` is the current example: it falls back to the Gemma4 template parser when wire tool calls are absent.
+- `format_tools_xml()` and `format_tools_json()` in `models/support/prompting.rs` are optional helpers. They are not the architecture. Use them only if the family's prompt format actually matches.
 
-`ConversationManager` (`shared/templates/conversation.rs`) manages multi-turn conversation history in the REPL. It is **model-agnostic** -- it stores messages and delegates formatting to a `ChatTemplate`.
+## Minimum Template Tests
 
-### How it's used in the REPL
+Add `#[cfg(test)]` coverage in the template file itself for:
 
-The REPL creates a `ConversationManager` before the main loop. On each chat message:
-
-1. User input is pushed as `ChatRole::User`
-2. `conversation.messages()` provides the full history to `ChatRequest`
-3. Model response is pushed as `ChatRole::Assistant`
-4. `/clear` resets the conversation (keeping system prompt if set)
-
-### Context Management Methods
-
-| Method | Purpose |
-|--------|---------|
-| `push(msg)` | Append a message |
-| `clear()` | Reset history, keep system prompt |
-| `slide(keep_turns)` | Keep system prompt + last N turn pairs |
-| `summarize_prefix(summary)` | Replace older messages with a summary |
-| `format(template)` | Format all messages using a `ChatTemplate` |
-| `format_with_tools(template, tools)` | Format with tool definitions |
-
-### Future: Prefix Caching
-
-The `KvCacheState` trait (`shared/templates/kv_cache.rs`) abstracts KV cache operations for conversation-aware cache reuse:
-
-```rust
-pub trait KvCacheState {
-    fn cache_token_count(&self) -> usize;
-    fn clear_cache(&mut self);
-    fn truncate_to(&mut self, len: usize);
-}
-```
-
-Phase 1 (current): trait is defined, models implement stubs. Phase 2: real prefix caching with token-level truncation, allowing the KV cache to be reused across turns instead of re-encoding the entire conversation history each time.
+- single user turn formatting
+- system prompt handling
+- multi-turn formatting
+- tool declaration formatting
+- tool response turns (`ChatRole::Tool`)
+- tool-call parsing and fallback parsing
+- end-of-turn stripping in `parse_response()`

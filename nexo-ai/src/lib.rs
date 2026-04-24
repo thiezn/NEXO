@@ -1,14 +1,15 @@
+pub mod api;
 pub mod audio;
 pub mod config;
 pub mod coordinator;
 pub mod device;
 pub mod download;
-#[cfg(feature = "candle")]
 pub mod models;
+#[cfg(feature = "mlx")]
+pub mod openai;
 pub mod registry;
 #[cfg(feature = "mlx")]
-pub mod remote_models;
-pub mod shared;
+pub mod servers;
 pub mod statistics;
 pub mod vision;
 

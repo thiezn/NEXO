@@ -27,14 +27,7 @@ impl super::Coordinator {
         self.clear_active_models();
 
         #[cfg(feature = "mlx")]
-        if let Some(ref server) = self.mlx_server {
-            let server = server.clone();
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server.lock().await.stop().await;
-                })
-            });
-        }
+        self.provider_servers.stop_all();
 
         tracing::info!("unloaded all models");
     }

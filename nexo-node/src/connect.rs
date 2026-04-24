@@ -2,11 +2,11 @@ use crate::config::NodeConfig;
 use crate::kv_cache::manager::SessionCacheManager;
 use crate::registry::ToolRegistry;
 use base64::Engine;
-use nexo_ai::coordinator::Coordinator;
-use nexo_ai::registry::find_manifest;
-use nexo_ai::shared::types::{
+use nexo_ai::api::types::{
     ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, ModelCategory, ToolCallRequest,
 };
+use nexo_ai::coordinator::Coordinator;
+use nexo_ai::registry::find_manifest;
 use nexo_ws_client::{
     NexoConnection, ReadHalf, WriteHalf, default_node_connect_params, perform_handshake,
 };
@@ -572,43 +572,20 @@ async fn dispatch_agent_inference(
 
             // Handle KV cache session switching (disk persistence)
             if let Some(kv) = model.as_kv_cacheable() {
-                let current = kv.current_session_id().map(String::from);
                 let target = session_id.as_deref();
                 tracing::debug!(
-                    "dispatch_agent_inference {}: KV cache current={:?}, target={:?}",
+                    "dispatch_agent_inference {}: switching KV cache to target={:?}",
                     request_id,
-                    current,
                     target,
                 );
 
-                if current.as_deref() != target && target.is_some() {
-                    let mgr = cache_mgr.lock().unwrap();
-
-                    // Save current session to disk
-                    if current.is_some()
-                        && let Err(e) = mgr.save_current_session(&model_name, kv)
-                    {
-                        tracing::warn!("Failed to save KV cache for session {:?}: {e}", current);
-                    }
-
-                    // Try to load target session from disk
-                    let device = kv.device().clone();
-                    let dtype = kv.dtype();
-                    let loaded = mgr.load_session(target.unwrap(), &model_name, kv, &device, dtype);
-                    match loaded {
-                        Ok(true) => {
-                            tracing::debug!("KV cache: switched to session {:?} from disk", target,);
-                        }
-                        Ok(false) => {
-                            tracing::debug!(
-                                "KV cache: no disk cache for session {:?}, starting fresh",
-                                target,
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to load KV cache for session {:?}: {e}", target,);
-                        }
-                    }
+                let mgr = cache_mgr.lock().unwrap();
+                if let Err(error) = mgr.switch_session(&model_name, kv, target) {
+                    tracing::warn!(
+                        "Failed to switch KV cache for model '{}' to session {:?}: {error}",
+                        model_name,
+                        target,
+                    );
                 }
             }
 
@@ -634,14 +611,23 @@ async fn dispatch_agent_inference(
                         .map_err(|e| format!("Failed to parse tool specs: {e}"))?;
 
                 let req = ToolCallRequest {
-                    messages: chat_messages,
+                    messages: chat_messages.clone(),
                     tools: tool_specs,
                     max_tokens,
                     temperature,
                     top_p,
                     top_k,
-                    session_id,
+                    session_id: session_id.clone(),
                 };
+
+                if let Some(kv) = model.as_kv_cacheable() {
+                    kv.clear_kv_cache();
+                    kv.set_session_state(session_id.clone(), Vec::new());
+                    tracing::debug!(
+                        "dispatch_agent_inference {}: cleared in-memory KV state before tool selection inference",
+                        request_id,
+                    );
+                }
 
                 let tool_model = model
                     .as_tool()
@@ -660,8 +646,45 @@ async fn dispatch_agent_inference(
                     resp.tool_calls.len()
                 );
 
+                if let Some(kv) = model.as_kv_cacheable() {
+                    kv.clear_kv_cache();
+                    kv.set_session_state(session_id.clone(), Vec::new());
+                    tracing::debug!(
+                        "dispatch_agent_inference {}: reset in-memory KV state after tool selection inference",
+                        request_id,
+                    );
+                }
+
                 if resp.tool_calls.is_empty() {
-                    Ok(serde_json::json!({ "content": resp.reasoning.unwrap_or_default() }))
+                    let fallback_text = resp.reasoning.unwrap_or_default();
+                    tracing::debug!(
+                        "dispatch_agent_inference {}: no tool calls returned, falling back to chat response",
+                        request_id,
+                    );
+
+                    let chat_req = ChatRequest {
+                        messages: chat_messages.clone(),
+                        max_tokens,
+                        temperature,
+                        top_p,
+                        top_k,
+                        session_id: session_id.clone(),
+                    };
+                    let Some(chat_model) = model.as_chat() else {
+                        return Ok(serde_json::json!({ "content": fallback_text }));
+                    };
+                    let chat_resp = chat_model.chat(&chat_req).map_err(|e| e.to_string())?;
+
+                    if let Some(kv) = model.as_kv_cacheable() {
+                        kv.clear_kv_cache();
+                        kv.set_session_state(session_id.clone(), Vec::new());
+                        tracing::debug!(
+                            "dispatch_agent_inference {}: reset in-memory KV state after chat fallback response",
+                            request_id,
+                        );
+                    }
+
+                    Ok(serde_json::json!({ "content": chat_resp.text }))
                 } else {
                     let calls: Vec<serde_json::Value> = resp
                         .tool_calls

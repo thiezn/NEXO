@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::shared::types::ModelCategory;
+use crate::api::types::ModelCategory;
 
 // ── AiConfig ────────────────────────────────────────────────────────────────
 
@@ -18,15 +18,27 @@ pub struct AiConfig {
     pub startup_categories: Vec<String>,
     /// Per-model overrides keyed by model name.
     pub models: HashMap<String, ModelSettings>,
-    /// MLX server host (default: "127.0.0.1").
-    #[serde(default)]
-    pub mlx_host: Option<String>,
-    /// MLX server port (default: 8080).
-    #[serde(default)]
-    pub mlx_port: Option<u16>,
+    /// MLX VLM server host (default: "127.0.0.1").
+    #[serde(default, alias = "mlx_host")]
+    pub mlx_vlm_host: Option<String>,
+    /// MLX VLM server port (default: 8080).
+    #[serde(default, alias = "mlx_port")]
+    pub mlx_vlm_port: Option<u16>,
     /// Path to Python venv containing mlx_vlm (e.g. "/path/to/.venv").
+    #[serde(default, alias = "mlx_venv_path")]
+    pub mlx_vlm_venv_path: Option<String>,
+    /// MLX Audio server host (default: "127.0.0.1").
     #[serde(default)]
-    pub mlx_venv_path: Option<String>,
+    pub mlx_audio_host: Option<String>,
+    /// MLX Audio server port (default: 8000).
+    #[serde(default)]
+    pub mlx_audio_port: Option<u16>,
+    /// Path to Python venv containing mlx_audio (e.g. "/path/to/.venv").
+    #[serde(default)]
+    pub mlx_audio_venv_path: Option<String>,
+    /// Hugging Face endpoint used by managed mlx-audio processes.
+    #[serde(default)]
+    pub mlx_audio_hf_endpoint: Option<String>,
 }
 
 impl Default for AiConfig {
@@ -35,9 +47,13 @@ impl Default for AiConfig {
             active_models: HashMap::new(),
             startup_categories: vec!["chat".to_string(), "talk".to_string()],
             models: HashMap::new(),
-            mlx_host: None,
-            mlx_port: None,
-            mlx_venv_path: None,
+            mlx_vlm_host: None,
+            mlx_vlm_port: None,
+            mlx_vlm_venv_path: None,
+            mlx_audio_host: None,
+            mlx_audio_port: None,
+            mlx_audio_venv_path: None,
+            mlx_audio_hf_endpoint: None,
         }
     }
 }
@@ -124,12 +140,20 @@ pub struct CoordinatorConfig {
     pub startup_categories: Vec<String>,
     /// Per-model overrides keyed by model name.
     pub models: HashMap<String, ModelSettings>,
-    /// MLX server host (default: "127.0.0.1").
-    pub mlx_host: Option<String>,
-    /// MLX server port (default: 8080).
-    pub mlx_port: Option<u16>,
+    /// MLX VLM server host (default: "127.0.0.1").
+    pub mlx_vlm_host: Option<String>,
+    /// MLX VLM server port (default: 8080).
+    pub mlx_vlm_port: Option<u16>,
     /// Path to Python venv containing mlx_vlm (e.g. "/path/to/.venv").
-    pub mlx_venv_path: Option<String>,
+    pub mlx_vlm_venv_path: Option<String>,
+    /// MLX Audio server host (default: "127.0.0.1").
+    pub mlx_audio_host: Option<String>,
+    /// MLX Audio server port (default: 8000).
+    pub mlx_audio_port: Option<u16>,
+    /// Path to Python venv containing mlx_audio (e.g. "/path/to/.venv").
+    pub mlx_audio_venv_path: Option<String>,
+    /// Hugging Face endpoint used by managed mlx-audio processes.
+    pub mlx_audio_hf_endpoint: Option<String>,
 }
 
 impl CoordinatorConfig {
@@ -161,14 +185,31 @@ impl CoordinatorConfig {
         self.models.get(name).cloned().unwrap_or_default()
     }
 
-    /// MLX server address (host, port) with defaults.
-    pub fn mlx_server_addr(&self) -> (String, u16) {
+    /// MLX VLM server address (host, port) with defaults.
+    pub fn mlx_vlm_server_addr(&self) -> (String, u16) {
         (
-            self.mlx_host
+            self.mlx_vlm_host
                 .clone()
                 .unwrap_or_else(|| "127.0.0.1".to_string()),
-            self.mlx_port.unwrap_or(8080),
+            self.mlx_vlm_port.unwrap_or(8080),
         )
+    }
+
+    /// MLX Audio server address (host, port) with defaults.
+    pub fn mlx_audio_server_addr(&self) -> (String, u16) {
+        (
+            self.mlx_audio_host
+                .clone()
+                .unwrap_or_else(|| "127.0.0.1".to_string()),
+            self.mlx_audio_port.unwrap_or(8000),
+        )
+    }
+
+    /// Hugging Face endpoint used by managed mlx-audio processes.
+    pub fn mlx_audio_hf_endpoint(&self) -> String {
+        self.mlx_audio_hf_endpoint
+            .clone()
+            .unwrap_or_else(|| "https://hf-mirror.com".to_string())
     }
 }
 
@@ -178,9 +219,13 @@ impl From<AiConfig> for CoordinatorConfig {
             active_models: ai.active_models,
             startup_categories: ai.startup_categories,
             models: ai.models,
-            mlx_host: ai.mlx_host,
-            mlx_port: ai.mlx_port,
-            mlx_venv_path: ai.mlx_venv_path,
+            mlx_vlm_host: ai.mlx_vlm_host,
+            mlx_vlm_port: ai.mlx_vlm_port,
+            mlx_vlm_venv_path: ai.mlx_vlm_venv_path,
+            mlx_audio_host: ai.mlx_audio_host,
+            mlx_audio_port: ai.mlx_audio_port,
+            mlx_audio_venv_path: ai.mlx_audio_venv_path,
+            mlx_audio_hf_endpoint: ai.mlx_audio_hf_endpoint,
         }
     }
 }

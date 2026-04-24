@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use anyhow::Context;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
@@ -22,7 +23,23 @@ pub fn load_file(path: &Path) -> anyhow::Result<AudioBuffer> {
         hint.with_extension(ext);
     }
 
-    decode_stream(mss, hint)
+    match decode_stream(mss, hint) {
+        Ok(audio) => Ok(audio),
+        Err(symphonia_error) if is_wav_path(path) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %symphonia_error,
+                "symphonia failed to decode WAV file, falling back to hound"
+            );
+            decode_wav_reader(std::fs::File::open(path)?).with_context(|| {
+                format!(
+                    "failed to decode WAV file '{}': {symphonia_error}",
+                    path.display()
+                )
+            })
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Load audio from in-memory bytes. The format is auto-detected by symphonia.
@@ -31,7 +48,67 @@ pub fn load_bytes(data: &[u8]) -> anyhow::Result<AudioBuffer> {
     let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
     let hint = Hint::new();
 
-    decode_stream(mss, hint)
+    match decode_stream(mss, hint) {
+        Ok(audio) => Ok(audio),
+        Err(symphonia_error) if looks_like_wav(data) => {
+            tracing::warn!(
+                error = %symphonia_error,
+                "symphonia failed to decode WAV bytes, falling back to hound"
+            );
+            decode_wav_reader(std::io::Cursor::new(data))
+                .with_context(|| format!("failed to decode WAV bytes: {symphonia_error}"))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn looks_like_wav(data: &[u8]) -> bool {
+    data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WAVE"
+}
+
+fn is_wav_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
+}
+
+fn decode_wav_reader<R>(reader: R) -> anyhow::Result<AudioBuffer>
+where
+    R: std::io::Read + std::io::Seek,
+{
+    let mut reader = hound::WavReader::new(reader)?;
+    let spec = reader.spec();
+
+    let samples = match spec.sample_format {
+        hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<Vec<_>, _>>()?,
+        hound::SampleFormat::Int => {
+            let scale = pcm_scale(spec.bits_per_sample);
+            reader
+                .samples::<i32>()
+                .map(|sample| sample.map(|sample| sample as f32 / scale))
+                .collect::<Result<Vec<_>, _>>()?
+        }
+    };
+
+    tracing::info!(
+        sample_rate = spec.sample_rate,
+        channels = spec.channels,
+        samples = samples.len(),
+        "decoded wav via hound"
+    );
+
+    Ok(AudioBuffer {
+        samples,
+        sample_rate: spec.sample_rate,
+        channels: spec.channels,
+    })
+}
+
+fn pcm_scale(bits_per_sample: u16) -> f32 {
+    match bits_per_sample {
+        0 => 1.0,
+        bits => (1_i64 << (bits - 1)) as f32,
+    }
 }
 
 /// Shared decode logic: probe the stream, find the default audio track,
@@ -97,4 +174,44 @@ fn decode_stream(mss: MediaSourceStream, hint: Hint) -> anyhow::Result<AudioBuff
         sample_rate,
         channels: channels as u16,
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_wav_reader_handles_pcm16() {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 24_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let mut bytes = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut bytes);
+            let mut writer = hound::WavWriter::new(cursor, spec).unwrap();
+            writer.write_sample(0_i16).unwrap();
+            writer.write_sample(i16::MAX).unwrap();
+            writer.write_sample(i16::MIN + 1).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let audio = decode_wav_reader(std::io::Cursor::new(bytes)).unwrap();
+
+        assert_eq!(audio.sample_rate, 24_000);
+        assert_eq!(audio.channels, 1);
+        assert_eq!(audio.samples.len(), 3);
+        assert!(audio.samples[1] > 0.99);
+        assert!(audio.samples[2] < -0.99);
+    }
+
+    #[test]
+    fn looks_like_wav_checks_riff_header() {
+        assert!(looks_like_wav(b"RIFF\0\0\0\0WAVEfmt "));
+        assert!(!looks_like_wav(b"not a wav"));
+    }
 }

@@ -269,7 +269,7 @@ impl KvCache {
     }
 }
 
-pub use crate::shared::types::LayerKvSnapshot;
+pub use crate::api::types::LayerKvSnapshot;
 
 // ── Attention ───────────────────────────────────────────────────────────────
 

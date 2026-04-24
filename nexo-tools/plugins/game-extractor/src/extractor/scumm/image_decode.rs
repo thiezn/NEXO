@@ -1,5 +1,5 @@
-use anyhow::{Result, bail};
 use crate::extractor::common::bitstream::BitReader;
+use anyhow::{Result, bail};
 
 pub fn decode_strip(strip_data: &[u8], height: usize) -> Result<Vec<u8>> {
     if strip_data.is_empty() {
@@ -34,7 +34,11 @@ pub fn decode_strip(strip_data: &[u8], height: usize) -> Result<Vec<u8>> {
 fn decode_raw(data: &[u8], height: usize) -> Result<Vec<u8>> {
     let total = 8 * height;
     if data.len() < total {
-        bail!("Raw strip too short: need {} bytes, have {}", total, data.len());
+        bail!(
+            "Raw strip too short: need {} bytes, have {}",
+            total,
+            data.len()
+        );
     }
     Ok(data[..total].to_vec())
 }
@@ -45,7 +49,13 @@ fn decode_raw(data: &[u8], height: usize) -> Result<Vec<u8>> {
 ///   bit1, !bit2: absolute color read, inc = -1
 ///   bit1, bit2, !bit3: color += inc
 ///   bit1, bit2, bit3: inc = -inc; color += inc
-fn decode_basic(data: &[u8], height: usize, codec: u8, vertical: bool, transparent: bool) -> Result<Vec<u8>> {
+fn decode_basic(
+    data: &[u8],
+    height: usize,
+    codec: u8,
+    vertical: bool,
+    transparent: bool,
+) -> Result<Vec<u8>> {
     let param_bits = (codec % 10) as u8;
     let decomp_mask = 0xFFu8 >> (8 - param_bits);
 
@@ -235,7 +245,11 @@ fn decode_v3_codec3(data: &[u8], height: usize) -> Result<Vec<u8>> {
         () => {{
             mask <<= 1;
             if mask == 256 {
-                buffer = if src < data.len() { data[src] as u32 } else { 0 };
+                buffer = if src < data.len() {
+                    data[src] as u32
+                } else {
+                    0
+                };
                 src += 1;
                 mask = 1;
             }
@@ -262,20 +276,30 @@ fn decode_v3_codec3(data: &[u8], height: usize) -> Result<Vec<u8>> {
                 let color = read_n_bits!(4);
                 let count = (c & 3) as usize + 2;
                 for _ in 0..count {
-                    if x >= 8 { return Ok(pixels); }
+                    if x >= 8 {
+                        return Ok(pixels);
+                    }
                     pixels[y * 8 + x] = run.wrapping_mul(16).wrapping_add(color);
                     y += 1;
-                    if y >= height { y = 0; x += 1; }
+                    if y >= height {
+                        y = 0;
+                        x += 1;
+                    }
                 }
             }
             1 => {
                 let count = (c & 3) as usize + 1;
                 for _ in 0..count {
                     let color = read_n_bits!(4);
-                    if x >= 8 { return Ok(pixels); }
+                    if x >= 8 {
+                        return Ok(pixels);
+                    }
                     pixels[y * 8 + x] = run.wrapping_mul(16).wrapping_add(color);
                     y += 1;
-                    if y >= height { y = 0; x += 1; }
+                    if y >= height {
+                        y = 0;
+                        x += 1;
+                    }
                 }
             }
             2 => {
@@ -298,7 +322,9 @@ fn decode_v3_codec4(data: &[u8], height: usize) -> Result<Vec<u8>> {
 
     let mut local_palette = [0u8; 256];
     for i in 0..numcolors {
-        if src >= data.len() { break; }
+        if src >= data.len() {
+            break;
+        }
         local_palette[i] = data[src];
         src += 1;
     }
@@ -308,7 +334,9 @@ fn decode_v3_codec4(data: &[u8], height: usize) -> Result<Vec<u8>> {
     let mut y = 0usize;
 
     while x < 8 {
-        if src >= data.len() { break; }
+        if src >= data.len() {
+            break;
+        }
         let color = data[src];
         src += 1;
 
@@ -316,19 +344,29 @@ fn decode_v3_codec4(data: &[u8], height: usize) -> Result<Vec<u8>> {
             // Single pixel using local palette
             pixels[y * 8 + x] = local_palette[color as usize];
             y += 1;
-            if y >= height { y = 0; x += 1; }
+            if y >= height {
+                y = 0;
+                x += 1;
+            }
         } else {
             // RLE run
             let run = (color as usize - numcolors) + 1;
-            if src >= data.len() { break; }
+            if src >= data.len() {
+                break;
+            }
             let run_color = data[src];
             src += 1;
 
             for _ in 0..run {
-                if x >= 8 { break; }
+                if x >= 8 {
+                    break;
+                }
                 pixels[y * 8 + x] = run_color;
                 y += 1;
-                if y >= height { y = 0; x += 1; }
+                if y >= height {
+                    y = 0;
+                    x += 1;
+                }
             }
         }
     }
@@ -354,7 +392,11 @@ fn decode_v3_codec7(strip_data: &[u8], height: usize) -> Result<Vec<u8>> {
         () => {{
             mask <<= 1;
             if mask == 256 {
-                buffer = if src < strip_data.len() { strip_data[src] as u32 } else { 0 };
+                buffer = if src < strip_data.len() {
+                    strip_data[src] as u32
+                } else {
+                    0
+                };
                 src += 1;
                 mask = 1;
             }
@@ -413,7 +455,9 @@ fn decode_v3_ega(data: &[u8], height: usize) -> Result<Vec<u8>> {
     let mut y = 0usize;
 
     while x < 8 {
-        if src >= data.len() { break; }
+        if src >= data.len() {
+            break;
+        }
         let color_byte = data[src];
         src += 1;
 
@@ -422,36 +466,52 @@ fn decode_v3_ega(data: &[u8], height: usize) -> Result<Vec<u8>> {
 
             if color_byte & 0x40 != 0 {
                 // Dithered run: two colors packed in one byte
-                if src >= data.len() { break; }
+                if src >= data.len() {
+                    break;
+                }
                 let color = data[src];
                 src += 1;
 
                 if run == 0 {
-                    if src >= data.len() { break; }
+                    if src >= data.len() {
+                        break;
+                    }
                     run = data[src] as usize;
                     src += 1;
                 }
 
                 for z in 0..run {
-                    if x >= 8 { break; }
+                    if x >= 8 {
+                        break;
+                    }
                     pixels[y * 8 + x] = if z & 1 != 0 { color & 0xF } else { color >> 4 };
                     y += 1;
-                    if y >= height { y = 0; x += 1; }
+                    if y >= height {
+                        y = 0;
+                        x += 1;
+                    }
                 }
             } else {
                 // Copy from previous column
                 if run == 0 {
-                    if src >= data.len() { break; }
+                    if src >= data.len() {
+                        break;
+                    }
                     run = data[src] as usize;
                     src += 1;
                 }
 
                 for _ in 0..run {
-                    if x >= 8 { break; }
+                    if x >= 8 {
+                        break;
+                    }
                     let prev = if x > 0 { pixels[y * 8 + (x - 1)] } else { 0 };
                     pixels[y * 8 + x] = prev;
                     y += 1;
-                    if y >= height { y = 0; x += 1; }
+                    if y >= height {
+                        y = 0;
+                        x += 1;
+                    }
                 }
             }
         } else {
@@ -460,16 +520,23 @@ fn decode_v3_ega(data: &[u8], height: usize) -> Result<Vec<u8>> {
             let mut run = (color_byte >> 4) as usize;
 
             if run == 0 {
-                if src >= data.len() { break; }
+                if src >= data.len() {
+                    break;
+                }
                 run = data[src] as usize;
                 src += 1;
             }
 
             for _ in 0..run {
-                if x >= 8 { break; }
+                if x >= 8 {
+                    break;
+                }
                 pixels[y * 8 + x] = color;
                 y += 1;
-                if y >= height { y = 0; x += 1; }
+                if y >= height {
+                    y = 0;
+                    x += 1;
+                }
             }
         }
     }

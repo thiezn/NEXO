@@ -1,6 +1,6 @@
-use anyhow::Result;
 use super::palette::Palette;
 use super::version::SciVersion;
+use anyhow::Result;
 
 /// A single cel (frame) extracted from a view.
 pub struct ViewCel {
@@ -28,13 +28,12 @@ pub struct ViewResource {
 /// Parse a view resource based on SCI version.
 pub fn parse_view(data: &[u8], version: SciVersion) -> Result<ViewResource> {
     match version {
-        SciVersion::Sci0 | SciVersion::Sci01 |
-        SciVersion::Sci1Early | SciVersion::Sci1Middle | SciVersion::Sci1Late => {
-            parse_view_vga(data)
-        }
-        SciVersion::Sci11 => {
-            parse_view_vga11(data)
-        }
+        SciVersion::Sci0
+        | SciVersion::Sci01
+        | SciVersion::Sci1Early
+        | SciVersion::Sci1Middle
+        | SciVersion::Sci1Late => parse_view_vga(data),
+        SciVersion::Sci11 => parse_view_vga11(data),
         SciVersion::Sci2 | SciVersion::Sci21 => {
             parse_view_vga11(data) // SCI32 views use a similar format
         }
@@ -58,9 +57,12 @@ fn parse_view_vga(data: &[u8]) -> Result<ViewResource> {
 
     // Read embedded palette if present — uses same format as palette resources
     let embedded_palette = if has_palette && palette_offset > 0 && palette_offset < data.len() {
-        super::palette::parse_palette(&data[palette_offset..], super::version::SciVersion::Sci1Middle)
-            .ok()
-            .filter(|pal| pal.iter().any(|c| c[0] != 0 || c[1] != 0 || c[2] != 0))
+        super::palette::parse_palette(
+            &data[palette_offset..],
+            super::version::SciVersion::Sci1Middle,
+        )
+        .ok()
+        .filter(|pal| pal.iter().any(|c| c[0] != 0 || c[1] != 0 || c[2] != 0))
     } else {
         None
     };
@@ -103,7 +105,8 @@ fn parse_view_vga(data: &[u8]) -> Result<ViewResource> {
             }
 
             // Cel offsets are ABSOLUTE from resource start (not relative to loop)
-            let cel_offset = u16::from_le_bytes([data[cel_off_pos], data[cel_off_pos + 1]]) as usize;
+            let cel_offset =
+                u16::from_le_bytes([data[cel_off_pos], data[cel_off_pos + 1]]) as usize;
             if cel_offset + 8 > data.len() {
                 continue;
             }
@@ -231,7 +234,8 @@ fn parse_view_vga11(data: &[u8]) -> Result<ViewResource> {
 
         // Cel data offset is at lo + 12 (4 bytes BE)
         let cel_data_offset = if lo + 16 <= data.len() {
-            u32::from_be_bytes([data[lo + 12], data[lo + 13], data[lo + 14], data[lo + 15]]) as usize
+            u32::from_be_bytes([data[lo + 12], data[lo + 13], data[lo + 14], data[lo + 15]])
+                as usize
         } else {
             continue;
         };
@@ -255,8 +259,12 @@ fn parse_view_vga11(data: &[u8]) -> Result<ViewResource> {
             }
 
             // RLE offset at co + 24, literal offset at co + 28
-            let rle_offset = u32::from_be_bytes([data[co + 24], data[co + 25], data[co + 26], data[co + 27]]) as usize;
-            let literal_offset = u32::from_be_bytes([data[co + 28], data[co + 29], data[co + 30], data[co + 31]]) as usize;
+            let rle_offset =
+                u32::from_be_bytes([data[co + 24], data[co + 25], data[co + 26], data[co + 27]])
+                    as usize;
+            let literal_offset =
+                u32::from_be_bytes([data[co + 28], data[co + 29], data[co + 30], data[co + 31]])
+                    as usize;
 
             let pixels = if rle_offset > 0 && rle_offset < data.len() {
                 let rle_data = &data[rle_offset..];
@@ -325,12 +333,16 @@ fn decode_rle_vga(rle_data: &[u8], width: u16, height: u16, clear_key: u8) -> Re
             }
             0x80 => {
                 // Fill — next byte repeated
-                if pos >= rle_data.len() { break; }
+                if pos >= rle_data.len() {
+                    break;
+                }
                 let fill_byte = rle_data[pos];
                 pos += 1;
                 let cnt = if count == 0 { 64 } else { count };
                 for _ in 0..cnt {
-                    if out_pos >= total { break; }
+                    if out_pos >= total {
+                        break;
+                    }
                     pixels[out_pos] = fill_byte;
                     out_pos += 1;
                 }
@@ -339,7 +351,9 @@ fn decode_rle_vga(rle_data: &[u8], width: u16, height: u16, clear_key: u8) -> Re
                 // Literal run (count + 64 bytes)
                 let cnt = count + 64;
                 for _ in 0..cnt {
-                    if pos >= rle_data.len() || out_pos >= total { break; }
+                    if pos >= rle_data.len() || out_pos >= total {
+                        break;
+                    }
                     pixels[out_pos] = rle_data[pos];
                     pos += 1;
                     out_pos += 1;
@@ -349,7 +363,9 @@ fn decode_rle_vga(rle_data: &[u8], width: u16, height: u16, clear_key: u8) -> Re
                 // 0x00: Literal run (count bytes)
                 let cnt = if count == 0 { 64 } else { count };
                 for _ in 0..cnt {
-                    if pos >= rle_data.len() || out_pos >= total { break; }
+                    if pos >= rle_data.len() || out_pos >= total {
+                        break;
+                    }
                     pixels[out_pos] = rle_data[pos];
                     pos += 1;
                     out_pos += 1;
@@ -393,31 +409,49 @@ pub fn decode_rle_vga11(
             0x80 => {
                 // Fill — byte from literal stream (if available) or RLE stream
                 let fill_byte = if has_literal {
-                    if lit_pos >= lit_data.len() { break; }
-                    let b = lit_data[lit_pos]; lit_pos += 1; b
+                    if lit_pos >= lit_data.len() {
+                        break;
+                    }
+                    let b = lit_data[lit_pos];
+                    lit_pos += 1;
+                    b
                 } else {
-                    if rle_pos >= rle_data.len() { break; }
-                    let b = rle_data[rle_pos]; rle_pos += 1; b
+                    if rle_pos >= rle_data.len() {
+                        break;
+                    }
+                    let b = rle_data[rle_pos];
+                    rle_pos += 1;
+                    b
                 };
                 for _ in 0..run_length {
-                    if out_pos >= total { break; }
+                    if out_pos >= total {
+                        break;
+                    }
                     pixels[out_pos] = fill_byte;
                     out_pos += 1;
                 }
             }
             0x40 | 0x00 => {
                 // Copy bytes: 0x40 = run_length + 64, 0x00 = run_length
-                let cnt = if (cmd & 0xC0) == 0x40 { run_length + 64 } else { run_length };
+                let cnt = if (cmd & 0xC0) == 0x40 {
+                    run_length + 64
+                } else {
+                    run_length
+                };
                 if has_literal {
                     for _ in 0..cnt {
-                        if lit_pos >= lit_data.len() || out_pos >= total { break; }
+                        if lit_pos >= lit_data.len() || out_pos >= total {
+                            break;
+                        }
                         pixels[out_pos] = lit_data[lit_pos];
                         lit_pos += 1;
                         out_pos += 1;
                     }
                 } else {
                     for _ in 0..cnt {
-                        if rle_pos >= rle_data.len() || out_pos >= total { break; }
+                        if rle_pos >= rle_data.len() || out_pos >= total {
+                            break;
+                        }
                         pixels[out_pos] = rle_data[rle_pos];
                         rle_pos += 1;
                         out_pos += 1;
@@ -437,7 +471,9 @@ fn resolve_mirrors(loops: &mut Vec<ViewLoop>) {
         if let Some(mirror_src) = loops[i].mirror_of {
             if mirror_src < loops.len() && mirror_src != i && !loops[mirror_src].cels.is_empty() {
                 // Clone cels from source and mirror horizontally
-                let mirrored_cels: Vec<ViewCel> = loops[mirror_src].cels.iter()
+                let mirrored_cels: Vec<ViewCel> = loops[mirror_src]
+                    .cels
+                    .iter()
                     .map(|cel| {
                         let mut mirrored_pixels = vec![0u8; cel.pixels.len()];
                         for y in 0..cel.height as usize {
