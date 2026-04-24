@@ -5,8 +5,8 @@ use crate::server::state::{GatewayState, PeerInfo, dummy_sender};
 use nexo_ws_schema::{EventKind, Frame, Method, Role};
 use sqlx::SqlitePool;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 
 fn make_state() -> SharedState {
     Arc::new(RwLock::new(GatewayState::new(std::path::PathBuf::from(

@@ -73,7 +73,7 @@ pub enum AppCommand {
 pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, String> {
     let trimmed = input.trim();
     let Some(without_slash) = trimmed.strip_prefix('/') else {
-        return Err("Commands must start with '/'. Use /help to see available commands.".into());
+        return parse_agent(trimmed, context);
     };
 
     let Some((command, args)) = split_command(without_slash) else {
@@ -185,6 +185,7 @@ Presence:
 Autocomplete:
 - Use Tab to accept the current suggestion.
 - Use Up/Down or Shift+Tab to cycle suggestions.
+- Type plain text to run it as `/agent <prompt>`.
 - Use @path in /agent prompts to inline file contents.
 - Use @path as the image argument for /image analyze.
 - Press F1 or type /help to open this help view.
@@ -394,6 +395,19 @@ mod tests {
     #[test]
     fn parses_agent_with_default_context() {
         let command = parse("/agent summarize this", context(Path::new("."))).unwrap();
+        match command {
+            AppCommand::Agent(params) => {
+                assert_eq!(params.session_id.as_deref(), Some("sess-1"));
+                assert_eq!(params.model_id.as_deref(), Some("gemma-4"));
+                assert_eq!(params.prompt, "summarize this");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_plain_text_as_agent_command() {
+        let command = parse("summarize this", context(Path::new("."))).unwrap();
         match command {
             AppCommand::Agent(params) => {
                 assert_eq!(params.session_id.as_deref(), Some("sess-1"));
