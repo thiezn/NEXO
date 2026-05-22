@@ -1,4 +1,3 @@
-
 ## Rust Development guidelines
 
 - Always use the latest stable rust versions

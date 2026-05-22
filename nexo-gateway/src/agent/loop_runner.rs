@@ -190,6 +190,18 @@ pub async fn run(
                 return;
             }
             InferenceOutcome::ToolCalls(calls) => {
+                let assistant_tool_history = serialize_tool_calls_for_history(&calls);
+                let _ = super::session::insert_message(
+                    db,
+                    session_id,
+                    Some(run_id),
+                    "assistant",
+                    &assistant_tool_history,
+                    None,
+                    None,
+                )
+                .await;
+
                 for call in &calls {
                     // Emit tool_call event
                     emit_event(
@@ -799,6 +811,75 @@ fn tool_capability(tool_name: &str) -> String {
     tool_name.split('.').next().unwrap_or(tool_name).to_string()
 }
 
+fn serialize_tool_calls_for_history(calls: &[ToolCallInfo]) -> String {
+    calls.iter().map(serialize_tool_call).collect()
+}
+
+fn serialize_tool_call(call: &ToolCallInfo) -> String {
+    let mut out = String::from("<|tool_call>call:");
+    out.push_str(&call.name);
+    out.push('{');
+    serialize_tool_arguments(&mut out, &call.arguments);
+    out.push('}');
+    out.push_str("<tool_call|>");
+    out
+}
+
+fn serialize_tool_arguments(out: &mut String, value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => serialize_tool_object(out, map),
+        other => serialize_tool_value(out, other),
+    }
+}
+
+fn serialize_tool_object(out: &mut String, map: &serde_json::Map<String, serde_json::Value>) {
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+
+    for (index, (key, value)) in entries.into_iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(key);
+        out.push(':');
+        serialize_tool_value(out, value);
+    }
+}
+
+fn serialize_tool_value(out: &mut String, value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Null => out.push_str("null"),
+        serde_json::Value::Bool(boolean) => {
+            if *boolean {
+                out.push_str("true");
+            } else {
+                out.push_str("false");
+            }
+        }
+        serde_json::Value::Number(number) => out.push_str(&number.to_string()),
+        serde_json::Value::String(string) => {
+            out.push_str("<|\"|>");
+            out.push_str(string);
+            out.push_str("<|\"|>");
+        }
+        serde_json::Value::Array(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                serialize_tool_value(out, item);
+            }
+            out.push(']');
+        }
+        serde_json::Value::Object(map) => {
+            out.push('{');
+            serialize_tool_object(out, map);
+            out.push('}');
+        }
+    }
+}
+
 fn emit_event(
     event_tx: &broadcast::Sender<Frame>,
     run_id: &str,
@@ -893,4 +974,50 @@ async fn fail(
     }
     let _ = super::session::finish_run(db, run_id, AgentStatus::Failed, Some(error)).await;
     super::locks::release_all_for_run(db, run_id).await.ok();
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_tool_calls_for_history_uses_native_blocks() {
+        let calls = vec![
+            ToolCallInfo {
+                id: "call-1".into(),
+                name: "notes.list".into(),
+                arguments: serde_json::json!({}),
+            },
+            ToolCallInfo {
+                id: "call-2".into(),
+                name: "echo.run".into(),
+                arguments: serde_json::json!({
+                    "message": "hello",
+                    "count": 2,
+                    "verbose": true,
+                    "tags": ["a", "b"],
+                    "meta": {
+                        "source": "test"
+                    }
+                }),
+            },
+        ];
+
+        let serialized = serialize_tool_calls_for_history(&calls);
+
+        assert_eq!(
+            serialized,
+            concat!(
+                "<|tool_call>call:notes.list{}<tool_call|>",
+                "<|tool_call>call:echo.run{",
+                "count:2,",
+                "message:<|\"|>hello<|\"|>,",
+                "meta:{source:<|\"|>test<|\"|>},",
+                "tags:[<|\"|>a<|\"|>,<|\"|>b<|\"|>],",
+                "verbose:true",
+                "}<tool_call|>"
+            )
+        );
+    }
 }

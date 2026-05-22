@@ -8,16 +8,16 @@ name = "nexo-client"
 path = "src/main.rs"
 
 [dependencies]
-nexo-ws-schema = { path = "../shared/nexo-ws-schema", features = ["clap"] }
-nexo-ws-client = { path = "../shared/nexo-ws-client" }
+nexo-ws-schema = { workspace = true, features = ["clap"] }
+nexo-ws-client = { workspace = true }
 cli-helpers = { workspace = true, features = ["config", "markdown", "tracing"] }
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tracing = "0"
-clap = { version = "4", features = ["derive"] }
-dirs = "6"
-base64 = "0"
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+dirs = { workspace = true }
+base64 = { workspace = true }
 ratatui = { version = "0", features = ["crossterm"] }
 crossterm = "0"
 

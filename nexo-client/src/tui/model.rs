@@ -9,6 +9,7 @@ use super::completion;
 
 const MAX_LOG_ENTRIES: usize = 250;
 const STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityButton {
@@ -165,6 +166,7 @@ pub struct Model {
     pub default_model_id: Option<String>,
     pub startup_session_name: Option<String>,
     pub last_status_request_at: Option<Instant>,
+    pub last_reconnect_attempt_at: Option<Instant>,
 }
 
 impl Model {
@@ -203,6 +205,7 @@ impl Model {
                 .then_some(options.initial_session_name)
                 .flatten(),
             last_status_request_at: None,
+            last_reconnect_attempt_at: None,
         };
 
         model.push_log(
@@ -383,11 +386,46 @@ impl Model {
                 .is_none_or(|last| last.elapsed() >= STATUS_REFRESH_INTERVAL)
     }
 
+    pub fn should_retry_connect(&self) -> bool {
+        !self.summary.connected
+            && self
+                .last_reconnect_attempt_at
+                .is_none_or(|last| last.elapsed() >= RECONNECT_INTERVAL)
+    }
+
+    pub fn mark_reconnect_attempt(&mut self) {
+        self.last_reconnect_attempt_at = Some(Instant::now());
+    }
+
+    pub fn set_connected(&mut self, connection: ConnectionInfo) {
+        self.summary.connected = true;
+        self.summary.gateway_url = connection.gateway_url.clone();
+        self.summary.protocol = Some(connection.hello.protocol);
+        self.summary.last_error = None;
+        self.last_status_request_at = None;
+        self.last_reconnect_attempt_at = None;
+        self.pending_requests.clear();
+        self.push_log(
+            LogKind::Success,
+            "Reconnected",
+            format!(
+                "Connected to {} with protocol v{}",
+                connection.gateway_url, connection.hello.protocol
+            ),
+        );
+    }
+
     pub fn set_disconnected(&mut self, error: impl Into<String>) {
         let error = error.into();
+        let was_connected = self.summary.connected;
         self.summary.connected = false;
         self.summary.last_error = Some(error.clone());
-        self.push_log(LogKind::Error, "Disconnected", error);
+        self.last_status_request_at = None;
+        self.last_reconnect_attempt_at = None;
+        self.pending_requests.clear();
+        if was_connected {
+            self.push_log(LogKind::Error, "Disconnected", error);
+        }
     }
 
     pub fn update_activity_view(

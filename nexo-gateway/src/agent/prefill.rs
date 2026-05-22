@@ -38,7 +38,19 @@ const COLLECTIONS_PATH: &str = "PREFILL/collections.json";
 // ── SHA utility ─────────────────────────────────────────────────────────────────
 
 pub fn compute_sha(combined: &str) -> String {
-    format!("{:x}", Sha256::digest(combined.as_bytes()))
+    let digest = Sha256::digest(combined.as_bytes());
+    hex_encode(digest.as_ref())
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 // ── Markdown CRUD ───────────────────────────────────────────────────────────────

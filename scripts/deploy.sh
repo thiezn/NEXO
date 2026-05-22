@@ -20,12 +20,17 @@ sudo cp ./target/release/nexo-node /usr/local/bin
 sudo cp ./target/release/nexo-ai /usr/local/bin
 
 # Now change the permissions of the binaries so that they can be executed by anyone.
+echo "Setting permissions for the binaries..."
 sudo chown root:admin /usr/local/bin/nexo
 sudo chown root:admin /usr/local/bin/nexo-client
 sudo chown root:admin /usr/local/bin/game-extractor
 sudo chown root:admin /usr/local/bin/epub-extractor
 sudo chown root:admin /usr/local/bin/nexo-node
 sudo chown root:admin /usr/local/bin/nexo-ai
+
+# Updating local inference tools
+source /Users/Mathijs.Mortimer/Development/utilities/.venv/bin/activate
+uv pip install --upgrade mlx-vlm mlx-audio
 
 # Verify the permissions
 # ls -ltrah /usr/local/bin/* | grep "\-rwx"

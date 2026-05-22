@@ -22,7 +22,7 @@ pub async fn run_start(options: StartOptions) -> cli_helpers::Result {
         cli_helpers::Error::Io(format!("Failed to determine working directory: {e}"))
     })?;
 
-    let (connection, network_tx, mut network_rx) =
+    let (connection, mut network_tx, mut network_rx) =
         network::connect(options.url_override.as_deref()).await?;
 
     terminal::install_panic_hook();
@@ -34,6 +34,7 @@ pub async fn run_start(options: StartOptions) -> cli_helpers::Result {
     let mut last_tick = Instant::now();
     while model.running_state == RunningState::Running {
         drain_network(&mut model, &mut network_rx, &network_tx);
+        reconnect_if_needed(&mut model, &mut network_tx, &mut network_rx).await;
 
         terminal.draw(|frame| view::render(&mut model, frame))?;
 
@@ -66,6 +67,31 @@ pub async fn run_start(options: StartOptions) -> cli_helpers::Result {
 
     let _ = network_tx.send(NetworkCommand::Close);
     Ok(())
+}
+
+async fn reconnect_if_needed(
+    model: &mut Model,
+    network_tx: &mut tokio::sync::mpsc::UnboundedSender<NetworkCommand>,
+    network_rx: &mut tokio::sync::mpsc::UnboundedReceiver<NetworkEvent>,
+) {
+    if !model.should_retry_connect() {
+        return;
+    }
+
+    let gateway_url = model.summary.gateway_url.clone();
+    model.mark_reconnect_attempt();
+
+    match network::connect(Some(&gateway_url)).await {
+        Ok((connection, next_tx, next_rx)) => {
+            *network_tx = next_tx;
+            *network_rx = next_rx;
+            model.set_connected(connection);
+            process_message(model, Message::Tick, network_tx);
+        }
+        Err(error) => {
+            model.summary.last_error = Some(format!("Reconnect failed: {error}"));
+        }
+    }
 }
 
 fn drain_network(

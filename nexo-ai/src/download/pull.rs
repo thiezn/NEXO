@@ -6,6 +6,7 @@ use hf_hub::api::tokio::{Api, ApiBuilder, ApiError, Progress};
 use hf_hub::{Cache, Repo, RepoType};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::path::PathBuf;
 use thiserror::Error;
 use tracing::debug;
@@ -47,8 +48,7 @@ pub enum DownloadError {
     FilePlacement(String),
 }
 
-// ── HF token resolution ─────────────────────────────────────────────
-
+/// Resolve a HuggingFace token from environment variable or cache file.
 fn resolve_hf_token() -> Option<String> {
     if let Ok(token) = std::env::var("HF_TOKEN") {
         let token = token.trim().to_string();
@@ -76,8 +76,8 @@ fn resolve_hf_token() -> Option<String> {
         .or_else(|| Cache::from_env().token())
 }
 
-// ── File placement ──────────────────────────────────────────────────
-
+/// Attempt to hardlink the source file to the destination. If that fails (e.g. across filesystems),
+/// fall back to copying. If the destination already exists and has the same size as the source, do nothing.
 fn hardlink_or_copy(src: &std::path::Path, dst: &std::path::Path) -> Result<(), DownloadError> {
     let real_src = src.canonicalize().map_err(|e| {
         DownloadError::FilePlacement(format!(
@@ -120,18 +120,37 @@ fn hardlink_or_copy(src: &std::path::Path, dst: &std::path::Path) -> Result<(), 
     Ok(())
 }
 
-// ── SHA-256 verification ────────────────────────────────────────────
-
+/// Verify the SHA-256 hash of a file against an expected hex string.
 pub fn verify_sha256(path: &std::path::Path, expected: &str) -> anyhow::Result<bool> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    std::io::copy(&mut file, &mut hasher)?;
-    let digest = format!("{:x}", hasher.finalize());
+    let mut buffer = [0_u8; 8 * 1024];
+
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    let digest = hasher.finalize();
+    let digest = hex_encode(digest.as_ref());
     Ok(digest == expected)
 }
 
-// ── Progress bar helpers ────────────────────────────────────────────
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
 
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Truncate long filenames for display in the progress bar, keeping the end of the name which often contains important info (e.g. version or hash).
 fn truncate_filename(name: &str, max_len: usize) -> String {
     if name.len() <= max_len || max_len < 8 {
         return name.to_string();
@@ -141,6 +160,7 @@ fn truncate_filename(name: &str, max_len: usize) -> String {
     format!("...{}", &name[start..])
 }
 
+/// Calculate the width for the filename column in the progress bar based on terminal size, leaving room for the bar and other info.
 fn filename_column_width() -> usize {
     let term_width = Term::stderr().size().1 as usize;
     term_width.saturating_sub(75).max(12)
@@ -174,8 +194,7 @@ impl Progress for DownloadProgress {
     }
 }
 
-// ── Core download function ──────────────────────────────────────────
-
+/// Extract HTTP status code from an ApiError if available, to help determine the cause of download failures.
 fn extract_http_status(err: &ApiError) -> Option<u16> {
     if let ApiError::RequestError(reqwest_err) = err {
         reqwest_err.status().map(|s| s.as_u16())
@@ -184,6 +203,7 @@ fn extract_http_status(err: &ApiError) -> Option<u16> {
     }
 }
 
+/// Download a file from HuggingFace with progress reporting, and handle common error cases to provide user-friendly messages.
 async fn download_file<P: Progress + Clone + Send + Sync + 'static>(
     api: &Api,
     hf_repo: &str,
@@ -220,8 +240,6 @@ async fn download_file<P: Progress + Clone + Send + Sync + 'static>(
         }
     }
 }
-
-// ── Public API ──────────────────────────────────────────────────────
 
 /// Download all files for a model manifest with terminal progress bars.
 ///

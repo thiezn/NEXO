@@ -48,8 +48,9 @@ pub trait OpenAiFamilyAdapter: Clone + Send + Sync + 'static {
     ) -> (Vec<ToolCall>, Option<String>) {
         let tool_calls = parse_wire_tool_calls(&message.tool_calls);
         let reasoning = message
-            .content
+            .reasoning
             .clone()
+            .or_else(|| message.content.clone())
             .filter(|text| !text.trim().is_empty());
         (tool_calls, reasoning)
     }
@@ -153,6 +154,7 @@ where
             .map(|choice| choice.message)
             .unwrap_or(OpenAiResponseMessage {
                 content: None,
+                reasoning: None,
                 tool_calls: Vec::new(),
             });
         let tokens = resp

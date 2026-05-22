@@ -8,26 +8,29 @@ name = "nexo-node"
 path = "src/main.rs"
 
 [dependencies]
-nexo-ws-schema = { path = "../shared/nexo-ws-schema" }
-nexo-ws-client = { path = "../shared/nexo-ws-client" }
-nexo-spec = { path = "../shared/nexo-spec", features = ["tool"] }
-nexo-ai = { path = "../nexo-ai", default-features = false, features = ["metal", "download"] }
+nexo-ws-schema = { workspace = true }
+nexo-ws-client = { workspace = true }
+nexo-spec = { workspace = true, features = ["tool"] }
+nexo-ai = { path = "../nexo-ai", default-features = false, features = [
+    "metal",
+    "download",
+] }
 cli-helpers = { workspace = true, features = ["config", "tracing"] }
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tracing = "0"
-clap = { version = "4", features = ["derive"] }
-dirs = "6"
-anyhow = "1"
-async-trait = "0"
-base64 = "0.22"
-indicatif = "0"
-console = "0"
-sha2 = "0"
-candle-core = "0"
-thiserror = "2"
-futures-util = "0"
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+dirs = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+indicatif = { workspace = true }
+console = { workspace = true }
+sha2 = { workspace = true }
+candle-core = { workspace = true }
+thiserror = { workspace = true }
+futures-util = { workspace = true }
 
 [lints]
 workspace = true

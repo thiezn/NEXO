@@ -58,7 +58,7 @@ I've done work on it, this is built in phase 1:
 - Add NES, Delores/thimbleweed and SNES extraction?
 - Think of a way to use my local model tools. I think at the moment i will load a model in memory, run inference once, and then close the model. I need a way to start and stop them, eventually controlled by the gateway. I could think of different setup, i might have text to text model running always, but then if i need alot of memory for some image generation, i stop the text-to-text, start the other, run my batch, shut dfown and then restart the text-to-text.
 - It tried to get huggingface manifest, but couldn't as he didn't have a token when building img-to-text. This meant it guessed it himself so that might be a common problem with a bunch more of my models. need a prompt to retrieve and validate all the manifests. UPDATE Stored hugging face token locally and instructed it to use curl which worked for the multimodal build.
-- Create cli and lib with Rust Image and viuer to mutate pixel art like pallet changing, resizing, cropping, cleaning up, etc. This can be used for my game extraction tools, but also as a standalone tool for mutating images for other purposes. At minimum I want the nearest upscaling algorithm. https://johanneskopf.de/publications/pixelart/supplementary/multi_comparison.html and this one 2xSaI interpolation algorithm, and this one RotSprite for rotation (https://github.com/tversteeg/rotsprite RUST!) or extrac it from chuot . There might be other cool things in chout we could use. It also has nearest neighbor. Do i need rust-gpu to execute shaders? Are shaders used for processing images? here's rotation: https://codeberg.org/fosk/chuot/src/branch/main/shaders/rotation.wgsl and neirest neighbor: https://codeberg.org/fosk/chuot/src/branch/main/shaders/nearest_neighbor.wgsl use rust wgpu probably for this. There must be tons of shaders i can quikcly test and adopt for my use case? for instance wgpu has built in: FilterMode::Nearest. https://rust-gpu.github.io
+- Create cli and lib with Rust Image and viewer to mutate pixel art like pallet changing, resizing, cropping, cleaning up, etc. This can be used for my game extraction tools, but also as a standalone tool for mutating images for other purposes. At minimum I want the nearest upscaling algorithm. https://johanneskopf.de/publications/pixelart/supplementary/multi_comparison.html and this one 2xSaI interpolation algorithm, and this one RotSprite for rotation (https://github.com/tversteeg/rotsprite RUST!) or extrac it from chuot . There might be other cool things in chout we could use. It also has nearest neighbor. Do i need rust-gpu to execute shaders? Are shaders used for processing images? here's rotation: https://codeberg.org/fosk/chuot/src/branch/main/shaders/rotation.wgsl and neirest neighbor: https://codeberg.org/fosk/chuot/src/branch/main/shaders/nearest_neighbor.wgsl use rust wgpu probably for this. There must be tons of shaders i can quikcly test and adopt for my use case? for instance wgpu has built in: FilterMode::Nearest. https://rust-gpu.github.io
 - WebSocket interface so I can get my LoRA training pipeline working with review feedback.
 - Make Question cards showing an image, tap an answer and horizontally scroll through them and submit. Backend stores my results
 - Build some kind of storage system for NEXO. Use sqlite, and rust sqlx to do type safety. Have a production sqlite database and a dev database. PRoduction NEXO instance should run on my macbook M1, dev instance is on my M4. I'd like to be able to iterate quickly and in parallel so i might have to consider creating separate sql databases per feature. This could then avoid complicating types and structs into one big entangled thing?
@@ -66,10 +66,10 @@ I've done work on it, this is built in phase 1:
 - for the local inference cli's, can we have a nice tokens/sec counter?
 
 
-##  Run auto research using my local chat model.
+##  Run auto research using my local chat model for generating my game assets
 
-- Read in literature like hackers manifesto
-- can we push it in and get it cached, doing something with prefill?
+- Read in literature like hackers manifesto to give context to the images
+- can we push the literature in and get it cached, doing something with prefill?
 - run 100 image generations with different prompts.
 - send all images for human review
 - randomize the image runs between auto research so iOS app doesn’t know which run it was

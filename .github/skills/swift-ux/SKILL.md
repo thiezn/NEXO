@@ -62,15 +62,15 @@ struct MyComponent: View {
 ```
 
 When the component needs theme colors, use the environment:
+
 ```swift
 @Environment(\.themeColors) private var themeColors
 ```
 
----
-
 ## Component Reference
 
 ### AppIcon
+
 Centralized SF Symbol names. Add new icons here instead of hardcoding strings.
 
 ```swift
@@ -98,6 +98,7 @@ Categories: Actions, Thread Actions, Book Actions, Navigation, Profile, Status, 
 ```
 
 ### LargeCard
+
 Portrait card with full-bleed image and gradient text overlay.
 
 ```swift
@@ -113,6 +114,7 @@ LargeCard(
 ```
 
 ### SmallCard
+
 Square card with text below the image.
 
 ```swift
@@ -127,6 +129,7 @@ SmallCard(
 ```
 
 ### AvatarView
+
 Adaptive avatar: image > initials (size>32) > system icon (size<=32).
 
 ```swift
@@ -134,6 +137,7 @@ AvatarView(imageData: profile.avatarImageData, initials: "MM", size: 28)
 ```
 
 ### SectionHeader
+
 Title + optional trailing action.
 
 ```swift
@@ -143,6 +147,7 @@ SectionHeader("Continue Reading", actionLabel: "See All") {
 ```
 
 ### EmptyStateView
+
 Wraps `ContentUnavailableView` with optional action button.
 
 ```swift
@@ -156,6 +161,7 @@ EmptyStateView(
 ```
 
 ### CategoryBadge
+
 Capsule badge for tags/categories.
 
 ```swift
@@ -163,6 +169,7 @@ CategoryBadge(text: "Fiction", color: .blue)
 ```
 
 ### MessageInputBar
+
 Multi-line text field + send button.
 
 ```swift
@@ -173,6 +180,7 @@ MessageInputBar(text: $messageText, placeholder: "Message...") { content in
 ```
 
 ### AppMenu
+
 3-section structured menu. All sections optional.
 
 ```swift

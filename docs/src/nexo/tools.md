@@ -68,6 +68,14 @@ Response handling by content type:
 - **JSON** — compacted (values preserved, long strings truncated, arrays summarized)
 - **Other** — returned as plain text with truncation
 
+### Todo tools
+
+TODO operations (`create`, `add`, `list`, `complete`, `delete`, `reorder`) are exposed as tools.
+
+* These tools execute on the gateway (like other gateway-hosted tools).
+* Results are appended to the transcript exactly like any other tool result.
+* The gateway does **not** enforce TODO completion for run termination, it's up to the model to manage the TODO list and decide when it's "done."
+
 ### Notes tools
 
 Git-backed note-taking for persistent memory across conversations.

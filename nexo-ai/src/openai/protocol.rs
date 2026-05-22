@@ -1,3 +1,4 @@
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
 /// Metadata for a model reported by an OpenAI-compatible `/v1/models` endpoint.
@@ -139,8 +140,11 @@ pub struct OpenAiChoice {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpenAiResponseMessage {
+    #[serde(default, deserialize_with = "deserialize_response_content")]
     pub content: Option<String>,
     #[serde(default)]
+    pub reasoning: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_tool_calls")]
     pub tool_calls: Vec<OpenAiResponseToolCall>,
 }
 
@@ -158,6 +162,38 @@ pub struct OpenAiResponseToolFunction {
 #[derive(Debug, Deserialize)]
 pub struct OpenAiUsage {
     pub completion_tokens: Option<usize>,
+}
+
+fn deserialize_response_content<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::String(text)) => Ok(Some(text)),
+        Some(serde_json::Value::Array(parts)) => {
+            let text = parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+                .collect::<String>();
+            if text.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(text))
+            }
+        }
+        Some(other) => Err(D::Error::custom(format!(
+            "unsupported chat response content: {other}"
+        ))),
+    }
+}
+
+fn deserialize_tool_calls<'de, D>(deserializer: D) -> Result<Vec<OpenAiResponseToolCall>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<Vec<OpenAiResponseToolCall>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -301,5 +337,44 @@ mod tests {
             resp.choices[0].message.tool_calls[0].function.arguments,
             r#"{"city":"Amsterdam"}"#
         );
+    }
+
+    #[test]
+    fn chat_response_deserializes_null_tool_calls() {
+        let json = r#"{
+            "choices": [{"message": {
+                "role": "assistant",
+                "content": "hello",
+                "reasoning": null,
+                "tool_calls": null,
+                "tool_call_id": null,
+                "name": null
+            }}],
+            "usage": null
+        }"#;
+        let resp: OpenAiChatResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.choices[0].message.content.as_deref(), Some("hello"));
+        assert!(resp.choices[0].message.tool_calls.is_empty());
+        assert_eq!(resp.choices[0].message.reasoning, None);
+    }
+
+    #[test]
+    fn chat_response_deserializes_output_text_parts() {
+        let json = r#"{
+            "choices": [{"message": {
+                "content": [
+                    {"type": "output_text", "text": "hello "},
+                    {"type": "output_text", "text": "world"}
+                ],
+                "reasoning": "chain",
+                "tool_calls": []
+            }}]
+        }"#;
+        let resp: OpenAiChatResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            resp.choices[0].message.content.as_deref(),
+            Some("hello world")
+        );
+        assert_eq!(resp.choices[0].message.reasoning.as_deref(), Some("chain"));
     }
 }
