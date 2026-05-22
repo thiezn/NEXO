@@ -26,17 +26,7 @@ impl ToolRegistry {
 
     /// Get tool specs as schema-compatible entries for `tools.register`.
     pub fn specs(&self) -> Vec<ToolSpecEntry> {
-        self.tools
-            .iter()
-            .map(|t| {
-                let spec = t.spec();
-                ToolSpecEntry {
-                    name: spec.name,
-                    description: spec.description,
-                    parameters: spec.parameters,
-                }
-            })
-            .collect()
+        self.tools.iter().map(|tool| tool.spec()).collect()
     }
 
     /// Get capability names (unique tool name prefixes) and command names for `ConnectParams`.

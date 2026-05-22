@@ -161,10 +161,7 @@ pub fn build_tool_messages(
     );
 
     let mut augmented = Vec::with_capacity(messages.len() + 1);
-    augmented.push(ChatMessage {
-        role: ChatRole::System,
-        content: system_text,
-    });
+    augmented.push(ChatMessage::new(ChatRole::System, system_text));
     augmented.extend_from_slice(messages);
     augmented
 }
@@ -219,7 +216,7 @@ fn push_gemma4_string(out: &mut String, value: &str) {
     out.push_str("<|\"|>");
 }
 
-fn parse_native_tool_calls(raw: &str) -> Vec<ToolCall> {
+pub(crate) fn parse_native_tool_calls(raw: &str) -> Vec<ToolCall> {
     let mut calls = Vec::new();
     let mut search = raw;
 
@@ -397,10 +394,7 @@ mod tests {
     #[test]
     fn build_tool_messages_inserts_system_instruction() {
         let augmented = build_tool_messages(
-            &[ChatMessage {
-                role: ChatRole::User,
-                content: "Use a tool.".into(),
-            }],
+            &[ChatMessage::new(ChatRole::User, "Use a tool.")],
             &[nexo_spec::tool::ToolSpec {
                 name: "get_weather".into(),
                 description: "Get weather for a location".into(),
@@ -413,6 +407,7 @@ mod tests {
                         }
                     }
                 }),
+                ..Default::default()
             }],
         );
 
@@ -428,10 +423,7 @@ mod tests {
 
     #[test]
     fn format_simple_prompt() {
-        let msgs = vec![ChatMessage {
-            role: ChatRole::User,
-            content: "Hello!".into(),
-        }];
+        let msgs = vec![ChatMessage::new(ChatRole::User, "Hello!")];
 
         let result = template().format_prompt(&msgs, &ReasoningMode::Disabled);
 
@@ -442,14 +434,8 @@ mod tests {
     #[test]
     fn format_with_system() {
         let msgs = vec![
-            ChatMessage {
-                role: ChatRole::System,
-                content: "You are helpful.".into(),
-            },
-            ChatMessage {
-                role: ChatRole::User,
-                content: "Hi".into(),
-            },
+            ChatMessage::new(ChatRole::System, "You are helpful."),
+            ChatMessage::new(ChatRole::User, "Hi"),
         ];
 
         let result = template().format_prompt(&msgs, &ReasoningMode::Disabled);
@@ -462,18 +448,9 @@ mod tests {
     #[test]
     fn format_multi_turn() {
         let msgs = vec![
-            ChatMessage {
-                role: ChatRole::User,
-                content: "Hi".into(),
-            },
-            ChatMessage {
-                role: ChatRole::Assistant,
-                content: "Hello!".into(),
-            },
-            ChatMessage {
-                role: ChatRole::User,
-                content: "How are you?".into(),
-            },
+            ChatMessage::new(ChatRole::User, "Hi"),
+            ChatMessage::new(ChatRole::Assistant, "Hello!"),
+            ChatMessage::new(ChatRole::User, "How are you?"),
         ];
 
         let result = template().format_prompt(&msgs, &ReasoningMode::Disabled);
@@ -572,18 +549,9 @@ mod tests {
     #[test]
     fn tool_response_merges_into_model_turn() {
         let msgs = vec![
-            ChatMessage {
-                role: ChatRole::User,
-                content: "What's the weather?".into(),
-            },
-            ChatMessage {
-                role: ChatRole::Assistant,
-                content: "Let me check.".into(),
-            },
-            ChatMessage {
-                role: ChatRole::Tool,
-                content: "temperature: 15C".into(),
-            },
+            ChatMessage::new(ChatRole::User, "What's the weather?"),
+            ChatMessage::new(ChatRole::Assistant, "Let me check."),
+            ChatMessage::new(ChatRole::Tool, "temperature: 15C"),
         ];
 
         let result = template().format_prompt(&msgs, &ReasoningMode::Disabled);

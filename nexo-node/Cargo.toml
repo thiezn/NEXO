@@ -12,6 +12,7 @@ nexo-ws-schema = { workspace = true }
 nexo-ws-client = { workspace = true }
 nexo-spec = { workspace = true, features = ["tool"] }
 nexo-ai = { path = "../nexo-ai", default-features = false, features = [
+    "mlx",
     "metal",
     "download",
 ] }

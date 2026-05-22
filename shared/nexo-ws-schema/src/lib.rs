@@ -15,7 +15,9 @@ pub use events::{
 };
 pub use frame::Frame;
 pub use methods::{
-    AgentParams, AgentResponse, AgentStatus, CollectionEntry, ConversationMessage,
+    AgentContextAppendParams, AgentContextAppendResponse, AgentParams, AgentResponse,
+    AgentRoundMessage, AgentRoundRequest, AgentRoundResponse, AgentRoundToolCall, AgentStatus,
+    AgentStopParams, AgentStopResponse, CollectionEntry, ConversationMessage,
     CronCreateParams, CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry,
     CronListParams, CronListResponse, HealthParams, HealthResponse, ImageAnalyzeParams,
     ImageAnalyzeResponse, MarkdownFileEntry, Method, ModelLoadParams, ModelLoadResponse,

@@ -193,23 +193,21 @@ Whenever an LLM-capable node connects (or sends a `model.status` push that chang
 
 1. Fetch all `queued` runs ordered by `queued_at ASC`.
 2. Atomically claim each run (`UPDATE … WHERE status = 'queued'`).
-3. Call `loop_runner::run` for each claimed run in order.
+3. Call `agent::r#loop::resume_run` for each claimed run in order.
 
 Double-processing is prevented because the `agent_task` is a single sequential async task — all `AgentCommand` variants are processed one at a time.
 
 ### Queued run columns
 
-The `agent_runs` table stores the full request state needed for replay:
+Queued runs are resumed from normalized state rather than replaying a copied request blob:
 
 | Column | Purpose |
 |--------|---------|
 | `queued_at` | ISO-8601 timestamp used for ordering |
-| `queued_prompt` | Original user prompt |
-| `queued_context` | Optional JSON context blob |
-| `queued_peer_id` | Peer that submitted the run |
 | `model_id` | Requested model (may be `NULL`) |
+| `thinking` | Whether the run should preserve thinking-mode behavior |
 
-> **Note**: The `thinking` flag is not preserved for queued runs — they replay with `thinking: false`.
+The request transcript itself is stored in `transcript_entries`, each inference step is recorded in `agent_rounds`, tool executions are tracked in `tool_traces`, and terminal summaries are stored in `run_summaries`.
 
 ---
 

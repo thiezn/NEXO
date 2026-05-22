@@ -83,10 +83,7 @@ mod tests {
     fn chat_errors_when_not_loaded() {
         let mut model = StubModel::new("unloaded", 500);
         let request = ChatRequest {
-            messages: vec![ChatMessage {
-                role: ChatRole::User,
-                content: "hello".to_string(),
-            }],
+            messages: vec![ChatMessage::new(ChatRole::User, "hello")],
             max_tokens: 100,
             temperature: 0.7,
             top_p: 0.9,
@@ -104,10 +101,7 @@ mod tests {
         model.load().unwrap();
 
         let request = ChatRequest {
-            messages: vec![ChatMessage {
-                role: ChatRole::User,
-                content: "hello".to_string(),
-            }],
+            messages: vec![ChatMessage::new(ChatRole::User, "hello")],
             max_tokens: 100,
             temperature: 0.7,
             top_p: 0.9,

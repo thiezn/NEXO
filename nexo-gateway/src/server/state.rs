@@ -244,12 +244,12 @@ impl GatewayState {
         let mut entries: Vec<ToolEntry> = self
             .tool_registry
             .values()
-            .map(|rt| ToolEntry {
-                name: rt.spec.name.clone(),
-                description: rt.spec.description.clone(),
-                source: "node".into(),
-                available: self.peer_senders.contains_key(&rt.peer_id),
-                parameters: Some(rt.spec.parameters.clone()),
+            .map(|rt| {
+                ToolEntry::new(
+                    rt.spec.clone(),
+                    "node",
+                    self.peer_senders.contains_key(&rt.peer_id),
+                )
             })
             .collect();
         entries.extend(self.gateway_tools.tool_entries());
@@ -420,11 +420,15 @@ mod tests {
                 name: "echo.run".into(),
                 description: "Echo input".into(),
                 parameters: serde_json::json!({"type": "object"}),
+                contract_version: None,
+                execution: Default::default(),
             },
             ToolSpecEntry {
                 name: "echo.ping".into(),
                 description: "Ping".into(),
                 parameters: serde_json::json!({"type": "object"}),
+                contract_version: None,
+                execution: Default::default(),
             },
         ];
         let count = state.register_tools("n1", tools);
@@ -448,15 +452,17 @@ mod tests {
                 name: "echo.run".into(),
                 description: "Echo input".into(),
                 parameters: serde_json::json!({"type": "object"}),
+                contract_version: Some("2026-05-22".into()),
+                execution: Default::default(),
             }],
         );
 
         let entries = state.all_tool_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "echo.run");
+        assert_eq!(entries[0].spec.name, "echo.run");
         assert_eq!(entries[0].source, "node");
         assert!(entries[0].available);
-        assert!(entries[0].parameters.is_some());
+        assert_eq!(entries[0].spec.parameters["type"], "object");
     }
 
     #[test]
@@ -470,6 +476,8 @@ mod tests {
                     name: "orphan.tool".into(),
                     description: "Orphan".into(),
                     parameters: serde_json::json!({}),
+                    contract_version: None,
+                    execution: Default::default(),
                 },
                 peer_id: "gone".into(),
                 registered_at: chrono::Utc::now(),

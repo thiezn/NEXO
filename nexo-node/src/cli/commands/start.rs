@@ -198,4 +198,20 @@ mod tests {
         let result = resolve_startup_models(&config, &available);
         assert_eq!(result.len(), 2);
     }
+
+    #[test]
+    fn resolve_prefers_smallest_available_mlx_model() {
+        let available = vec![
+            "gemma-4-e2b-it".to_string(),
+            "mlx-gemma-4-e2b-it-8bit".to_string(),
+        ];
+        let config = NodeConfig {
+            startup_categories: vec!["chat".into(), "tool".into(), "image".into()],
+            ..Default::default()
+        };
+
+        let result = resolve_startup_models(&config, &available);
+
+        assert_eq!(result, vec!["mlx-gemma-4-e2b-it-8bit".to_string()]);
+    }
 }

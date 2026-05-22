@@ -326,6 +326,10 @@ async fn dispatch_method(
         Method::Agent => {
             agent::handle_agent(request_id, params, peer_id, state, db, agent_handle).await
         }
+        Method::AgentStop => agent::handle_agent_stop(request_id, params, state, db).await,
+        Method::AgentContextAppend => {
+            agent::handle_agent_context_append(request_id, params, db).await
+        }
         Method::SessionCreate => {
             agent::handle_session_create(request_id, params, peer_id, state, db).await
         }

@@ -283,10 +283,10 @@ macro_rules! chat_test {
 
             let chat = model.as_chat().expect("should be a chat model");
             let request = ChatRequest {
-                messages: vec![ChatMessage {
-                    role: ChatRole::User,
-                    content: "What is 2+2? Answer with just the number.".into(),
-                }],
+                messages: vec![ChatMessage::new(
+                    ChatRole::User,
+                    "What is 2+2? Answer with just the number.",
+                )],
                 max_tokens: $max_tokens,
                 temperature: 0.1,
                 top_p: 0.9,
@@ -350,10 +350,7 @@ macro_rules! perf_test {
 
             // Warmup: prime Metal shader compilation
             let warmup = ChatRequest {
-                messages: vec![ChatMessage {
-                    role: ChatRole::User,
-                    content: "Hi".into(),
-                }],
+                messages: vec![ChatMessage::new(ChatRole::User, "Hi")],
                 max_tokens: 2,
                 temperature: 0.1,
                 top_p: 0.9,
@@ -364,10 +361,10 @@ macro_rules! perf_test {
 
             // Benchmark
             let request = ChatRequest {
-                messages: vec![ChatMessage {
-                    role: ChatRole::User,
-                    content: "Write a short paragraph about the history of computing.".into(),
-                }],
+                messages: vec![ChatMessage::new(
+                    ChatRole::User,
+                    "Write a short paragraph about the history of computing.",
+                )],
                 max_tokens: 128,
                 temperature: 0.1,
                 top_p: 0.9,
@@ -454,10 +451,10 @@ macro_rules! tool_test {
 
             let tool = model.as_tool().expect("should be a tool model");
             let request = ToolCallRequest {
-                messages: vec![ChatMessage {
-                    role: ChatRole::User,
-                    content: "What is the weather in Amsterdam?".into(),
-                }],
+                messages: vec![ChatMessage::new(
+                    ChatRole::User,
+                    "What is the weather in Amsterdam?",
+                )],
                 tools: vec![nexo_spec::tool::ToolSpec {
                     name: "get_weather".into(),
                     description: "Get the current weather for a city".into(),
@@ -468,6 +465,7 @@ macro_rules! tool_test {
                         },
                         "required": ["city"]
                     }),
+                    ..Default::default()
                 }],
                 max_tokens: $max_tokens,
                 temperature: 0.1,
@@ -533,10 +531,10 @@ macro_rules! gguf_chat_test {
 
             let chat = model.as_chat().expect("should be a chat model");
             let request = ChatRequest {
-                messages: vec![ChatMessage {
-                    role: ChatRole::User,
-                    content: "What is 2+2? Answer with just the number.".into(),
-                }],
+                messages: vec![ChatMessage::new(
+                    ChatRole::User,
+                    "What is 2+2? Answer with just the number.",
+                )],
                 max_tokens: $max_tokens,
                 temperature: 0.1,
                 top_p: 0.9,

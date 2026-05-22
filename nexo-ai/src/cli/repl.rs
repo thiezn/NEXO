@@ -1217,10 +1217,7 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str, conversation: &mut Con
         return;
     };
 
-    conversation.push(ChatMessage {
-        role: ChatRole::User,
-        content: text.to_string(),
-    });
+    conversation.push(ChatMessage::new(ChatRole::User, text.to_string()));
 
     let settings = coordinator.config().model_settings(&model_name);
     let request = crate::api::types::ChatRequest {
@@ -1246,10 +1243,10 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str, conversation: &mut Con
 
     match result {
         Ok(response) => {
-            conversation.push(ChatMessage {
-                role: ChatRole::Assistant,
-                content: response.text.clone(),
-            });
+            conversation.push(ChatMessage::new(
+                ChatRole::Assistant,
+                response.text.clone(),
+            ));
 
             println!();
             println!("  {}", response.text);
@@ -1278,10 +1275,7 @@ fn handle_tool(coordinator: &mut Coordinator, text: &str) {
 
     let settings = coordinator.config().model_settings(&model_name);
     let request = crate::api::types::ToolCallRequest {
-        messages: vec![ChatMessage {
-            role: ChatRole::User,
-            content: text.to_string(),
-        }],
+        messages: vec![ChatMessage::new(ChatRole::User, text.to_string())],
         tools: vec![],
         max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
         temperature: settings.temperature.unwrap_or(0.3),

@@ -23,6 +23,35 @@ pub enum ChatRole {
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+}
+
+impl ChatMessage {
+    pub fn new(role: ChatRole, content: impl Into<String>) -> Self {
+        Self {
+            role,
+            content: content.into(),
+            tool_call_id: None,
+            tool_name: None,
+        }
+    }
+
+    pub fn with_tool_metadata(
+        role: ChatRole,
+        content: impl Into<String>,
+        tool_call_id: Option<String>,
+        tool_name: Option<String>,
+    ) -> Self {
+        Self {
+            role,
+            content: content.into(),
+            tool_call_id,
+            tool_name,
+        }
+    }
 }
 
 /// Request for a chat completion.
@@ -300,14 +329,18 @@ mod tests {
 
     #[test]
     fn chat_message_serde_roundtrip() {
-        let msg = ChatMessage {
-            role: ChatRole::User,
-            content: "hello".into(),
-        };
+        let msg = ChatMessage::with_tool_metadata(
+            ChatRole::Tool,
+            "hello",
+            Some("call-1".into()),
+            Some("io.bash".into()),
+        );
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ChatMessage = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.role, ChatRole::User);
+        assert_eq!(parsed.role, ChatRole::Tool);
         assert_eq!(parsed.content, "hello");
+        assert_eq!(parsed.tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(parsed.tool_name.as_deref(), Some("io.bash"));
     }
 
     // -- ToolCall serde --
@@ -414,10 +447,7 @@ mod tests {
     #[test]
     fn chat_request_can_be_constructed() {
         let req = ChatRequest {
-            messages: vec![ChatMessage {
-                role: ChatRole::System,
-                content: "You are helpful.".into(),
-            }],
+            messages: vec![ChatMessage::new(ChatRole::System, "You are helpful.")],
             max_tokens: 100,
             temperature: 0.7,
             top_p: 0.9,

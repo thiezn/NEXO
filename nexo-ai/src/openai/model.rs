@@ -6,11 +6,13 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 
 use crate::api::model_traits::*;
 use crate::api::types::*;
+use crate::models::gemma4::common::template::parse_native_tool_calls;
 
 use super::client::OpenAiClient;
 use super::protocol::{
     AudioDetail, ImageUrlDetail, OpenAiChatRequest, OpenAiContent, OpenAiContentPart,
-    OpenAiMessage, OpenAiResponseMessage, OpenAiResponseToolCall, OpenAiToolDefinition,
+    OpenAiMessage, OpenAiRequestToolCall, OpenAiRequestToolFunction, OpenAiResponseMessage,
+    OpenAiResponseToolCall, OpenAiToolDefinition,
 };
 
 pub trait OpenAiServerControl: Clone + Send + Sync + 'static {
@@ -327,16 +329,96 @@ where
 fn chat_messages_to_openai(messages: &[ChatMessage]) -> Vec<OpenAiMessage> {
     messages
         .iter()
-        .map(|message| OpenAiMessage {
-            role: match message.role {
-                ChatRole::System => "system".to_string(),
-                ChatRole::User => "user".to_string(),
-                ChatRole::Assistant => "assistant".to_string(),
-                ChatRole::Tool => "tool".to_string(),
-            },
-            content: OpenAiContent::Text(message.content.clone()),
+        .enumerate()
+        .map(|(index, message)| {
+            let tool_calls = assistant_tool_calls_for_history(messages, index, message);
+            OpenAiMessage {
+                role: match message.role {
+                    ChatRole::System => "system".to_string(),
+                    ChatRole::User => "user".to_string(),
+                    ChatRole::Assistant => "assistant".to_string(),
+                    ChatRole::Tool => "tool".to_string(),
+                },
+                content: assistant_content_for_history(message, tool_calls.as_deref()),
+                tool_call_id: message.tool_call_id.clone(),
+                name: message.tool_name.clone(),
+                tool_calls,
+            }
         })
         .collect()
+}
+
+fn assistant_content_for_history(
+    message: &ChatMessage,
+    tool_calls: Option<&[OpenAiRequestToolCall]>,
+) -> Option<OpenAiContent> {
+    if tool_calls.is_some() {
+        let visible_text = strip_native_tool_call_blocks(&message.content);
+        if visible_text.is_empty() {
+            return None;
+        }
+        return Some(OpenAiContent::Text(visible_text));
+    }
+
+    Some(OpenAiContent::Text(message.content.clone()))
+}
+
+fn assistant_tool_calls_for_history(
+    messages: &[ChatMessage],
+    index: usize,
+    message: &ChatMessage,
+) -> Option<Vec<OpenAiRequestToolCall>> {
+    if message.role != ChatRole::Assistant {
+        return None;
+    }
+
+    let tool_calls = parse_native_tool_calls(&message.content);
+    if tool_calls.is_empty() {
+        return None;
+    }
+
+    let following_tool_messages: Vec<_> = messages[index + 1..]
+        .iter()
+        .take_while(|next| next.role == ChatRole::Tool)
+        .collect();
+
+    Some(
+        tool_calls
+            .into_iter()
+            .enumerate()
+            .map(|(offset, tool_call)| OpenAiRequestToolCall {
+                id: following_tool_messages
+                    .get(offset)
+                    .and_then(|next| next.tool_call_id.clone())
+                    .unwrap_or_else(|| format!("history-call-{index}-{offset}")),
+                tool_type: "function".to_string(),
+                function: OpenAiRequestToolFunction {
+                    name: tool_call.name,
+                    arguments: serde_json::to_string(&tool_call.arguments)
+                        .unwrap_or_else(|_| "{}".to_string()),
+                },
+            })
+            .collect(),
+    )
+}
+
+fn strip_native_tool_call_blocks(content: &str) -> String {
+    let mut visible = String::new();
+    let mut rest = content;
+
+    while let Some(start) = rest.find("<|tool_call>call:") {
+        visible.push_str(&rest[..start]);
+        let after = &rest[start + "<|tool_call>call:".len()..];
+        if let Some(end) = after.find("<tool_call|>") {
+            rest = &after[end + "<tool_call|>".len()..];
+        } else {
+            rest = "";
+            break;
+        }
+    }
+
+    visible.push_str(rest);
+    visible.trim().to_string()
 }
 
 fn user_parts_request(
@@ -349,7 +431,10 @@ fn user_parts_request(
         model: model_id.to_string(),
         messages: vec![OpenAiMessage {
             role: "user".to_string(),
-            content: OpenAiContent::Parts(parts),
+            content: Some(OpenAiContent::Parts(parts)),
+            tool_call_id: None,
+            name: None,
+            tool_calls: None,
         }],
         max_tokens,
         temperature,
@@ -457,14 +542,14 @@ fn build_multimodal_request(model_id: &str, request: &MultiModalRequest) -> Open
         && let Some(last_user) = messages.iter_mut().rfind(|message| message.role == "user")
     {
         let text = match &last_user.content {
-            OpenAiContent::Text(text) => text.clone(),
-            OpenAiContent::Parts(_) => String::new(),
+            Some(OpenAiContent::Text(text)) => text.clone(),
+            Some(OpenAiContent::Parts(_)) | None => String::new(),
         };
         let mut parts = media_parts;
         if !text.is_empty() {
             parts.push(OpenAiContentPart::Text { text });
         }
-        last_user.content = OpenAiContent::Parts(parts);
+        last_user.content = Some(OpenAiContent::Parts(parts));
     }
 
     OpenAiChatRequest {
@@ -522,6 +607,8 @@ mod tests {
             messages: vec![ChatMessage {
                 role: ChatRole::User,
                 content: "What is the weather in Amsterdam?".into(),
+                tool_call_id: None,
+                tool_name: None,
             }],
             tools: vec![nexo_spec::tool::ToolSpec {
                 name: "get_weather".into(),
@@ -533,6 +620,7 @@ mod tests {
                     },
                     "required": ["city"]
                 }),
+                ..Default::default()
             }],
             max_tokens: 64,
             temperature: 0.1,
@@ -549,10 +637,87 @@ mod tests {
         assert_eq!(wire.tools.as_ref().unwrap()[0].function.name, "get_weather");
 
         let user = match &wire.messages[0].content {
-            OpenAiContent::Text(text) => text,
-            OpenAiContent::Parts(_) => panic!("expected text user content"),
+            Some(OpenAiContent::Text(text)) => text,
+            Some(OpenAiContent::Parts(_)) => panic!("expected text user content"),
+            None => panic!("expected user content"),
         };
         assert_eq!(user, "What is the weather in Amsterdam?");
+        assert!(wire.messages[0].tool_call_id.is_none());
+        assert!(wire.messages[0].tool_calls.is_none());
+    }
+
+    #[test]
+    fn chat_messages_to_openai_preserves_tool_metadata() {
+        let wire = chat_messages_to_openai(&[ChatMessage::with_tool_metadata(
+            ChatRole::Tool,
+            "stdout: hello",
+            Some("call-1".into()),
+            Some("io.bash".into()),
+        )]);
+
+        assert_eq!(wire.len(), 1);
+        assert_eq!(wire[0].role, "tool");
+        assert_eq!(wire[0].tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(wire[0].name.as_deref(), Some("io.bash"));
+        assert!(wire[0].tool_calls.is_none());
+    }
+
+    #[test]
+    fn chat_messages_to_openai_reconstructs_assistant_tool_calls() {
+        let wire = chat_messages_to_openai(&[
+            ChatMessage::new(
+                ChatRole::Assistant,
+                concat!(
+                    "<|tool_call>call:io.bash{command:<|\"|>ls -ltrah<|\"|>}<tool_call|>",
+                    "<|tool_call>call:files.count{kind:<|\"|>dir<|\"|>}<tool_call|>"
+                ),
+            ),
+            ChatMessage::with_tool_metadata(
+                ChatRole::Tool,
+                "stdout: first",
+                Some("call-1".into()),
+                Some("io.bash".into()),
+            ),
+            ChatMessage::with_tool_metadata(
+                ChatRole::Tool,
+                "stdout: second",
+                Some("call-2".into()),
+                Some("files.count".into()),
+            ),
+        ]);
+
+        assert_eq!(wire.len(), 3);
+        let assistant_tool_calls = wire[0].tool_calls.as_ref().unwrap();
+        assert_eq!(assistant_tool_calls.len(), 2);
+        assert_eq!(assistant_tool_calls[0].id, "call-1");
+        assert_eq!(assistant_tool_calls[0].tool_type, "function");
+        assert_eq!(assistant_tool_calls[0].function.name, "io.bash");
+        assert_eq!(
+            assistant_tool_calls[0].function.arguments,
+            r#"{"command":"ls -ltrah"}"#
+        );
+        assert_eq!(assistant_tool_calls[1].id, "call-2");
+        assert_eq!(assistant_tool_calls[1].function.name, "files.count");
+        assert_eq!(
+            assistant_tool_calls[1].function.arguments,
+            r#"{"kind":"dir"}"#
+        );
+        assert!(wire[0].content.is_none());
+    }
+
+    #[test]
+    fn chat_messages_to_openai_preserves_visible_assistant_text() {
+        let wire = chat_messages_to_openai(&[ChatMessage::new(
+            ChatRole::Assistant,
+            "I will inspect that.<|tool_call>call:io.bash{command:<|\"|>ls<|\"|>}<tool_call|>",
+        )]);
+
+        let content = match &wire[0].content {
+            Some(OpenAiContent::Text(text)) => text,
+            _ => panic!("expected visible assistant text"),
+        };
+        assert_eq!(content, "I will inspect that.");
+        assert!(wire[0].tool_calls.is_some());
     }
 
     #[test]

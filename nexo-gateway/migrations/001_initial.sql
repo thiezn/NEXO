@@ -39,24 +39,59 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     session_id      TEXT NOT NULL REFERENCES sessions(id),
     idempotency_key TEXT NOT NULL UNIQUE,
     status          TEXT NOT NULL DEFAULT 'accepted',
-    summary         TEXT,
     model_id        TEXT,
+    thinking        INTEGER NOT NULL DEFAULT 0,
     queued_at       TEXT,
-    queued_prompt   TEXT,
-    queued_context  TEXT,
-    queued_peer_id  TEXT,
     started_at      TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at     TEXT
 );
 
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE IF NOT EXISTS agent_rounds (
+    id           TEXT PRIMARY KEY,
+    run_id       TEXT NOT NULL REFERENCES agent_runs(id),
+    round_index  INTEGER NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'started',
+    selected_peer_id TEXT,
+    model_id     TEXT,
+    rationale    TEXT,
+    started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at  TEXT,
+    UNIQUE (run_id, round_index)
+);
+
+CREATE TABLE IF NOT EXISTS transcript_entries (
     id           TEXT PRIMARY KEY,
     session_id   TEXT NOT NULL REFERENCES sessions(id),
     run_id       TEXT REFERENCES agent_runs(id),
+    round_id     TEXT REFERENCES agent_rounds(id),
     role         TEXT NOT NULL,
     content      TEXT NOT NULL,
+    entry_kind   TEXT NOT NULL DEFAULT 'message',
     tool_call_id TEXT,
     tool_name    TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS tool_traces (
+    id           TEXT PRIMARY KEY,
+    run_id       TEXT NOT NULL REFERENCES agent_runs(id),
+    round_id     TEXT NOT NULL REFERENCES agent_rounds(id),
+    tool_call_id TEXT NOT NULL,
+    tool_name    TEXT NOT NULL,
+    arguments    TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'started',
+    output       TEXT,
+    error        TEXT,
+    started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS run_summaries (
+    id           TEXT PRIMARY KEY,
+    run_id       TEXT NOT NULL REFERENCES agent_runs(id),
+    round_id     TEXT REFERENCES agent_rounds(id),
+    kind         TEXT NOT NULL,
+    content      TEXT NOT NULL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -88,7 +123,10 @@ CREATE TABLE IF NOT EXISTS node_models (
 
 -- Indexes
 
-CREATE INDEX IF NOT EXISTS idx_messages_session  ON messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_transcript_entries_session ON transcript_entries(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_rounds_run ON agent_rounds(run_id, round_index);
+CREATE INDEX IF NOT EXISTS idx_tool_traces_run ON tool_traces(run_id, round_id);
+CREATE INDEX IF NOT EXISTS idx_run_summaries_run ON run_summaries(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user     ON sessions(user_id, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cron_next_run     ON cron_jobs(enabled, next_run_at);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_queued ON agent_runs(status, queued_at) WHERE status = 'queued';

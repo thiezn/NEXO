@@ -8,19 +8,14 @@ use nexo_ai::api::types::{
 };
 use nexo_ai::coordinator::Coordinator;
 use nexo_ai::registry::find_manifest;
-use nexo_ws_client::{
-    NexoConnection, ReadHalf, WriteHalf, default_node_connect_params, perform_handshake,
-};
+use nexo_ws_client::{NexoConnection, WriteHalf, default_node_connect_params, perform_handshake};
 use nexo_ws_schema::{
-    ErrorPayload, Frame, ImageAnalyzeParams, LoadedModelInfo, Method, ModelLoadResponse,
-    ModelStatusParams, ModelUnloadResponse, ToolsExecuteParams, ToolsExecuteResponse,
-    ToolsRegisterParams,
+    AgentRoundRequest, AgentRoundResponse, AgentRoundToolCall, ErrorPayload, Frame,
+    ImageAnalyzeParams, LoadedModelInfo, Method, ModelLoadResponse, ModelStatusParams,
+    ModelUnloadResponse, ToolsExecuteParams, ToolsExecuteResponse, ToolsRegisterParams,
 };
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
-const MAX_PREFILL_CACHE_ENTRIES: usize = 64;
 
 /// Run the node, connecting to the gateway and reconnecting on disconnect.
 pub async fn run_node(
@@ -147,7 +142,6 @@ async fn connect_and_run(
 
     // Push initial model status so the gateway knows what's loaded.
     push_model_status(&mut writer, &coordinator, available_models).await;
-    let mut prefill_cache = std::collections::HashMap::<String, String>::new();
     let cache_manager = Arc::new(Mutex::new(SessionCacheManager::new(
         dirs::home_dir()
             .unwrap_or_default()
@@ -188,9 +182,6 @@ async fn connect_and_run(
                                 params,
                                 &coordinator,
                                 &inference_tx,
-                                &mut prefill_cache,
-                                &mut reader,
-                                &mut writer,
                                 &cache_manager,
                             ).await?;
                         }
@@ -388,92 +379,39 @@ async fn dispatch_agent_inference(
     params: serde_json::Value,
     coordinator: &Arc<Mutex<Coordinator>>,
     tx: &tokio::sync::mpsc::Sender<(String, Result<serde_json::Value, String>)>,
-    prefill_cache: &mut HashMap<String, String>,
-    reader: &mut ReadHalf,
-    writer: &mut WriteHalf,
     cache_manager: &Arc<Mutex<SessionCacheManager>>,
 ) -> cli_helpers::Result {
-    let mut messages: Vec<serde_json::Value> = params
-        .get("messages")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let tools: Vec<serde_json::Value> = params
-        .get("tools")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|t| {
-                    // Accept both OpenAI format {"type":"function","function":{...}}
-                    // and flat format {"name":...,"description":...,"parameters":...}
-                    t.get("function").cloned().or_else(|| Some(t.clone()))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let prefill_sha = params
-        .get("prefill_sha")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-
-    let model_id = params
-        .get("model_id")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-
-    let session_id = params
-        .get("session_id")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-
-    // Resolve prefill by SHA, prepending as system message if present
-    if let Some(sha) = &prefill_sha {
-        let content: String = if let Some(cached) = prefill_cache.get(sha.as_str()) {
-            cached.clone()
-        } else {
-            match fetch_prefill_from_gateway(reader, writer, sha).await {
-                Ok(content) => {
-                    if prefill_cache.len() >= MAX_PREFILL_CACHE_ENTRIES {
-                        // Evict an arbitrary entry to stay bounded.
-                        if let Some(key) = prefill_cache.keys().next().cloned() {
-                            prefill_cache.remove(&key);
-                        }
-                    }
-                    prefill_cache.insert(sha.clone(), content.clone());
-                    content
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to fetch prefill '{sha}': {e}");
-                    String::new()
-                }
-            }
-        };
-        if !content.is_empty() {
-            messages.insert(
-                0,
-                serde_json::json!({ "role": "system", "content": content }),
-            );
+    let round_request: AgentRoundRequest = match serde_json::from_value(params) {
+        Ok(request) => request,
+        Err(error) => {
+            let _ = tx
+                .send((
+                    request_id.to_string(),
+                    Err(format!("Invalid typed agent round params: {error}")),
+                ))
+                .await;
+            return Ok(());
         }
-    }
+    };
 
     // Convert to typed ChatMessages
-    let chat_messages: Vec<ChatMessage> = messages
+    let chat_messages: Vec<ChatMessage> = round_request
+        .messages
         .iter()
-        .map(|m| {
-            let role = match m.get("role").and_then(|v| v.as_str()) {
-                Some("system") => ChatRole::System,
-                Some("assistant") => ChatRole::Assistant,
-                Some("tool") => ChatRole::Tool,
+        .map(|message| {
+            let role = match message.role.as_str() {
+                "system" => ChatRole::System,
+                "assistant" => ChatRole::Assistant,
+                "tool" => ChatRole::Tool,
                 _ => ChatRole::User,
             };
-            let content = m
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-            ChatMessage { role, content }
+            let content = message.content.clone();
+            ChatMessage::with_tool_metadata(
+                role,
+                content,
+                message.tool_call_id.clone(),
+                message.tool_name.clone(),
+            )
         })
         .collect();
 
@@ -491,15 +429,15 @@ async fn dispatch_agent_inference(
     tracing::debug!(
         "dispatch_agent_inference {}: resolving model (model_id={:?}, has_tools={}, session_id={:?}, messages={})",
         request_id,
-        model_id,
-        !tools.is_empty(),
-        session_id,
+        round_request.model_id,
+        !round_request.tools.is_empty(),
+        round_request.session_id,
         chat_messages.len(),
     );
     let coord = coordinator.lock()?;
-    let model_name = if let Some(id) = &model_id {
+    let model_name = if let Some(id) = &round_request.model_id {
         id.clone()
-    } else if !tools.is_empty() {
+    } else if !round_request.tools.is_empty() {
         coord
             .active_model_for(ModelCategory::Tool)
             .or_else(|| coord.active_model_for(ModelCategory::Chat))
@@ -513,6 +451,11 @@ async fn dispatch_agent_inference(
     };
     let settings = coord.config().model_settings(&model_name);
     drop(coord);
+
+    let session_id = round_request.session_id.clone();
+    let run_id = round_request.run_id.clone();
+    let round_id = round_request.round_id.clone();
+    let tool_specs = round_request.tools.clone();
 
     if model_name.is_empty() {
         tracing::warn!(
@@ -543,7 +486,9 @@ async fn dispatch_agent_inference(
     let cache_mgr = cache_manager.clone();
     let tx = tx.clone();
     let request_id = request_id.to_string();
-    let has_tools = !tools.is_empty();
+    let run_id_for_task = run_id.clone();
+    let round_id_for_task = round_id.clone();
+    let has_tools = !tool_specs.is_empty();
 
     // Gemma 4 recommended defaults
     let temperature = settings.temperature.unwrap_or(1.0);
@@ -572,7 +517,7 @@ async fn dispatch_agent_inference(
 
             // Handle KV cache session switching (disk persistence)
             if let Some(kv) = model.as_kv_cacheable() {
-                let target = session_id.as_deref();
+                let target = Some(session_id.as_str());
                 tracing::debug!(
                     "dispatch_agent_inference {}: switching KV cache to target={:?}",
                     request_id,
@@ -606,23 +551,19 @@ async fn dispatch_agent_inference(
             );
 
             if has_tools {
-                let tool_specs: Vec<nexo_spec::tool::ToolSpec> =
-                    serde_json::from_value(serde_json::Value::Array(tools))
-                        .map_err(|e| format!("Failed to parse tool specs: {e}"))?;
-
                 let req = ToolCallRequest {
                     messages: chat_messages.clone(),
-                    tools: tool_specs,
+                    tools: tool_specs.clone(),
                     max_tokens,
                     temperature,
                     top_p,
                     top_k,
-                    session_id: session_id.clone(),
+                    session_id: Some(session_id.clone()),
                 };
 
                 if let Some(kv) = model.as_kv_cacheable() {
                     kv.clear_kv_cache();
-                    kv.set_session_state(session_id.clone(), Vec::new());
+                    kv.set_session_state(Some(session_id.clone()), Vec::new());
                     tracing::debug!(
                         "dispatch_agent_inference {}: cleared in-memory KV state before tool selection inference",
                         request_id,
@@ -648,59 +589,37 @@ async fn dispatch_agent_inference(
 
                 if let Some(kv) = model.as_kv_cacheable() {
                     kv.clear_kv_cache();
-                    kv.set_session_state(session_id.clone(), Vec::new());
+                    kv.set_session_state(Some(session_id.clone()), Vec::new());
                     tracing::debug!(
                         "dispatch_agent_inference {}: reset in-memory KV state after tool selection inference",
                         request_id,
                     );
                 }
 
-                if resp.tool_calls.is_empty() {
-                    let fallback_text = resp.reasoning.unwrap_or_default();
-                    tracing::debug!(
-                        "dispatch_agent_inference {}: no tool calls returned, falling back to chat response",
-                        request_id,
-                    );
-
-                    let chat_req = ChatRequest {
-                        messages: chat_messages.clone(),
-                        max_tokens,
-                        temperature,
-                        top_p,
-                        top_k,
-                        session_id: session_id.clone(),
-                    };
-                    let Some(chat_model) = model.as_chat() else {
-                        return Ok(serde_json::json!({ "content": fallback_text }));
-                    };
-                    let chat_resp = chat_model.chat(&chat_req).map_err(|e| e.to_string())?;
-
-                    if let Some(kv) = model.as_kv_cacheable() {
-                        kv.clear_kv_cache();
-                        kv.set_session_state(session_id.clone(), Vec::new());
-                        tracing::debug!(
-                            "dispatch_agent_inference {}: reset in-memory KV state after chat fallback response",
-                            request_id,
-                        );
-                    }
-
-                    Ok(serde_json::json!({ "content": chat_resp.text }))
-                } else {
-                    let calls: Vec<serde_json::Value> = resp
+                let response = AgentRoundResponse {
+                    content: if resp.tool_calls.is_empty() {
+                        resp.reasoning.clone().filter(|text| !text.is_empty())
+                    } else {
+                        None
+                    },
+                    rationale: resp.reasoning,
+                    tool_calls: resp
                         .tool_calls
-                        .iter()
-                        .map(|tc| {
-                            serde_json::json!({
-                                "id": nexo_ws_schema::Frame::new_id(),
-                                "function": {
-                                    "name": tc.name,
-                                    "arguments": tc.arguments,
-                                }
-                            })
+                        .into_iter()
+                        .map(|tool_call| AgentRoundToolCall {
+                            id: nexo_ws_schema::Frame::new_id(),
+                            name: tool_call.name,
+                            arguments: tool_call.arguments,
                         })
-                        .collect();
-                    Ok(serde_json::json!({ "tool_calls": calls }))
-                }
+                        .collect(),
+                };
+                tracing::info!(
+                    "Agent round {round_id_for_task} for run {run_id_for_task} completed on tool path: tool_calls={}, content_chars={}, reasoning_chars={}",
+                    response.tool_calls.len(),
+                    response.content.as_deref().map_or(0, str::len),
+                    response.rationale.as_deref().map_or(0, str::len),
+                );
+                Ok(serde_json::to_value(response).map_err(|e| e.to_string())?)
             } else {
                 let req = ChatRequest {
                     messages: chat_messages,
@@ -708,7 +627,7 @@ async fn dispatch_agent_inference(
                     temperature,
                     top_p,
                     top_k,
-                    session_id,
+                    session_id: Some(session_id.clone()),
                 };
 
                 let chat_model = model
@@ -728,7 +647,12 @@ async fn dispatch_agent_inference(
                     resp.text.len()
                 );
 
-                Ok(serde_json::json!({ "content": resp.text }))
+                Ok(serde_json::to_value(AgentRoundResponse {
+                    content: Some(resp.text),
+                    rationale: None,
+                    tool_calls: Vec::new(),
+                })
+                .map_err(|e| e.to_string())?)
             }
         })();
         tracing::debug!(
@@ -1000,74 +924,5 @@ async fn push_model_status(
     };
     if let Ok(frame) = Frame::request(Method::ModelStatus, &status) {
         let _ = writer.send_frame(&frame).await;
-    }
-}
-
-/// Fetch prefill content from the gateway by SHA.
-/// Sends a PrefillFetch request and waits for the response (up to 10s).
-async fn fetch_prefill_from_gateway(
-    reader: &mut ReadHalf,
-    writer: &mut WriteHalf,
-    prefill_sha: &str,
-) -> anyhow::Result<String> {
-    let fetch_id = Frame::new_id();
-    let fetch_frame = Frame::Request {
-        id: fetch_id.clone(),
-        method: Method::PrefillFetch,
-        params: serde_json::json!({ "prefillSha": prefill_sha }),
-    };
-    writer
-        .send_frame(&fetch_frame)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to send PrefillFetch: {e}"))?;
-
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            anyhow::bail!("PrefillFetch timed out for '{prefill_sha}'");
-        }
-
-        let frame = tokio::time::timeout(remaining, reader.recv_frame())
-            .await
-            .map_err(|_| anyhow::anyhow!("PrefillFetch timed out for '{prefill_sha}'"))?
-            .map_err(|e| anyhow::anyhow!("Connection error during PrefillFetch: {e}"))?
-            .ok_or_else(|| anyhow::anyhow!("Connection closed during PrefillFetch"))?;
-
-        match frame {
-            Frame::Response {
-                id,
-                ok: true,
-                payload,
-                ..
-            } if id == fetch_id => {
-                let content = payload
-                    .as_ref()
-                    .and_then(|p| p.get("content"))
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("Missing 'content' field in PrefillFetch response")
-                    })?;
-                return Ok(content);
-            }
-            Frame::Response {
-                id,
-                ok: false,
-                error,
-                ..
-            } if id == fetch_id => {
-                let msg = error
-                    .map(|e| format!("{}: {}", e.code, e.message))
-                    .unwrap_or_else(|| "Unknown error".into());
-                anyhow::bail!("PrefillFetch failed for sha '{prefill_sha}': {msg}");
-            }
-            other => {
-                tracing::debug!(
-                    "Discarding non-prefill frame while awaiting PrefillFetch: {other:?}"
-                );
-            }
-        }
     }
 }

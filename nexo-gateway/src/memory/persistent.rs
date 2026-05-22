@@ -1,8 +1,17 @@
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 
-/// Initialize the SQLite database at the given path, running migrations.
+/// Initialize the SQLite database at the given path.
 pub async fn initialize(db_path: &Path) -> cli_helpers::Result {
+    let pool = connect(db_path).await?;
+    pool.close().await;
+
+    tracing::info!("Database initialized at {}", db_path.display());
+    Ok(())
+}
+
+/// Connect to the SQLite database at the given path, ensuring schema migrations are applied.
+pub async fn connect(db_path: &Path) -> cli_helpers::Result<SqlitePool> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
             cli_helpers::Error::Io(format!(
@@ -12,21 +21,15 @@ pub async fn initialize(db_path: &Path) -> cli_helpers::Result {
         })?;
     }
 
-    let pool = connect(db_path).await?;
-    run_migrations(&pool).await?;
-
-    tracing::info!("Database initialized at {}", db_path.display());
-    Ok(())
-}
-
-/// Connect to the SQLite database at the given path.
-pub async fn connect(db_path: &Path) -> cli_helpers::Result<SqlitePool> {
     let url = format!("sqlite:{}?mode=rwc", db_path.display());
-    SqlitePoolOptions::new()
+    let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&url)
         .await
-        .map_err(|e| cli_helpers::Error::Other(format!("Failed to connect to DB: {e}")))
+        .map_err(|e| cli_helpers::Error::Other(format!("Failed to connect to DB: {e}")))?;
+
+    run_migrations(&pool).await?;
+    Ok(pool)
 }
 
 async fn run_migrations(pool: &SqlitePool) -> cli_helpers::Result {
@@ -140,6 +143,26 @@ mod tests {
         let path = temp_db_path("init");
         initialize(&path).await.unwrap();
         assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn connect_from_path_runs_migrations() {
+        let path = temp_db_path("connect");
+        let pool = connect(&path).await.unwrap();
+
+        let tables: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+
+        let table_names: Vec<&str> = tables.iter().map(|t| t.0.as_str()).collect();
+        assert!(table_names.contains(&"devices"));
+        assert!(table_names.contains(&"users"));
+        assert!(table_names.contains(&"_sqlx_migrations"));
+
+        pool.close().await;
         let _ = std::fs::remove_file(&path);
     }
 }

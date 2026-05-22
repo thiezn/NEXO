@@ -77,12 +77,6 @@ impl NexoConnection {
         }
     }
 
-    /// Send a raw JSON string (for testing/debugging).
-    pub(crate) async fn send_raw(&mut self, json: &str) -> Result<()> {
-        self.ws.send(Message::Text(json.to_string().into())).await?;
-        Ok(())
-    }
-
     /// Close the connection gracefully.
     pub async fn close(&mut self) -> Result<()> {
         self.ws.close(None).await?;

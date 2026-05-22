@@ -1,8 +1,9 @@
 use crate::agent::{AgentCommand, AgentHandle};
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
-    AgentParams, AgentStatus, ErrorPayload, Frame, SessionClearParams, SessionCreateParams,
-    SessionGetParams,
+    AgentContextAppendParams, AgentContextAppendResponse, AgentParams, AgentStatus,
+    AgentStopParams, AgentStopResponse, ErrorPayload, EventKind, Frame, SessionClearParams,
+    SessionCreateParams, SessionGetParams,
 };
 use sqlx::SqlitePool;
 
@@ -47,19 +48,20 @@ pub(super) async fn handle_agent(
     };
 
     let run_id = Frame::new_id();
+    let thinking = agent_params.thinking.unwrap_or(false);
     if let Err(e) = crate::agent::session::create_run(
         db,
         &run_id,
         &session_id,
         &agent_params.idempotency_key,
         agent_params.model_id.as_deref(),
+        thinking,
     )
     .await
     {
         return internal_error(request_id, format!("Failed to create run: {e}"));
     }
 
-    let thinking = agent_params.thinking.unwrap_or(false);
     let cmd = AgentCommand::RunAgent {
         run_id: run_id.clone(),
         session_id: session_id.clone(),
@@ -81,6 +83,87 @@ pub(super) async fn handle_agent(
             session_id,
             status: AgentStatus::Accepted,
             summary: None,
+        },
+    )
+}
+
+pub(super) async fn handle_agent_stop(
+    request_id: &str,
+    params: serde_json::Value,
+    state: &SharedState,
+    db: &SqlitePool,
+) -> Frame {
+    let stop_params: AgentStopParams = match parse_params(request_id, params, "agent.stop") {
+        Ok(params) => params,
+        Err(frame) => return frame,
+    };
+
+    let stopped_session = match crate::agent::session::stop_run(db, &stop_params.run_id).await {
+        Ok(result) => result,
+        Err(error) => {
+            return internal_error(request_id, format!("Failed to stop run: {error}"));
+        }
+    };
+
+    let stopped = stopped_session.is_some();
+
+    if let Some(session_id) = stopped_session.as_ref() {
+        let event = Frame::event(
+            EventKind::Agent,
+            nexo_ws_schema::AgentEventPayload {
+                run_id: stop_params.run_id.clone(),
+                session_id: session_id.clone(),
+                status: AgentStatus::Cancelled,
+                content: None,
+                tool_name: None,
+                tool_call_id: None,
+                error: None,
+                thinking_content: None,
+            },
+        );
+        if let Ok(frame) = event {
+            let sender = state.read().await.event_tx.clone();
+            let _ = sender.send(frame);
+        }
+    }
+
+    ok_or_internal_error(
+        request_id,
+        AgentStopResponse {
+            stopped,
+        },
+    )
+}
+
+pub(super) async fn handle_agent_context_append(
+    request_id: &str,
+    params: serde_json::Value,
+    db: &SqlitePool,
+) -> Frame {
+    let append_params: AgentContextAppendParams =
+        match parse_params(request_id, params, "agent.context.append") {
+            Ok(params) => params,
+            Err(frame) => return frame,
+        };
+
+    let message_id = match crate::agent::session::append_run_context(
+        db,
+        &append_params.run_id,
+        &append_params.context,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            return internal_error(request_id, format!("Failed to append context: {error}"));
+        }
+    };
+
+    ok_or_internal_error(
+        request_id,
+        AgentContextAppendResponse {
+            queued: message_id.is_some(),
+            message_id,
         },
     )
 }

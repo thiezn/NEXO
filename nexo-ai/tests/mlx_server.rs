@@ -160,7 +160,10 @@ fn text_request(model_id: &str, prompt: &str, max_tokens: usize) -> OpenAiChatRe
         model: model_id.to_string(),
         messages: vec![OpenAiMessage {
             role: "user".to_string(),
-            content: OpenAiContent::Text(prompt.to_string()),
+            content: Some(OpenAiContent::Text(prompt.to_string())),
+            tool_call_id: None,
+            name: None,
+            tool_calls: None,
         }],
         max_tokens,
         temperature: 0.1,
@@ -283,10 +286,10 @@ async fn test_chat_inference() {
             .as_chat()
             .context("expected MLX model to expose chat")?
             .chat(&ChatRequest {
-                messages: vec![ChatMessage {
-                    role: ChatRole::User,
-                    content: "What is 2+2? Answer with just the number.".into(),
-                }],
+                messages: vec![ChatMessage::new(
+                    ChatRole::User,
+                    "What is 2+2? Answer with just the number.",
+                )],
                 max_tokens: 32,
                 temperature: 0.1,
                 top_p: 0.9,
@@ -324,10 +327,10 @@ async fn test_tool_calling() {
             .as_tool()
             .context("expected MLX model to expose tool calling")?
             .call_tools(&ToolCallRequest {
-                messages: vec![ChatMessage {
-                    role: ChatRole::User,
-                    content: "What is the weather in Amsterdam? Use the weather tool.".into(),
-                }],
+                messages: vec![ChatMessage::new(
+                    ChatRole::User,
+                    "What is the weather in Amsterdam? Use the weather tool.",
+                )],
                 tools: vec![nexo_spec::tool::ToolSpec {
                     name: "get_weather".into(),
                     description: "Get the current weather for a city".into(),
@@ -338,6 +341,7 @@ async fn test_tool_calling() {
                         },
                         "required": ["city"]
                     }),
+                    ..Default::default()
                 }],
                 max_tokens: 96,
                 temperature: 0.1,

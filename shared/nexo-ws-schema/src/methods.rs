@@ -1,4 +1,6 @@
-use nexo_spec::model::LoadedModelInfo;
+#[cfg(test)]
+use nexo_spec::tool::ToolExecutionConstraints;
+use nexo_spec::{model::LoadedModelInfo, tool::ToolSpec};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +13,10 @@ pub enum Method {
     Status,
     Send,
     Agent,
+    #[serde(rename = "agent.stop")]
+    AgentStop,
+    #[serde(rename = "agent.context.append")]
+    AgentContextAppend,
     SystemPresence,
     #[serde(rename = "tools.catalog")]
     ToolsCatalog,
@@ -120,6 +126,43 @@ pub struct AgentParams {
     pub thinking: Option<bool>,
 }
 
+/// Parameters for the `agent.stop` method.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStopParams {
+    /// The active run to stop.
+    pub run_id: String,
+}
+
+/// Response payload for the `agent.stop` method.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStopResponse {
+    /// Whether the run was still active and has now been stopped.
+    pub stopped: bool,
+}
+
+/// Parameters for the `agent.context.append` method.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentContextAppendParams {
+    /// The active run that should observe the new context on its next round.
+    pub run_id: String,
+    /// Arbitrary structured context to append to the transcript.
+    pub context: serde_json::Value,
+}
+
+/// Response payload for the `agent.context.append` method.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentContextAppendResponse {
+    /// Whether the context was accepted for the active run.
+    pub queued: bool,
+    /// The persisted message identifier, when context was queued successfully.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+}
+
 /// Parameters for the `system-presence` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct SystemPresenceParams {
@@ -169,15 +212,72 @@ pub struct AgentResponse {
     pub summary: Option<String>,
 }
 
+/// A single transcript message forwarded in a typed agent round request.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoundMessage {
+    pub role: String,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+}
+
+/// Gateway-to-node payload for a single agent round inference.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoundRequest {
+    pub run_id: String,
+    pub round_id: String,
+    pub session_id: String,
+    pub messages: Vec<AgentRoundMessage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<ToolSpecEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+}
+
+/// A single tool call returned from a node for a round.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoundToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// Node-to-gateway response payload for a single agent round inference.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoundResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<AgentRoundToolCall>,
+}
+
 /// A single tool entry in the tools catalog response.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolEntry {
-    pub name: String,
-    pub description: String,
+    #[serde(flatten)]
+    pub spec: ToolSpec,
     pub source: String,
     pub available: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<serde_json::Value>,
+}
+
+impl ToolEntry {
+    /// Create a tool catalog entry from a shared tool spec.
+    pub fn new(spec: ToolSpec, source: impl Into<String>, available: bool) -> Self {
+        Self {
+            spec,
+            source: source.into(),
+            available,
+        }
+    }
 }
 
 /// Response payload for `tools.catalog`.
@@ -189,12 +289,7 @@ pub struct ToolsCatalogResponse {
 // -- tools.register --
 
 /// A tool specification entry for registration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct ToolSpecEntry {
-    pub name: String,
-    pub description: String,
-    pub parameters: serde_json::Value,
-}
+pub type ToolSpecEntry = ToolSpec;
 
 /// Parameters for the `tools.register` method (sent by nodes).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -670,6 +765,39 @@ mod tests {
     }
 
     #[test]
+    fn agent_control_method_serialization() {
+        assert_eq!(
+            serde_json::to_string(&Method::AgentStop).unwrap(),
+            "\"agent.stop\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Method::AgentContextAppend).unwrap(),
+            "\"agent.context.append\""
+        );
+    }
+
+    #[test]
+    fn agent_stop_params_roundtrip() {
+        let params = AgentStopParams {
+            run_id: "run-1".into(),
+        };
+        let json = serde_json::to_string(&params).unwrap();
+        let decoded: AgentStopParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, decoded);
+    }
+
+    #[test]
+    fn agent_context_append_params_roundtrip() {
+        let params = AgentContextAppendParams {
+            run_id: "run-1".into(),
+            context: serde_json::json!({"files": ["notes.md"]}),
+        };
+        let json = serde_json::to_string(&params).unwrap();
+        let decoded: AgentContextAppendParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, decoded);
+    }
+
+    #[test]
     fn health_response_serialization() {
         let resp = HealthResponse {
             status: "ok".into(),
@@ -682,44 +810,64 @@ mod tests {
     #[test]
     fn tools_catalog_response() {
         let resp = ToolsCatalogResponse {
-            tools: vec![ToolEntry {
-                name: "extractor".into(),
-                description: "Extract data".into(),
-                source: "core".into(),
-                available: true,
-                parameters: None,
-            }],
+            tools: vec![ToolEntry::new(
+                ToolSpec {
+                    name: "extractor".into(),
+                    description: "Extract data".into(),
+                    parameters: serde_json::json!({"type": "object"}),
+                    contract_version: None,
+                    execution: ToolExecutionConstraints::default(),
+                },
+                "core",
+                true,
+            )],
         };
         let json = serde_json::to_string(&resp).unwrap();
         let decoded: ToolsCatalogResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp.tools.len(), decoded.tools.len());
-        assert_eq!(resp.tools[0].name, decoded.tools[0].name);
+        assert_eq!(resp.tools[0].spec.name, decoded.tools[0].spec.name);
     }
 
     #[test]
     fn tool_entry_with_parameters() {
-        let entry = ToolEntry {
-            name: "echo".into(),
-            description: "Echo input".into(),
-            source: "node".into(),
-            available: true,
-            parameters: Some(serde_json::json!({"type": "object"})),
-        };
+        let entry = ToolEntry::new(
+            ToolSpec {
+                name: "echo".into(),
+                description: "Echo input".into(),
+                parameters: serde_json::json!({"type": "object"}),
+                contract_version: Some("2026-05-22".into()),
+                execution: ToolExecutionConstraints {
+                    side_effect_level: nexo_spec::tool::ToolSideEffectLevel::ReadOnly,
+                    parallel_safe: true,
+                },
+            },
+            "node",
+            true,
+        );
         let json = serde_json::to_value(&entry).unwrap();
         assert_eq!(json["parameters"]["type"], "object");
+        assert_eq!(json["contractVersion"], "2026-05-22");
+        assert_eq!(json["execution"]["sideEffectLevel"], "read_only");
+        assert_eq!(json["execution"]["parallelSafe"], true);
     }
 
     #[test]
-    fn tool_entry_without_parameters_omits_field() {
-        let entry = ToolEntry {
-            name: "echo".into(),
-            description: "Echo input".into(),
-            source: "node".into(),
-            available: true,
-            parameters: None,
-        };
+    fn tool_entry_omits_default_spec_metadata() {
+        let entry = ToolEntry::new(
+            ToolSpec {
+                name: "echo".into(),
+                description: "Echo input".into(),
+                parameters: serde_json::json!({"type": "object"}),
+                contract_version: None,
+                execution: ToolExecutionConstraints::default(),
+            },
+            "node",
+            true,
+        );
         let json = serde_json::to_value(&entry).unwrap();
-        assert!(!json.as_object().unwrap().contains_key("parameters"));
+        assert_eq!(json["parameters"]["type"], "object");
+        assert!(!json.as_object().unwrap().contains_key("contractVersion"));
+        assert!(!json.as_object().unwrap().contains_key("execution"));
     }
 
     #[test]
@@ -741,6 +889,8 @@ mod tests {
                 name: "echo".into(),
                 description: "Echo tool".into(),
                 parameters: serde_json::json!({"type": "object", "properties": {"input": {"type": "string"}}}),
+                contract_version: Some("2026-05-22".into()),
+                execution: ToolExecutionConstraints::default(),
             }],
         };
         let json = serde_json::to_string(&params).unwrap();
@@ -803,6 +953,61 @@ mod tests {
         assert_eq!(json["sessionId"], "sess-1");
         assert_eq!(json["status"], "accepted");
         assert!(json.get("summary").is_none());
+    }
+
+    #[test]
+    fn agent_round_request_roundtrip() {
+        let request = AgentRoundRequest {
+            run_id: "run-1".into(),
+            round_id: "round-1".into(),
+            session_id: "sess-1".into(),
+            messages: vec![AgentRoundMessage {
+                role: "system".into(),
+                content: "You are helpful".into(),
+                tool_call_id: None,
+                tool_name: None,
+            }],
+            tools: vec![ToolSpecEntry {
+                name: "echo.run".into(),
+                description: "Echo input".into(),
+                parameters: serde_json::json!({"type": "object"}),
+                contract_version: None,
+                execution: ToolExecutionConstraints::default(),
+            }],
+            model_id: Some("gemma-4-e4b-it".into()),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        let decoded: AgentRoundRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(request, decoded);
+    }
+
+    #[test]
+    fn agent_round_response_roundtrip() {
+        let response = AgentRoundResponse {
+            content: Some("Final answer".into()),
+            rationale: Some("Reasoning summary".into()),
+            tool_calls: vec![AgentRoundToolCall {
+                id: "call-1".into(),
+                name: "echo.run".into(),
+                arguments: serde_json::json!({"input": "hello"}),
+            }],
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        let decoded: AgentRoundResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(response, decoded);
+    }
+
+    #[test]
+    fn agent_context_append_response_omits_missing_message_id() {
+        let response = AgentContextAppendResponse {
+            queued: false,
+            message_id: None,
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["queued"], false);
+        assert!(json.get("messageId").is_none());
     }
 
     #[test]

@@ -82,8 +82,11 @@ The gateway's SQLite database stores structured operational state:
 | Table | Purpose |
 |-------|---------|
 | `sessions` | Conversation containers, linked to a user |
-| `agent_runs` | One row per agent invocation, tracks status and summary |
-| `messages` | Conversation messages (user, assistant, tool, system), ordered by time |
+| `agent_runs` | One row per agent invocation, tracks lifecycle state for the run |
+| `agent_rounds` | One row per inference round within a run |
+| `transcript_entries` | Conversation transcript entries (user, assistant, tool, system), ordered by time |
+| `tool_traces` | Detailed records for tool execution attempts within a round |
+| `run_summaries` | Terminal summaries stored separately from run lifecycle metadata |
 | `capability_locks` | Advisory locks for tool/model exclusivity during agent runs |
 | `cron_jobs` | Scheduled agent tasks with cron expressions |
 
@@ -91,16 +94,19 @@ The gateway's SQLite database stores structured operational state:
 
 ```
 User prompt
-  → messages table (role: "user")
-  → context assembly (SELECT * FROM messages WHERE session_id ORDER BY created_at)
+  → transcript_entries table (role: "user")
+  → context assembly (SELECT * FROM transcript_entries WHERE session_id ORDER BY created_at)
   → LLM inference (via node)
-  → messages table (role: "assistant" or "tool")
+  → agent_rounds table (round status + rationale + selected peer)
+  → transcript_entries table (role: "assistant" or "tool")
+  → tool_traces table (per tool invocation)
   → agent_runs table (status: "completed")
+  → run_summaries table (final summary text)
 ```
 
 ## Categories
 
-- **Conversation / chat transcripts** — stored in `messages` table per session
-- **Daily / session summaries** — stored as `agent_runs.summary`
+- **Conversation / chat transcripts** — stored in `transcript_entries` per session
+- **Daily / session summaries** — stored in `run_summaries`
 - **Core / long-term facts** — SOUL.md and prefill markdown files in git storage
 - **Notes** — Timestamped agent-created notes in git storage

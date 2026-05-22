@@ -125,8 +125,15 @@ pub async fn run_scheduler(
             let run_id = Frame::new_id();
             let idem_key = format!("cron-{job_id}-{}", chrono::Utc::now().timestamp());
 
-            if let Err(e) =
-                super::session::create_run(&pool, &run_id, &run_session_id, &idem_key, None).await
+            if let Err(e) = super::session::create_run(
+                &pool,
+                &run_id,
+                &run_session_id,
+                &idem_key,
+                None,
+                false,
+            )
+            .await
             {
                 tracing::warn!("Failed to create cron run: {e}");
                 update_timestamps().await;

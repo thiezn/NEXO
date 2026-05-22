@@ -217,11 +217,15 @@ async fn node_connects_with_tools_and_models() {
             name: "echo.run".into(),
             description: "Echo input".into(),
             parameters: serde_json::json!({"type": "object"}),
+            contract_version: None,
+            execution: Default::default(),
         },
         ToolSpecEntry {
             name: "ping".into(),
             description: "Returns pong".into(),
             parameters: serde_json::json!({"type": "object"}),
+            contract_version: None,
+            execution: Default::default(),
         },
     ];
     let registered = register_tools(&mut node, tools).await;
@@ -256,6 +260,8 @@ async fn node_connects_with_tools_only() {
         name: "echo.run".into(),
         description: "Echo".into(),
         parameters: serde_json::json!({"type": "object"}),
+        contract_version: None,
+        execution: Default::default(),
     }];
     let registered = register_tools(&mut node, tools).await;
     assert_eq!(registered, 1);
@@ -363,6 +369,8 @@ async fn multiple_nodes_tracked_independently() {
             name: "echo.run".into(),
             description: "Echo".into(),
             parameters: serde_json::json!({"type": "object"}),
+            contract_version: None,
+            execution: Default::default(),
         }],
     )
     .await;

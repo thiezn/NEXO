@@ -36,13 +36,7 @@ impl GatewayToolExecutor {
             .values()
             .map(|t| {
                 let spec = t.spec();
-                ToolEntry {
-                    name: spec.name,
-                    description: spec.description,
-                    source: "gateway".into(),
-                    available: true,
-                    parameters: Some(spec.parameters),
-                }
+                ToolEntry::new(spec, "gateway", true)
             })
             .collect()
     }
@@ -97,7 +91,7 @@ mod tests {
         executor.register(Arc::new(DummyTool));
         let entries = executor.tool_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "dummy.test");
+        assert_eq!(entries[0].spec.name, "dummy.test");
         assert_eq!(entries[0].source, "gateway");
         assert!(entries[0].available);
     }

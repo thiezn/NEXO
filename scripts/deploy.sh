@@ -4,33 +4,108 @@ set -euo pipefail
 ROOT_DIR="$(dirname "$(realpath "$0")")/.."
 cd "$ROOT_DIR" || { echo "❌ Failed to cd into ${ROOT_DIR}"; exit 1; }
 
+ALL_TARGETS=(
+	"nexo-gateway"
+	"nexo-client"
+	"game-extractor"
+	"epub-extractor"
+	"nexo-node"
+	"nexo-ai"
+)
+
+print_usage() {
+	echo "Usage: ./scripts/deploy.sh [target ...]"
+	echo
+	echo "Deploy all targets when no arguments are provided."
+	echo "Valid targets: ${ALL_TARGETS[*]}"
+}
+
+is_valid_target() {
+	local candidate="$1"
+	local known_target
+	for known_target in "${ALL_TARGETS[@]}"; do
+		if [[ "$known_target" == "$candidate" ]]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+binary_for_target() {
+	local target="$1"
+	case "$target" in
+		"nexo-gateway")
+			echo "nexo"
+			;;
+		*)
+			echo "$target"
+			;;
+	esac
+}
+
+should_update_inference_tools() {
+	local target
+	for target in "$@"; do
+		case "$target" in
+			"nexo-node"|"nexo-ai")
+				return 0
+				;;
+		esac
+	done
+	return 1
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+	print_usage
+	exit 0
+fi
+
+DEPLOY_TARGETS=()
+if [[ "$#" -eq 0 ]]; then
+	DEPLOY_TARGETS=("${ALL_TARGETS[@]}")
+else
+	for requested_target in "$@"; do
+		if ! is_valid_target "$requested_target"; then
+			echo "❌ Unknown deploy target: $requested_target"
+			print_usage
+			exit 1
+		fi
+		DEPLOY_TARGETS+=("$requested_target")
+	done
+fi
+
+# Clean up build artifacts
+echo "Cleaning up previous build artifacts..."
+cargo clean
 
 # First test and build the production apps
 # cargo test --release
 # echo "Tests passed"
 
-echo "Building the production binaries..."
-cargo build --release
+echo "Building the production binaries for: ${DEPLOY_TARGETS[*]}"
+BUILD_COMMAND=(cargo build --release)
+for deploy_target in "${DEPLOY_TARGETS[@]}"; do
+	BUILD_COMMAND+=(-p "$deploy_target")
+done
+"${BUILD_COMMAND[@]}"
 
-sudo cp ./target/release/nexo /usr/local/bin
-sudo cp ./target/release/nexo-client /usr/local/bin
-sudo cp ./target/release/game-extractor /usr/local/bin
-sudo cp ./target/release/epub-extractor /usr/local/bin
-sudo cp ./target/release/nexo-node /usr/local/bin
-sudo cp ./target/release/nexo-ai /usr/local/bin
+for deploy_target in "${DEPLOY_TARGETS[@]}"; do
+	binary_name="$(binary_for_target "$deploy_target")"
+	sudo cp "./target/release/${binary_name}" /usr/local/bin
+done
 
 # Now change the permissions of the binaries so that they can be executed by anyone.
 echo "Setting permissions for the binaries..."
-sudo chown root:admin /usr/local/bin/nexo
-sudo chown root:admin /usr/local/bin/nexo-client
-sudo chown root:admin /usr/local/bin/game-extractor
-sudo chown root:admin /usr/local/bin/epub-extractor
-sudo chown root:admin /usr/local/bin/nexo-node
-sudo chown root:admin /usr/local/bin/nexo-ai
+for deploy_target in "${DEPLOY_TARGETS[@]}"; do
+	binary_name="$(binary_for_target "$deploy_target")"
+	sudo chown root:admin "/usr/local/bin/${binary_name}"
+done
 
-# Updating local inference tools
-source /Users/Mathijs.Mortimer/Development/utilities/.venv/bin/activate
-uv pip install --upgrade mlx-vlm mlx-audio
+if should_update_inference_tools "${DEPLOY_TARGETS[@]}"; then
+	echo "Updating local inference tools..."
+	source /Users/Mathijs.Mortimer/Development/utilities/.venv/bin/activate
+	uv pip install --upgrade mlx-vlm mlx-audio
+fi
 
 # Verify the permissions
 # ls -ltrah /usr/local/bin/* | grep "\-rwx"

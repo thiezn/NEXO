@@ -112,15 +112,7 @@ agent commands sequentially. When a client sends an `agent` request:
 4. Lifecycle events (`thinking`, `tool_call`, `streaming`, `completed`) are broadcast
    to all connected clients via the event channel
 
-```mermaid
-flowchart LR
-    Client -->|request:agent| Handler
-    Handler -->|AgentCommand| Brain
-    Brain -->|inference request| Node
-    Node -->|response| Brain
-    Brain -->|event:agent| Client
-    Brain -->|tools.execute| Node
-```
+Details: [Agent Loop](/nexo/agent_loop.md)
 
 ### Capability locking
 

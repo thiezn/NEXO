@@ -24,10 +24,7 @@ impl ConversationManager {
     pub fn with_system_prompt(prompt: String) -> Self {
         let content = prompt.clone();
         Self {
-            messages: vec![ChatMessage {
-                role: ChatRole::System,
-                content,
-            }],
+            messages: vec![ChatMessage::new(ChatRole::System, content)],
             system_prompt: Some(prompt),
             reasoning: ReasoningMode::default(),
         }
@@ -46,10 +43,8 @@ impl ConversationManager {
     pub fn clear(&mut self) {
         self.messages.clear();
         if let Some(ref prompt) = self.system_prompt {
-            self.messages.push(ChatMessage {
-                role: ChatRole::System,
-                content: prompt.clone(),
-            });
+            self.messages
+                .push(ChatMessage::new(ChatRole::System, prompt.clone()));
         }
     }
 
@@ -98,10 +93,10 @@ impl ConversationManager {
         if let Some(sys) = system_msg {
             self.messages.push(sys);
         }
-        self.messages.push(ChatMessage {
-            role: ChatRole::System,
-            content: format!("Previous conversation summary: {summary}"),
-        });
+        self.messages.push(ChatMessage::new(
+            ChatRole::System,
+            format!("Previous conversation summary: {summary}"),
+        ));
         self.messages.extend(last_pair);
     }
 
@@ -165,14 +160,8 @@ mod tests {
     #[test]
     fn push_and_turn_count() {
         let mut cm = ConversationManager::new();
-        cm.push(ChatMessage {
-            role: ChatRole::User,
-            content: "hi".into(),
-        });
-        cm.push(ChatMessage {
-            role: ChatRole::Assistant,
-            content: "hello".into(),
-        });
+        cm.push(ChatMessage::new(ChatRole::User, "hi"));
+        cm.push(ChatMessage::new(ChatRole::Assistant, "hello"));
         assert_eq!(cm.turn_count(), 1);
         assert_eq!(cm.messages().len(), 2);
     }
@@ -180,10 +169,7 @@ mod tests {
     #[test]
     fn clear_keeps_system_prompt() {
         let mut cm = ConversationManager::with_system_prompt("system".into());
-        cm.push(ChatMessage {
-            role: ChatRole::User,
-            content: "hi".into(),
-        });
+        cm.push(ChatMessage::new(ChatRole::User, "hi"));
         assert_eq!(cm.messages().len(), 2);
         cm.clear();
         assert_eq!(cm.messages().len(), 1);
@@ -193,10 +179,7 @@ mod tests {
     #[test]
     fn clear_empty_without_system() {
         let mut cm = ConversationManager::new();
-        cm.push(ChatMessage {
-            role: ChatRole::User,
-            content: "hi".into(),
-        });
+        cm.push(ChatMessage::new(ChatRole::User, "hi"));
         cm.clear();
         assert!(cm.messages().is_empty());
     }
@@ -205,14 +188,8 @@ mod tests {
     fn slide_keeps_last_n_turns() {
         let mut cm = ConversationManager::with_system_prompt("sys".into());
         for i in 0..4 {
-            cm.push(ChatMessage {
-                role: ChatRole::User,
-                content: format!("q{i}"),
-            });
-            cm.push(ChatMessage {
-                role: ChatRole::Assistant,
-                content: format!("a{i}"),
-            });
+            cm.push(ChatMessage::new(ChatRole::User, format!("q{i}")));
+            cm.push(ChatMessage::new(ChatRole::Assistant, format!("a{i}")));
         }
         // 1 system + 8 messages = 9
         assert_eq!(cm.messages().len(), 9);

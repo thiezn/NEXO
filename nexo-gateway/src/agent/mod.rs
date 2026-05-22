@@ -2,10 +2,11 @@ pub mod context;
 pub mod cron;
 pub mod gateway_tools;
 pub mod locks;
-pub mod loop_runner;
+pub mod r#loop;
 pub mod prefill;
 pub mod queue;
 pub mod session;
+pub mod tool_orchestrator;
 
 use crate::server::state::SharedState;
 use nexo_ws_schema::Frame;
@@ -75,7 +76,7 @@ async fn agent_task(
                 tracing::info!(
                     "Starting agent run {run_id} (session={session_id}, thinking={thinking})"
                 );
-                loop_runner::run(
+                r#loop::start_run(
                     &run_id,
                     &session_id,
                     &prompt,

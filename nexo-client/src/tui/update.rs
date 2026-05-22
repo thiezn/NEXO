@@ -619,7 +619,9 @@ fn handle_agent_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effe
     stream.status = event.status;
     stream.tool_name = event.tool_name.clone();
     stream.error = event.error.clone();
-    if let Some(content) = &event.content {
+    if matches!(event.status, AgentStatus::Streaming | AgentStatus::Accepted)
+        && let Some(content) = &event.content
+    {
         stream.content = content.clone();
     }
 
@@ -632,7 +634,15 @@ fn handle_agent_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effe
         AgentStatus::Thinking => {}
         AgentStatus::ToolCall => {
             let tool_name = event.tool_name.unwrap_or_else(|| "unknown".to_string());
-            model.push_log(LogKind::Info, "agent tool", tool_name);
+            if let Some(content) = event.content {
+                model.push_log(
+                    LogKind::Info,
+                    "agent tool result",
+                    format!("{tool_name}\n{content}"),
+                );
+            } else {
+                model.push_log(LogKind::Info, "agent tool", tool_name);
+            }
         }
         AgentStatus::Streaming | AgentStatus::Accepted => {}
         AgentStatus::Completed => {

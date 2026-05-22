@@ -555,6 +555,112 @@ async fn dispatch_agent_returns_accepted_with_session(pool: SqlitePool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn dispatch_agent_stop_marks_run_cancelled(pool: SqlitePool) {
+    let state = make_state();
+    let ah = make_agent_handle(&state, &pool);
+
+    sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO users (id, device_id) VALUES ('cli', 'dev-1')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO sessions (id, user_id) VALUES ('sess-1', 'cli')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO agent_runs (id, session_id, idempotency_key, status) VALUES ('run-1', 'sess-1', 'idem-1', 'accepted')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let resp = dispatch(
+        "req-1",
+        &Method::AgentStop,
+        serde_json::json!({"runId": "run-1"}),
+        "p1",
+        &state,
+        &pool,
+        &ah,
+    )
+    .await;
+    if let Frame::Response { ok, payload, .. } = resp {
+        assert!(ok);
+        assert_eq!(payload.unwrap()["stopped"], true);
+    } else {
+        panic!("Expected response");
+    }
+
+    let (status, finished_at): (String, Option<String>) =
+        sqlx::query_as("SELECT status, finished_at FROM agent_runs WHERE id = 'run-1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "cancelled");
+    assert!(finished_at.is_some());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn dispatch_agent_context_append_persists_message(pool: SqlitePool) {
+    let state = make_state();
+    let ah = make_agent_handle(&state, &pool);
+
+    sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO users (id, device_id) VALUES ('cli', 'dev-1')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO sessions (id, user_id) VALUES ('sess-1', 'cli')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO agent_runs (id, session_id, idempotency_key, status) VALUES ('run-1', 'sess-1', 'idem-1', 'accepted')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let resp = dispatch(
+        "req-1",
+        &Method::AgentContextAppend,
+        serde_json::json!({
+            "runId": "run-1",
+            "context": {"notes": ["agent_loop.md"]}
+        }),
+        "p1",
+        &state,
+        &pool,
+        &ah,
+    )
+    .await;
+    if let Frame::Response { ok, payload, .. } = resp {
+        assert!(ok);
+        let payload = payload.unwrap();
+        assert_eq!(payload["queued"], true);
+        assert!(payload["messageId"].as_str().is_some());
+    } else {
+        panic!("Expected response");
+    }
+
+    let (role, content): (String, String) = sqlx::query_as(
+        "SELECT role, content FROM transcript_entries WHERE run_id = 'run-1' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(role, "system");
+    assert!(content.contains("agent_loop.md"));
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn dispatch_cron_create_and_list(pool: SqlitePool) {
     let state = make_state();
     let ah = make_agent_handle(&state, &pool);

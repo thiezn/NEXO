@@ -3,7 +3,7 @@ use nexo_ws_schema::Frame;
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
-/// Drain all queued agent runs, submitting them to the loop runner in the order they were queued.
+/// Drain all queued agent runs, resuming them in the order they were queued.
 ///
 /// This is called whenever a new LLM-capable node connects. Since `agent_task` is a single async
 /// task, all DrainQueue commands serialize naturally — there is no double-drain race.
@@ -18,16 +18,8 @@ pub async fn drain_queue(
     }
 
     // Fetch all queued runs in order they were queued
-    let queued: Vec<(
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    )> = match sqlx::query_as(
-        "SELECT ar.id, ar.session_id, ar.queued_prompt, ar.queued_context,
-                    ar.model_id, ar.queued_peer_id
+    let queued: Vec<(String, String, Option<String>, i64)> = match sqlx::query_as(
+        "SELECT ar.id, ar.session_id, ar.model_id, ar.thinking
             FROM agent_runs ar
             WHERE ar.status = 'queued'
             ORDER BY ar.queued_at ASC",
@@ -48,7 +40,7 @@ pub async fn drain_queue(
 
     tracing::info!("Draining {} queued agent run(s)", queued.len());
 
-    for (run_id, session_id, prompt, context_json, model_id, peer_id) in queued {
+    for (run_id, session_id, model_id, thinking) in queued {
         // Claim the run by setting status to 'accepted'. This prevents re-processing if another
         // DrainQueue is somehow triggered before this one finishes.
         let result = sqlx::query(
@@ -71,12 +63,6 @@ pub async fn drain_queue(
             }
         }
 
-        let context: Option<serde_json::Value> = context_json
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok());
-
-        let peer_id_ref = peer_id.as_deref().unwrap_or("queue-drain");
-
         tracing::info!("Resuming queued run {run_id} (session={session_id})");
 
         // Look up the session's prefill_collection_id for this queued run
@@ -90,18 +76,16 @@ pub async fn drain_queue(
         .flatten()
         .and_then(|(c,)| c);
 
-        super::loop_runner::run(
+        super::r#loop::resume_run(
             &run_id,
             &session_id,
-            &prompt,
-            context.as_ref(),
-            peer_id_ref,
+            "queue-drain",
             db,
             state,
             event_tx,
             model_id.as_deref(),
             prefill_collection_id.as_deref(),
-            false, // thinking not preserved for queued runs
+            thinking != 0,
         )
         .await;
     }

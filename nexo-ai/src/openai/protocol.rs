@@ -67,7 +67,27 @@ pub struct OpenAiChatRequest {
 #[derive(Debug, Serialize)]
 pub struct OpenAiMessage {
     pub role: String,
-    pub content: OpenAiContent,
+    pub content: Option<OpenAiContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<OpenAiRequestToolCall>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenAiRequestToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: OpenAiRequestToolFunction,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenAiRequestToolFunction {
+    pub name: String,
+    pub arguments: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -205,7 +225,10 @@ mod tests {
     fn text_content_serializes_as_string() {
         let msg = OpenAiMessage {
             role: "user".to_string(),
-            content: OpenAiContent::Text("hello".to_string()),
+            content: Some(OpenAiContent::Text("hello".to_string())),
+            tool_call_id: None,
+            name: None,
+            tool_calls: None,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["content"], "hello");
@@ -215,7 +238,7 @@ mod tests {
     fn parts_content_serializes_as_array() {
         let msg = OpenAiMessage {
             role: "user".to_string(),
-            content: OpenAiContent::Parts(vec![
+            content: Some(OpenAiContent::Parts(vec![
                 OpenAiContentPart::Text {
                     text: "describe this".to_string(),
                 },
@@ -224,7 +247,10 @@ mod tests {
                         url: "data:image/png;base64,abc".to_string(),
                     },
                 },
-            ]),
+            ])),
+            tool_call_id: None,
+            name: None,
+            tool_calls: None,
         };
         let json = serde_json::to_value(&msg).unwrap();
         let parts = json["content"].as_array().unwrap();
@@ -252,7 +278,10 @@ mod tests {
             model: "test-model".to_string(),
             messages: vec![OpenAiMessage {
                 role: "user".to_string(),
-                content: OpenAiContent::Text("hi".to_string()),
+                content: Some(OpenAiContent::Text("hi".to_string())),
+                tool_call_id: None,
+                name: None,
+                tool_calls: None,
             }],
             max_tokens: 100,
             temperature: 0.7,
@@ -271,7 +300,10 @@ mod tests {
             model: "test-model".to_string(),
             messages: vec![OpenAiMessage {
                 role: "user".to_string(),
-                content: OpenAiContent::Text("hi".to_string()),
+                content: Some(OpenAiContent::Text("hi".to_string())),
+                tool_call_id: None,
+                name: None,
+                tool_calls: None,
             }],
             max_tokens: 100,
             temperature: 0.7,
@@ -286,6 +318,7 @@ mod tests {
                             "city": {"type": "string"}
                         }
                     }),
+                    ..Default::default()
                 },
             )]),
         };
@@ -297,6 +330,28 @@ mod tests {
             json["tools"][0]["function"]["description"],
             "Get the weather"
         );
+    }
+
+    #[test]
+    fn assistant_tool_turn_can_serialize_null_content() {
+        let msg = OpenAiMessage {
+            role: "assistant".to_string(),
+            content: None,
+            tool_call_id: None,
+            name: None,
+            tool_calls: Some(vec![OpenAiRequestToolCall {
+                id: "call-1".to_string(),
+                tool_type: "function".to_string(),
+                function: OpenAiRequestToolFunction {
+                    name: "io.bash".to_string(),
+                    arguments: r#"{"command":"ls"}"#.to_string(),
+                },
+            }]),
+        };
+
+        let json = serde_json::to_value(&msg).unwrap();
+        assert!(json["content"].is_null());
+        assert_eq!(json["tool_calls"][0]["id"], "call-1");
     }
 
     #[test]
