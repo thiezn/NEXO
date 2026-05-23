@@ -25,11 +25,11 @@ use nexo_ai::api::model_traits::ModelInfo;
 use nexo_ai::api::types::{
     ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, ModelCategory, ToolCallRequest,
 };
-use nexo_ai::models::gemma4::openai::{Gemma4OpenAiFamily, default_request_model_id};
-use nexo_ai::openai::client::OpenAiClient;
-use nexo_ai::openai::model::OpenAiModel;
-use nexo_ai::openai::protocol::{OpenAiChatRequest, OpenAiContent, OpenAiMessage, OpenAiModelInfo};
-use nexo_ai::servers::mlx_vlm::{MlxHealthInfo, MlxVlmHandle};
+use nexo_ai::inference::models::gemma4::openai::{Gemma4OpenAiFamily, default_request_model_id};
+use nexo_ai::inference::remote::openai::client::OpenAiClient;
+use nexo_ai::inference::remote::openai::model::OpenAiModel;
+use nexo_ai::inference::remote::openai::protocol::{OpenAiChatRequest, OpenAiContent, OpenAiMessage, OpenAiModelInfo};
+use nexo_ai::inference::remote::servers::mlx_vlm::{MlxHealthInfo, MlxVlmHandle};
 
 const DEFAULT_VENV_PATH: &str = "/Users/Mathijs.Mortimer/Development/utilities/.venv";
 const SERVER_HOST: &str = "127.0.0.1";

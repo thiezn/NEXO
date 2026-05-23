@@ -1,8 +1,8 @@
 //! Session-local KV cache persistence helpers used by inference handlers.
 
 use anyhow::Result;
-use nexo_ai::api::kv_cache::PersistedKvCacheMetadata as CacheMetadata;
 use nexo_ai::api::model_traits::KvCacheable;
+use nexo_ai::inference::candle::kv_cache::PersistedKvCacheMetadata as CacheMetadata;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -121,7 +121,7 @@ impl SessionCacheManager {
 }
 
 fn save_to_disk(dir: &Path, model_name: &str, model: &dyn KvCacheable) -> Result<bool> {
-    nexo_ai::api::kv_cache::save_model_cache_to_disk(dir, model_name, model)
+    nexo_ai::inference::candle::kv_cache::save_model_cache_to_disk(dir, model_name, model)
 }
 
 fn load_from_disk(
@@ -129,11 +129,11 @@ fn load_from_disk(
     session_id: &str,
     model: &mut dyn KvCacheable,
 ) -> Result<Option<CacheMetadata>> {
-    nexo_ai::api::kv_cache::load_model_cache_from_disk(dir, session_id, model)
+    nexo_ai::inference::candle::kv_cache::load_model_cache_from_disk(dir, session_id, model)
 }
 
 fn expire_old_caches(dir: &Path, max_entries: usize, max_age: Duration) -> Result<usize> {
-    nexo_ai::api::kv_cache::expire_model_caches_on_disk(dir, max_entries, max_age)
+    nexo_ai::inference::candle::kv_cache::expire_model_caches_on_disk(dir, max_entries, max_age)
 }
 
 #[cfg(test)]

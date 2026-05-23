@@ -1,4 +1,4 @@
-use crate::device;
+use crate::inference::candle::device;
 use anyhow::Result;
 
 impl super::Coordinator {

@@ -1,6 +1,6 @@
 use crate::api::types::{ChatMessage, ChatRole, ModelCategory};
 use crate::coordinator::Coordinator;
-use crate::models::support::conversation::ConversationManager;
+use crate::inference::models::support::conversation::ConversationManager;
 use crate::registry::{find_manifest, known_manifests};
 use crate::statistics::display as stats_display;
 use anyhow::Result;

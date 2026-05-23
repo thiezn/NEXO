@@ -1,5 +1,5 @@
 use crate::api::types::ModelCategory;
-use crate::device;
+use crate::inference::candle::device;
 use crate::registry::find_manifest;
 use anyhow::Result;
 

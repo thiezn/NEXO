@@ -11,7 +11,7 @@ use crate::registry::CandleBackend;
 use crate::registry::OpenAiProvider;
 use crate::registry::{AiModelManifest, ModelFamily, ModelRuntime};
 #[cfg(feature = "mlx")]
-use crate::servers::ManagedProviderServers;
+use crate::inference::remote::servers::ManagedProviderServers;
 
 pub(super) struct ModelFactory<'a> {
     config: &'a CoordinatorConfig,
@@ -50,7 +50,7 @@ impl<'a> ModelFactory<'a> {
         match (manifest.family, &manifest.runtime) {
             #[cfg(feature = "candle")]
             (ModelFamily::Whisper, ModelRuntime::Candle(CandleBackend::Safetensors)) => {
-                Ok(Box::new(crate::models::whisper::WhisperModel::new(
+                Ok(Box::new(crate::inference::models::whisper::WhisperModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
@@ -58,7 +58,7 @@ impl<'a> ModelFactory<'a> {
             }
             #[cfg(feature = "candle")]
             (ModelFamily::Flux, ModelRuntime::Candle(CandleBackend::Safetensors)) => {
-                Ok(Box::new(crate::models::flux2::FluxModel::new(
+                Ok(Box::new(crate::inference::models::flux2::FluxModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
@@ -66,7 +66,7 @@ impl<'a> ModelFactory<'a> {
             }
             #[cfg(feature = "candle")]
             (ModelFamily::ZImage, ModelRuntime::Candle(CandleBackend::Gguf)) => {
-                Ok(Box::new(crate::models::z_image::ZImageModel::new(
+                Ok(Box::new(crate::inference::models::z_image::ZImageModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
@@ -74,7 +74,7 @@ impl<'a> ModelFactory<'a> {
             }
             #[cfg(feature = "candle")]
             (ModelFamily::QwenImage, ModelRuntime::Candle(_)) => {
-                Ok(Box::new(crate::models::qwen_image::QwenImageModel::new(
+                Ok(Box::new(crate::inference::models::qwen_image::QwenImageModel::new(
                     model_name.to_string(),
                     memory_bytes,
                     model_dir,
@@ -84,7 +84,7 @@ impl<'a> ModelFactory<'a> {
             (ModelFamily::Gemma4, ModelRuntime::Candle(backend)) => {
                 let settings = self.config.model_settings(model_name);
                 Ok(Box::new(
-                    crate::models::gemma4::Gemma4Model::new(
+                    crate::inference::models::gemma4::Gemma4Model::new(
                         model_name.to_string(),
                         memory_bytes,
                         model_dir,
@@ -104,12 +104,12 @@ impl<'a> ModelFactory<'a> {
                 let (host, port) = self.config.mlx_vlm_server_addr();
                 let server = self.provider_servers.mlx_vlm(self.config);
                 let base_url = format!("http://{host}:{port}");
-                Ok(Box::new(crate::openai::model::OpenAiModel::new(
+                Ok(Box::new(crate::inference::remote::openai::model::OpenAiModel::new(
                     model_name,
                     model_dir,
                     memory_bytes,
                     categories,
-                    crate::models::gemma4::openai::Gemma4OpenAiFamily,
+                    crate::inference::models::gemma4::openai::Gemma4OpenAiFamily,
                     server,
                     &base_url,
                 )))
@@ -126,7 +126,7 @@ impl<'a> ModelFactory<'a> {
                 let server = self.provider_servers.mlx_audio(self.config);
                 let base_url = format!("http://{host}:{port}");
                 Ok(Box::new(
-                    crate::models::whisper::openai::build_whisper_openai_model(
+                    crate::inference::models::whisper::openai::build_whisper_openai_model(
                         model_name.to_string(),
                         model_dir.to_string_lossy().into_owned(),
                         memory_bytes,
@@ -147,7 +147,7 @@ impl<'a> ModelFactory<'a> {
                 let server = self.provider_servers.mlx_audio(self.config);
                 let base_url = format!("http://{host}:{port}");
                 Ok(Box::new(
-                    crate::models::voxtral::openai::build_voxtral_openai_model(
+                    crate::inference::models::voxtral::openai::build_voxtral_openai_model(
                         model_name.to_string(),
                         model_dir.to_string_lossy().into_owned(),
                         memory_bytes,

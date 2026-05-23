@@ -44,7 +44,7 @@ macro_rules! listen_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = nexo_ai::models::whisper::WhisperModel::new(
+            let mut model = nexo_ai::inference::models::whisper::WhisperModel::new(
                 $model_name.into(),
                 memory_bytes,
                 model_dir,
@@ -121,42 +121,42 @@ macro_rules! imagine_test {
 imagine_test!(
     test_flux_2_klein_4b,
     "flux-2-klein-4b",
-    nexo_ai::models::flux2::FluxModel
+    nexo_ai::inference::models::flux2::FluxModel
 );
 imagine_test!(
     test_flux_2_klein_9b,
     "flux-2-klein-9b",
-    nexo_ai::models::flux2::FluxModel
+    nexo_ai::inference::models::flux2::FluxModel
 );
 imagine_test!(
     test_flux_2_dev,
     "flux-2-dev",
-    nexo_ai::models::flux2::FluxModel
+    nexo_ai::inference::models::flux2::FluxModel
 );
 imagine_test!(
     test_z_image_turbo,
     "z-image-turbo",
-    nexo_ai::models::z_image::ZImageModel
+    nexo_ai::inference::models::z_image::ZImageModel
 );
 imagine_test!(
     test_qwen_image_q4,
     "qwen-image-q4",
-    nexo_ai::models::qwen_image::QwenImageModel
+    nexo_ai::inference::models::qwen_image::QwenImageModel
 );
 imagine_test!(
     test_qwen_image_q6,
     "qwen-image-q6",
-    nexo_ai::models::qwen_image::QwenImageModel
+    nexo_ai::inference::models::qwen_image::QwenImageModel
 );
 imagine_test!(
     test_qwen_image_q8,
     "qwen-image-q8",
-    nexo_ai::models::qwen_image::QwenImageModel
+    nexo_ai::inference::models::qwen_image::QwenImageModel
 );
 imagine_test!(
     test_qwen_image_bf16,
     "qwen-image-bf16",
-    nexo_ai::models::qwen_image::QwenImageModel
+    nexo_ai::inference::models::qwen_image::QwenImageModel
 );
 
 // ── Imagine (File Output) ───────────────────────────────────────────────────
@@ -248,7 +248,7 @@ macro_rules! imagine_file_test {
 imagine_file_test!(
     test_z_image_turbo_avocado,
     "z-image-turbo",
-    nexo_ai::models::z_image::ZImageModel,
+    nexo_ai::inference::models::z_image::ZImageModel,
     "avocado",
     "z-image-test-avocado.png",
     4
@@ -257,7 +257,7 @@ imagine_file_test!(
 imagine_file_test!(
     test_flux_2_klein_4b_avocado,
     "flux-2-klein-4b",
-    nexo_ai::models::flux2::FluxModel,
+    nexo_ai::inference::models::flux2::FluxModel,
     "avocado",
     "flux-test-avocado.png",
     4
@@ -308,27 +308,27 @@ macro_rules! chat_test {
 chat_test!(
     test_gemma_4_e4b_chat,
     "gemma-4-e4b",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 chat_test!(
     test_gemma_4_e2b_it_chat,
     "gemma-4-e2b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 chat_test!(
     test_gemma_4_e4b_it_chat,
     "gemma-4-e4b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 chat_test!(
     test_gemma_4_26b_a4b_it_chat,
     "gemma-4-26b-a4b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 chat_test!(
     test_gemma_4_31b_it_chat,
     "gemma-4-31b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 
 // ── Gemma 4 (Performance) ──────────────────────────────────────────────────
@@ -406,25 +406,25 @@ perf_test!(
     test_gemma_4_e2b_it_perf,
     "gemma-4-e2b-it",
     15.0,
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 perf_test!(
     test_gemma_4_e4b_it_perf,
     "gemma-4-e4b-it",
     10.0,
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 perf_test!(
     test_gemma_4_26b_a4b_it_perf,
     "gemma-4-26b-a4b-it",
     5.0,
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 perf_test!(
     test_gemma_4_31b_it_perf,
     "gemma-4-31b-it",
     2.0,
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 
 // ── Gemma 4 (Tool) ─────────────────────────────────────────────────────────
@@ -488,22 +488,22 @@ macro_rules! tool_test {
 tool_test!(
     test_gemma_4_e2b_it_tool,
     "gemma-4-e2b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 tool_test!(
     test_gemma_4_e4b_it_tool,
     "gemma-4-e4b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 tool_test!(
     test_gemma_4_26b_a4b_it_tool,
     "gemma-4-26b-a4b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 tool_test!(
     test_gemma_4_31b_it_tool,
     "gemma-4-31b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 
 // ── Gemma 4 GGUF (Chat) ───────────────────────────────────────────────────
@@ -519,7 +519,7 @@ macro_rules! gguf_chat_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = nexo_ai::models::gemma4::Gemma4Model::new(
+            let mut model = nexo_ai::inference::models::gemma4::Gemma4Model::new(
                 $model_name.into(),
                 memory_bytes,
                 model_dir,
@@ -579,7 +579,7 @@ macro_rules! gguf_image_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = nexo_ai::models::gemma4::Gemma4Model::new(
+            let mut model = nexo_ai::inference::models::gemma4::Gemma4Model::new(
                 $model_name.into(),
                 memory_bytes,
                 model_dir,
@@ -633,7 +633,7 @@ macro_rules! gguf_audio_test {
         #[timeout(600_000)]
         fn $name() {
             let (model_dir, memory_bytes) = resolve_model($model_name);
-            let mut model = nexo_ai::models::gemma4::Gemma4Model::new(
+            let mut model = nexo_ai::inference::models::gemma4::Gemma4Model::new(
                 $model_name.into(),
                 memory_bytes,
                 model_dir,
@@ -722,20 +722,20 @@ macro_rules! image_test {
 image_test!(
     test_gemma_4_e2b_it_image,
     "gemma-4-e2b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 image_test!(
     test_gemma_4_e4b_it_image,
     "gemma-4-e4b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 image_test!(
     test_gemma_4_26b_a4b_it_image,
     "gemma-4-26b-a4b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );
 image_test!(
     test_gemma_4_31b_it_image,
     "gemma-4-31b-it",
-    nexo_ai::models::gemma4::Gemma4Model
+    nexo_ai::inference::models::gemma4::Gemma4Model
 );

@@ -12,8 +12,8 @@ use std::thread;
 use anyhow::Result;
 use nexo_ai::api::model_traits::{ModelInfo, ToolModel};
 use nexo_ai::api::types::{ChatMessage, ChatRole, ModelCategory, ToolCallRequest};
-use nexo_ai::models::gemma4::openai::Gemma4OpenAiFamily;
-use nexo_ai::openai::model::{OpenAiModel, OpenAiServerControl};
+use nexo_ai::inference::models::gemma4::openai::Gemma4OpenAiFamily;
+use nexo_ai::inference::remote::openai::model::{OpenAiModel, OpenAiServerControl};
 
 #[derive(Clone, Default)]
 struct NoopServer;
