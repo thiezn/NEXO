@@ -1,3 +1,5 @@
+//! WebSocket handler for image analysis requests.
+
 use crate::server::state::SharedState;
 use nexo_ws_schema::{ErrorPayload, Frame, Method};
 

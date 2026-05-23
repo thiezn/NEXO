@@ -1,8 +1,11 @@
+//! WebSocket handlers for cron management requests.
+
 use nexo_ws_schema::{CronCreateParams, CronDeleteParams, Frame};
 use sqlx::SqlitePool;
 
 use super::base::{internal_error, ok_or_internal_error, parse_params};
 
+/// Handle `cron.create` requests from connected peers.
 pub(super) async fn handle_create(
     request_id: &str,
     params: serde_json::Value,
@@ -29,6 +32,7 @@ pub(super) async fn handle_create(
     }
 }
 
+/// Handle `cron.list` requests from connected peers.
 pub(super) async fn handle_list(request_id: &str, db: &SqlitePool) -> Frame {
     match crate::agent::cron::list_jobs(db).await {
         Ok(jobs) => ok_or_internal_error(request_id, nexo_ws_schema::CronListResponse { jobs }),
@@ -36,6 +40,7 @@ pub(super) async fn handle_list(request_id: &str, db: &SqlitePool) -> Frame {
     }
 }
 
+/// Handle `cron.delete` requests from connected peers.
 pub(super) async fn handle_delete(
     request_id: &str,
     params: serde_json::Value,

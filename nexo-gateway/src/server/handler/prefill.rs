@@ -1,3 +1,5 @@
+//! WebSocket handlers for prefill markdown and collection management.
+
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
     ErrorPayload, Frame, PrefillCollectionCreateParams, PrefillCollectionDeleteParams,
@@ -6,6 +8,7 @@ use nexo_ws_schema::{
 
 use super::base::{git_blocking, ok_or_internal_error, parse_params};
 
+/// Reject the deprecated `prefill.fetch` request.
 pub(super) fn handle_fetch_deprecated(request_id: &str) -> Frame {
     Frame::error_response(
         request_id,
@@ -18,6 +21,7 @@ pub(super) fn handle_fetch_deprecated(request_id: &str) -> Frame {
     )
 }
 
+/// Handle `prefill.markdown.create` requests.
 pub(super) async fn handle_markdown_create(
     request_id: &str,
     params: serde_json::Value,
@@ -30,7 +34,7 @@ pub(super) async fn handle_markdown_create(
         };
     let filename = p.filename.clone();
     match git_blocking(request_id, state, move |git| {
-        crate::agent::prefill::create_markdown(&git, &p.filename, &p.content)
+        crate::agent::context::create_context_document(&git, &p.filename, &p.content)
     })
     .await
     {
@@ -42,9 +46,10 @@ pub(super) async fn handle_markdown_create(
     }
 }
 
+/// Handle `prefill.markdown.list` requests.
 pub(super) async fn handle_markdown_list(request_id: &str, state: &SharedState) -> Frame {
     match git_blocking(request_id, state, |git| {
-        crate::agent::prefill::list_markdown(&git)
+        crate::agent::context::list_context_documents(&git)
     })
     .await
     {
@@ -63,6 +68,7 @@ pub(super) async fn handle_markdown_list(request_id: &str, state: &SharedState) 
     }
 }
 
+/// Handle `prefill.markdown.delete` requests.
 pub(super) async fn handle_markdown_delete(
     request_id: &str,
     params: serde_json::Value,
@@ -74,7 +80,7 @@ pub(super) async fn handle_markdown_delete(
             Err(f) => return f,
         };
     match git_blocking(request_id, state, move |git| {
-        crate::agent::prefill::delete_markdown(&git, &p.filename)
+        crate::agent::context::delete_context_document(&git, &p.filename)
     })
     .await
     {
@@ -86,6 +92,7 @@ pub(super) async fn handle_markdown_delete(
     }
 }
 
+/// Handle `prefill.collection.create` requests.
 pub(super) async fn handle_collection_create(
     request_id: &str,
     params: serde_json::Value,
@@ -98,7 +105,7 @@ pub(super) async fn handle_collection_create(
         };
     let collection_id = p.id.clone();
     match git_blocking(request_id, state, move |git| {
-        crate::agent::prefill::create_collection(
+        crate::agent::context::upsert_context_collection(
             &git,
             &p.id,
             &p.name,
@@ -116,9 +123,10 @@ pub(super) async fn handle_collection_create(
     }
 }
 
+/// Handle `prefill.collection.list` requests.
 pub(super) async fn handle_collection_list(request_id: &str, state: &SharedState) -> Frame {
     match git_blocking(request_id, state, |git| {
-        crate::agent::prefill::list_collections(&git)
+        crate::agent::context::list_context_collections(&git)
     })
     .await
     {
@@ -140,6 +148,7 @@ pub(super) async fn handle_collection_list(request_id: &str, state: &SharedState
     }
 }
 
+/// Handle `prefill.collection.delete` requests.
 pub(super) async fn handle_collection_delete(
     request_id: &str,
     params: serde_json::Value,
@@ -151,7 +160,7 @@ pub(super) async fn handle_collection_delete(
             Err(f) => return f,
         };
     match git_blocking(request_id, state, move |git| {
-        crate::agent::prefill::delete_collection(&git, &p.id)
+        crate::agent::context::delete_context_collection(&git, &p.id)
     })
     .await
     {

@@ -1,7 +1,14 @@
+//! Tool execution helpers for the agent loop.
+
 use crate::server::state::SharedState;
 use nexo_ws_schema::{Frame, Method, ToolsExecuteParams, ToolsExecuteResponse};
 
-/// Execute a tool by preferring gateway-native tools before forwarding to a node.
+/// Execute a tool by preferring gateway-local tools before forwarding to a node.
+///
+/// # Errors
+///
+/// Returns an error when the tool is unknown, the hosting node disconnects, the
+/// forwarded request times out, or the gateway-local executor fails.
 pub async fn execute_tool(
     tool_name: &str,
     args: &serde_json::Value,
@@ -93,7 +100,7 @@ pub async fn execute_tool(
     }
 }
 
-/// Derive a capability name from a tool name.
+/// Derive the capability namespace associated with a tool name.
 pub fn tool_capability(tool_name: &str) -> String {
     tool_name.split('.').next().unwrap_or(tool_name).to_string()
 }

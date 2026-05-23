@@ -1,3 +1,5 @@
+//! WebSocket handler for client-to-client send requests.
+
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
     ErrorPayload, EventKind, Frame, MessagePayload, Role, SendParams, SendResponse,
@@ -5,6 +7,7 @@ use nexo_ws_schema::{
 
 use super::base::{ok_or_internal_error, parse_params};
 
+/// Handle `send` requests between connected user peers.
 pub(super) async fn handle_send(
     request_id: &str,
     params: serde_json::Value,

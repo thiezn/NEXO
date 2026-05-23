@@ -1,18 +1,20 @@
+//! Gateway-local tool registry.
+
 use nexo_spec::tool::Tool;
 use nexo_ws_schema::ToolEntry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Executor for tools that run inside the gateway process (no node forwarding).
+/// Stores tools that execute directly inside the gateway process.
 ///
-/// Gateway-native tools (like notes) are registered here at startup and appear
-/// in the tool catalog alongside node-hosted tools. The agent loop checks this
-/// executor first before forwarding tool calls to nodes.
+/// Gateway-native tools are registered during startup and exposed in the
+/// shared tool catalog alongside node-hosted tools.
 pub struct GatewayToolExecutor {
     tools: HashMap<String, Arc<dyn Tool>>,
 }
 
 impl GatewayToolExecutor {
+    /// Create an empty gateway-local tool registry.
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
@@ -24,20 +26,16 @@ impl GatewayToolExecutor {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
-    /// Get a tool by name (for execution). Returns a cloneable `Arc`.
+    /// Look up a registered tool by name.
     pub fn get_tool(&self, name: &str) -> Option<&Arc<dyn Tool>> {
         self.tools.get(name)
     }
 
-    /// Build `ToolEntry` descriptors for all registered gateway-native tools.
-    /// These are always available (not dependent on a connected peer).
+    /// Build tool catalog entries for every registered gateway-local tool.
     pub fn tool_entries(&self) -> Vec<ToolEntry> {
         self.tools
             .values()
-            .map(|t| {
-                let spec = t.spec();
-                ToolEntry::new(spec, "gateway", true)
-            })
+            .map(|tool| ToolEntry::new(tool.spec(), "gateway", true))
             .collect()
     }
 }
@@ -62,12 +60,15 @@ mod tests {
         fn name(&self) -> &str {
             "dummy.test"
         }
+
         fn description(&self) -> &str {
             "A test tool"
         }
+
         fn parameters_schema(&self) -> serde_json::Value {
             serde_json::json!({"type": "object"})
         }
+
         async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<ToolResult> {
             Ok(ToolResult {
                 success: true,

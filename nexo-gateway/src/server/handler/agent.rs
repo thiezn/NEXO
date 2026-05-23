@@ -1,3 +1,5 @@
+//! WebSocket handlers for agent and session lifecycle requests.
+
 use crate::agent::{AgentCommand, AgentHandle};
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
@@ -9,6 +11,7 @@ use sqlx::SqlitePool;
 
 use super::base::{internal_error, ok_or_internal_error, parse_params, resolve_user_id};
 
+/// Handle `agent` requests by creating a run and submitting it to the background task.
 pub(super) async fn handle_agent(
     request_id: &str,
     params: serde_json::Value,
@@ -87,6 +90,7 @@ pub(super) async fn handle_agent(
     )
 }
 
+/// Handle `agent.stop` requests by marking the run as cancelled.
 pub(super) async fn handle_agent_stop(
     request_id: &str,
     params: serde_json::Value,
@@ -127,14 +131,10 @@ pub(super) async fn handle_agent_stop(
         }
     }
 
-    ok_or_internal_error(
-        request_id,
-        AgentStopResponse {
-            stopped,
-        },
-    )
+    ok_or_internal_error(request_id, AgentStopResponse { stopped })
 }
 
+/// Handle `agent.context.append` requests for active runs.
 pub(super) async fn handle_agent_context_append(
     request_id: &str,
     params: serde_json::Value,
@@ -168,6 +168,7 @@ pub(super) async fn handle_agent_context_append(
     )
 }
 
+/// Handle `session.create` requests.
 pub(super) async fn handle_session_create(
     request_id: &str,
     params: serde_json::Value,
@@ -201,6 +202,7 @@ pub(super) async fn handle_session_create(
     }
 }
 
+/// Handle `session.list` requests for the calling user.
 pub(super) async fn handle_session_list(
     request_id: &str,
     peer_id: &str,
@@ -217,6 +219,7 @@ pub(super) async fn handle_session_list(
     }
 }
 
+/// Handle `session.get` requests.
 pub(super) async fn handle_session_get(
     request_id: &str,
     params: serde_json::Value,
@@ -240,6 +243,7 @@ pub(super) async fn handle_session_get(
     }
 }
 
+/// Handle `session.clear` requests.
 pub(super) async fn handle_session_clear(
     request_id: &str,
     params: serde_json::Value,

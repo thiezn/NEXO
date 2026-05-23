@@ -1,5 +1,5 @@
-use crate::agent::gateway_tools::GatewayToolExecutor;
 use crate::memory::git::GitStorage;
+use crate::tools::GatewayToolExecutor;
 use nexo_spec::model::{LoadedModelInfo, ModelCategory};
 use nexo_ws_schema::{Frame, Role, Scope, ToolEntry, ToolSpecEntry};
 use std::collections::HashMap;
@@ -7,36 +7,54 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock, broadcast, mpsc, oneshot};
 
+/// Unique identifier assigned to a connected peer.
 pub type PeerId = String;
 
 /// Information about a connected peer (user or node).
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
+    /// Gateway-generated identifier for this connection.
     pub id: PeerId,
+    /// Stable client identifier provided by the connecting peer.
     pub client_id: String,
+    /// Peer role used for routing and authorization decisions.
     pub role: Role,
+    /// Declared protocol scopes granted to the peer.
     pub scopes: Vec<Scope>,
+    /// Declared capability families available on the peer.
     pub capabilities: Vec<String>,
+    /// Declared command names supported by the peer.
     pub commands: Vec<String>,
+    /// Optional persisted device identifier attached during connect.
     pub device_id: Option<String>,
+    /// Timestamp at which the peer connected to the gateway.
     pub connected_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// A tool registered by a node.
 #[derive(Debug, Clone)]
 pub struct RegisteredTool {
+    /// Tool specification advertised by the node.
     pub spec: ToolSpecEntry,
+    /// Peer currently hosting the tool.
     pub peer_id: PeerId,
+    /// Timestamp at which the tool was registered.
     pub registered_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Shared mutable state for the gateway.
 pub struct GatewayState {
+    /// Connected peers keyed by gateway-assigned peer ID.
     pub peers: HashMap<PeerId, PeerInfo>,
+    /// Directed senders used to push frames to a specific peer.
     pub peer_senders: HashMap<PeerId, mpsc::Sender<Frame>>,
+    /// Node-hosted tool registrations keyed by tool name.
     pub tool_registry: HashMap<String, RegisteredTool>,
+    /// Pending forwarded requests waiting for a response frame.
     pub pending_requests: HashMap<String, oneshot::Sender<Frame>>,
+    /// Broadcast channel used for shared event fan-out.
     pub event_tx: broadcast::Sender<Frame>,
+    /// Timestamp at which the gateway state was initialized.
     pub started_at: chrono::DateTime<chrono::Utc>,
     /// Models currently loaded in VRAM per node with their categories.
     pub loaded_models: HashMap<PeerId, Vec<LoadedModelInfo>>,
@@ -53,6 +71,7 @@ pub struct GatewayState {
 }
 
 impl GatewayState {
+    /// Create a new empty gateway state rooted at the provided storage path.
     pub fn new(storage_root: PathBuf) -> Self {
         let (tx, _) = broadcast::channel(256);
         Self {
@@ -71,6 +90,23 @@ impl GatewayState {
         }
     }
 
+    fn find_node_peer(
+        &self,
+        mut matches: impl FnMut(&PeerId, &PeerInfo) -> bool,
+    ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+        self.peers.iter().find_map(|(peer_id, peer)| {
+            if peer.role != Role::Node || !matches(peer_id, peer) {
+                return None;
+            }
+
+            self.peer_senders
+                .get(peer_id)
+                .cloned()
+                .map(|sender| (peer_id.clone(), sender))
+        })
+    }
+
+    /// Register a newly connected peer and its directed sender channel.
     pub fn add_peer(&mut self, info: PeerInfo, sender: mpsc::Sender<Frame>) {
         tracing::info!(
             "Peer connected: {} (role={:?}, client={})",
@@ -82,6 +118,7 @@ impl GatewayState {
         self.peers.insert(info.id.clone(), info);
     }
 
+    /// Remove a disconnected peer and any state derived from its connection.
     pub fn remove_peer(&mut self, id: &str) {
         if let Some(peer) = self.peers.remove(id) {
             tracing::info!("Peer disconnected: {} (client={})", peer.id, peer.client_id);
@@ -105,19 +142,11 @@ impl GatewayState {
 
     /// Find the first node that has `model_id` loaded in VRAM.
     pub fn find_loaded_llm_peer(&self, model_id: &str) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        for (peer_id, peer) in &self.peers {
-            if peer.role != Role::Node {
-                continue;
-            }
-            if let Some(models) = self.loaded_models.get(peer_id) {
-                if models.iter().any(|m| m.model_id == model_id) {
-                    if let Some(sender) = self.peer_senders.get(peer_id) {
-                        return Some((peer_id.clone(), sender.clone()));
-                    }
-                }
-            }
-        }
-        None
+        self.find_node_peer(|peer_id, _| {
+            self.loaded_models
+                .get(peer_id)
+                .is_some_and(|models| models.iter().any(|model| model.model_id == model_id))
+        })
     }
 
     /// Find the first node that has `model_id` available on disk (not necessarily loaded).
@@ -125,20 +154,13 @@ impl GatewayState {
         &self,
         model_id: &str,
     ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        for (peer_id, peer) in &self.peers {
-            if peer.role != Role::Node {
-                continue;
-            }
-            let has_model = self
-                .available_models
-                .get(peer_id)
-                .is_some_and(|models| models.iter().any(|m| m == model_id));
-
-            if has_model && let Some(sender) = self.peer_senders.get(peer_id) {
-                return Some((peer_id.clone(), sender.clone()));
-            }
-        }
-        None
+        self.find_node_peer(|peer_id, _| {
+            self.available_models.get(peer_id).is_some_and(|models| {
+                models
+                    .iter()
+                    .any(|available_model| available_model == model_id)
+            })
+        })
     }
 
     /// Find the first node that has a loaded model matching the given category predicate.
@@ -146,18 +168,13 @@ impl GatewayState {
         &self,
         pred: impl Fn(&ModelCategory) -> bool,
     ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        for (peer_id, peer) in &self.peers {
-            if peer.role != Role::Node {
-                continue;
-            }
-            if let Some(models) = self.loaded_models.get(peer_id)
-                && models.iter().any(|m| m.categories.iter().any(&pred))
-                && let Some(sender) = self.peer_senders.get(peer_id)
-            {
-                return Some((peer_id.clone(), sender.clone()));
-            }
-        }
-        None
+        self.find_node_peer(|peer_id, _| {
+            self.loaded_models.get(peer_id).is_some_and(|models| {
+                models
+                    .iter()
+                    .any(|model| model.categories.iter().any(&pred))
+            })
+        })
     }
 
     /// Find any connected node with a Chat or Tool model loaded.
@@ -256,26 +273,30 @@ impl GatewayState {
         entries
     }
 
+    /// Count currently connected user peers.
     pub fn connected_users(&self) -> u32 {
         self.peers.values().filter(|p| p.role == Role::User).count() as u32
     }
 
+    /// Count currently connected node peers.
     pub fn connected_nodes(&self) -> u32 {
         self.peers.values().filter(|p| p.role == Role::Node).count() as u32
     }
 
+    /// Return the deduplicated capability families exposed by connected nodes.
     pub fn all_capabilities(&self) -> Vec<String> {
         let mut caps: Vec<String> = self
             .peers
             .values()
             .filter(|p| p.role == Role::Node)
-            .flat_map(|p| p.capabilities.clone())
+            .flat_map(|peer| peer.capabilities.iter().cloned())
             .collect();
         caps.sort();
         caps.dedup();
         caps
     }
 
+    /// Return the gateway uptime in whole seconds.
     pub fn uptime_secs(&self) -> u64 {
         (chrono::Utc::now() - self.started_at).num_seconds().max(0) as u64
     }
@@ -286,6 +307,7 @@ impl GatewayState {
     }
 }
 
+/// Shared, asynchronously mutable gateway state handle.
 pub type SharedState = Arc<RwLock<GatewayState>>;
 
 fn is_llm_category(c: &ModelCategory) -> bool {
@@ -302,6 +324,13 @@ pub(crate) fn dummy_sender() -> mpsc::Sender<Frame> {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    fn make_loaded_model(model_id: &str, categories: Vec<ModelCategory>) -> LoadedModelInfo {
+        LoadedModelInfo {
+            model_id: model_id.into(),
+            categories,
+        }
+    }
 
     fn make_user_peer(id: &str) -> PeerInfo {
         PeerInfo {
@@ -402,6 +431,64 @@ mod tests {
     fn all_capabilities_empty_with_no_nodes() {
         let state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         assert!(state.all_capabilities().is_empty());
+    }
+
+    #[test]
+    fn peer_selection_finds_loaded_model_peer() {
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
+        state.add_peer(make_user_peer("u1"), dummy_sender());
+        state.add_peer(make_node_peer("n1", vec![]), dummy_sender());
+        state.add_peer(make_node_peer("n2", vec![]), dummy_sender());
+        state.set_loaded_models(
+            "n1",
+            vec![make_loaded_model("gemma-3n", vec![ModelCategory::Chat])],
+        );
+        state.set_loaded_models(
+            "n2",
+            vec![make_loaded_model("qwen-image", vec![ModelCategory::Image])],
+        );
+
+        let (peer_id, _sender) = state.find_loaded_llm_peer("gemma-3n").unwrap();
+        assert_eq!(peer_id, "n1");
+        assert!(state.find_loaded_llm_peer("missing-model").is_none());
+    }
+
+    #[test]
+    fn peer_selection_finds_available_model_peer() {
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
+        state.add_peer(make_node_peer("n1", vec![]), dummy_sender());
+        state.add_peer(make_node_peer("n2", vec![]), dummy_sender());
+        state.set_available_models("n1", vec!["chat-a".into()]);
+        state.set_available_models("n2", vec!["image-b".into(), "chat-b".into()]);
+
+        let (peer_id, _sender) = state.find_capable_peer_for_model("chat-b").unwrap();
+        assert_eq!(peer_id, "n2");
+        assert!(state.find_capable_peer_for_model("unknown").is_none());
+    }
+
+    #[test]
+    fn peer_selection_matches_loaded_categories() {
+        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
+        state.add_peer(make_node_peer("n-chat", vec![]), dummy_sender());
+        state.add_peer(make_node_peer("n-image", vec![]), dummy_sender());
+        state.set_loaded_models(
+            "n-chat",
+            vec![make_loaded_model(
+                "chatty",
+                vec![ModelCategory::Tool, ModelCategory::Chat],
+            )],
+        );
+        state.set_loaded_models(
+            "n-image",
+            vec![make_loaded_model("vision", vec![ModelCategory::Image])],
+        );
+
+        let (llm_peer_id, _sender) = state.find_any_llm_peer().unwrap();
+        assert_eq!(llm_peer_id, "n-chat");
+
+        let (image_peer_id, _sender) = state.find_image_analyze_peer().unwrap();
+        assert_eq!(image_peer_id, "n-image");
+        assert!(state.has_llm_peer());
     }
 
     #[test]

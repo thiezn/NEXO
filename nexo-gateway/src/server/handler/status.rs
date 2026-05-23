@@ -1,3 +1,5 @@
+//! WebSocket handlers for health, status, and model availability updates.
+
 use crate::agent::{AgentCommand, AgentHandle};
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
@@ -6,6 +8,7 @@ use nexo_ws_schema::{
 
 use super::base::{ok_or_internal_error, parse_params};
 
+/// Handle `health` requests.
 pub(super) async fn handle_health(request_id: &str, state: &SharedState) -> Frame {
     let state = state.read().await;
     ok_or_internal_error(
@@ -17,6 +20,7 @@ pub(super) async fn handle_health(request_id: &str, state: &SharedState) -> Fram
     )
 }
 
+/// Handle `status` requests.
 pub(super) async fn handle_status(request_id: &str, state: &SharedState) -> Frame {
     let state = state.read().await;
     ok_or_internal_error(
@@ -29,6 +33,7 @@ pub(super) async fn handle_status(request_id: &str, state: &SharedState) -> Fram
     )
 }
 
+/// Handle `tools.catalog` requests.
 pub(super) async fn handle_tools_catalog(request_id: &str, state: &SharedState) -> Frame {
     let state = state.read().await;
     ok_or_internal_error(
@@ -39,6 +44,7 @@ pub(super) async fn handle_tools_catalog(request_id: &str, state: &SharedState) 
     )
 }
 
+/// Handle `model.status` updates from connected nodes.
 pub(super) async fn handle_model_status(
     request_id: &str,
     params: serde_json::Value,

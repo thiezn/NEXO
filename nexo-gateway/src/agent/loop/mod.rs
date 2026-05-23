@@ -1,4 +1,5 @@
-mod cancellation;
+//! Round-based agent execution loop and supporting helpers.
+
 mod engine;
 mod events;
 mod queue;

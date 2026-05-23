@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
 use crate::agent::AgentHandle;
-use crate::server::state::{GatewayState, PeerInfo, dummy_sender};
+use crate::server::state::{GatewayState, PeerInfo, SharedState, dummy_sender};
 use nexo_ws_schema::{EventKind, Frame, Method, Role};
 use sqlx::SqlitePool;
 use std::sync::Arc;

@@ -2,19 +2,24 @@ use clap::{Parser, Subcommand};
 use cli_helpers::LogLevel;
 use nexo_ws_schema::SchemaSection;
 
+/// Command-line interface for the gateway binary.
 #[derive(Parser)]
 #[command(name = "nexo", about = "NEXO Gateway - Neural Extension Operator")]
 pub struct Cli {
+    /// The top-level command to execute.
     #[command(subcommand)]
     pub command: Command,
 
+    /// Global log verbosity for the current invocation.
     #[arg(short, long, value_enum, default_value_t = LogLevel::Info, global = true)]
     pub log_level: LogLevel,
 
+    /// Disable ANSI color output.
     #[arg(long, global = true)]
     pub no_color: bool,
 }
 
+/// Top-level commands supported by the gateway binary.
 #[derive(Subcommand)]
 pub enum Command {
     /// Initialize gateway configuration and database
@@ -31,7 +36,7 @@ pub enum Command {
         port: Option<u16>,
     },
 
-    /// Generate JSON schemas for the WebSocket protocol
+    /// Generate JSON schemas for the WebSocket protocol.
     Schema {
         /// Section to generate
         #[arg(value_enum, default_value_t = SchemaSection::All)]

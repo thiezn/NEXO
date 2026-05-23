@@ -1,3 +1,5 @@
+//! WebSocket handlers for tool registration and execution.
+
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
     ErrorPayload, Frame, Method, Role, ToolsRegisterParams, ToolsRegisterResponse,
@@ -7,6 +9,7 @@ use super::base::{
     ForwardErrorCodes, TOOL_EXECUTION_TIMEOUT, forward_to_node, ok_or_internal_error, parse_params,
 };
 
+/// Handle `tools.register` requests from node peers.
 pub(super) async fn handle_register(
     request_id: &str,
     params: serde_json::Value,
@@ -60,6 +63,7 @@ pub(super) async fn handle_register(
     ok_or_internal_error(request_id, ToolsRegisterResponse { registered })
 }
 
+/// Handle `tools.execute` requests by forwarding them to the hosting node.
 pub(super) async fn handle_execute(
     request_id: &str,
     params: serde_json::Value,

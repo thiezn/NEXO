@@ -153,7 +153,7 @@ impl GitStorage {
     }
 }
 
-// ── NoteStorage bridge ─────────────────────────────────────────────────────────
+/// Bridge `GitStorage` into the `nexo_notes::NoteStorage` trait.
 
 impl nexo_notes::NoteStorage for GitStorage {
     fn write_note(&self, filename: &str, content: &str) -> anyhow::Result<()> {
@@ -197,7 +197,7 @@ impl nexo_notes::NoteStorage for GitStorage {
     }
 }
 
-// ── Internal helpers ───────────────────────────────────────────────────────────
+/// Pull remote changes into the repository when a fast-forward update is available.
 
 fn pull_impl(repo: &Repository) -> anyhow::Result<()> {
     // Check if remote exists

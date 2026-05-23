@@ -1,6 +1,10 @@
 use crate::{
-    agent::{context::ContextMessage, prefill, session, tool_orchestrator},
+    agent::{
+        context::{self, ConversationContextMessage},
+        session,
+    },
     server::state::SharedState,
+    tools,
 };
 use nexo_spec::model::LoadedModelInfo;
 use nexo_ws_schema::{
@@ -10,7 +14,7 @@ use nexo_ws_schema::{
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
 
-use super::{cancellation, events, queue};
+use super::{events, queue};
 
 /// Maximum number of rounds before the engine stops a run.
 const MAX_ITERATIONS: usize = 20;
@@ -20,6 +24,20 @@ const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
 const THINK_TOKEN: &str = "<|think|>";
 const THINKING_BLOCK_OPEN: &str = "<|channel>thought\n";
 const THINKING_BLOCK_CLOSE: &str = "<channel|>";
+
+/// Return whether a run has already been cancelled.
+///
+/// Database lookup failures are logged and treated as not-cancelled so the loop
+/// can fail through its normal execution path.
+async fn run_cancelled(db: &SqlitePool, run_id: &str) -> bool {
+    match session::is_run_cancelled(db, run_id).await {
+        Ok(cancelled) => cancelled,
+        Err(error) => {
+            tracing::error!("Failed to load run status for {run_id}: {error}");
+            false
+        }
+    }
+}
 
 /// Start a run from a fresh user request.
 #[allow(clippy::too_many_arguments)]
@@ -125,7 +143,8 @@ async fn run_engine(
 ) {
     let _ = crate::agent::locks::reap_expired(db).await;
 
-    let (soul_content, prefill_content) = load_prompt_prefix(state, prefill_collection_id).await;
+    let prompt_assets: context::SystemPromptAssets =
+        context::load_system_prompt_assets(state, prefill_collection_id).await;
 
     let starting_round_index = match session::next_round_index(db, run_id).await {
         Ok(index) => index,
@@ -136,8 +155,10 @@ async fn run_engine(
     };
 
     for round_index in starting_round_index..=MAX_ITERATIONS {
-        if cancellation::run_cancelled(db, run_id).await {
-            crate::agent::locks::release_all_for_run(db, run_id).await.ok();
+        if run_cancelled(db, run_id).await {
+            crate::agent::locks::release_all_for_run(db, run_id)
+                .await
+                .ok();
             return;
         }
 
@@ -149,9 +170,16 @@ async fn run_engine(
             }
         };
 
-        events::emit_status(event_tx, run_id, session_id, AgentStatus::Thinking, None, None);
+        events::emit_status(
+            event_tx,
+            run_id,
+            session_id,
+            AgentStatus::Thinking,
+            None,
+            None,
+        );
 
-        let messages = match crate::agent::context::assemble(db, session_id).await {
+        let conversation_context = match context::load_conversation_context(db, session_id).await {
             Ok(messages) => messages,
             Err(error) => {
                 let _ = session::finish_round(db, &round_id, "failed", None, None).await;
@@ -164,11 +192,11 @@ async fn run_engine(
             let state_read = state.read().await;
             state_read.all_tool_entries()
         };
-        let tool_descriptions = crate::agent::context::build_tool_descriptions(&tool_entries);
+        let tool_prompt_section = context::build_tool_prompt_section(&tool_entries);
         tracing::info!(
             "Agent run {run_id} entering round {} (round_id={round_id}, messages={}, tools={}, model={:?}, thinking={thinking})",
             round_index,
-            messages.len(),
+            conversation_context.len(),
             tool_entries.iter().filter(|tool| tool.available).count(),
             model_id,
         );
@@ -176,21 +204,23 @@ async fn run_engine(
         let inference = run_inference(
             run_id,
             &round_id,
-            &messages,
-            &tool_descriptions,
+            &conversation_context,
+            &tool_prompt_section,
             &tool_entries,
             model_id,
-            &soul_content,
-            prefill_content.as_deref(),
+            &prompt_assets.soul_markdown,
+            prompt_assets.collection_markdown.as_deref(),
             state,
             thinking,
             session_id,
         )
         .await;
 
-        if cancellation::run_cancelled(db, run_id).await {
+        if run_cancelled(db, run_id).await {
             let _ = session::finish_round(db, &round_id, "cancelled", None, None).await;
-            crate::agent::locks::release_all_for_run(db, run_id).await.ok();
+            crate::agent::locks::release_all_for_run(db, run_id)
+                .await
+                .ok();
             return;
         }
 
@@ -238,10 +268,21 @@ async fn run_engine(
                     None,
                     thinking_content.as_deref(),
                 );
-                events::emit_status(event_tx, run_id, session_id, AgentStatus::Completed, None, None);
+                events::emit_status(
+                    event_tx,
+                    run_id,
+                    session_id,
+                    AgentStatus::Completed,
+                    None,
+                    None,
+                );
 
-                let _ = session::finish_run(db, run_id, AgentStatus::Completed, Some(&visible_text)).await;
-                crate::agent::locks::release_all_for_run(db, run_id).await.ok();
+                let _ =
+                    session::finish_run(db, run_id, AgentStatus::Completed, Some(&visible_text))
+                        .await;
+                crate::agent::locks::release_all_for_run(db, run_id)
+                    .await
+                    .ok();
                 return;
             }
             InferenceOutcome::ToolCalls(outcome) => {
@@ -265,7 +306,7 @@ async fn run_engine(
                 .await;
 
                 for call in &outcome.calls {
-                    if cancellation::run_cancelled(db, run_id).await {
+                    if run_cancelled(db, run_id).await {
                         let _ = session::finish_round(
                             db,
                             &round_id,
@@ -274,7 +315,9 @@ async fn run_engine(
                             Some(&outcome.selected_peer_id),
                         )
                         .await;
-                        crate::agent::locks::release_all_for_run(db, run_id).await.ok();
+                        crate::agent::locks::release_all_for_run(db, run_id)
+                            .await
+                            .ok();
                         return;
                     }
 
@@ -294,15 +337,9 @@ async fn run_engine(
                         call.name,
                         call.id,
                     );
-                    events::emit_tool_started(
-                        event_tx,
-                        run_id,
-                        session_id,
-                        &call.name,
-                        &call.id,
-                    );
+                    events::emit_tool_started(event_tx, run_id, session_id, &call.name, &call.id);
 
-                    let capability = tool_orchestrator::tool_capability(&call.name);
+                    let capability = tools::tool_capability(&call.name);
                     match crate::agent::locks::acquire(db, &capability, run_id).await {
                         Ok(true) => {}
                         Ok(false) => {
@@ -330,12 +367,7 @@ async fn run_engine(
                             )
                             .await;
                             events::emit_tool_result(
-                                event_tx,
-                                run_id,
-                                session_id,
-                                &call.name,
-                                &call.id,
-                                &output,
+                                event_tx, run_id, session_id, &call.name, &call.id, &output,
                             );
                             continue;
                         }
@@ -355,14 +387,21 @@ async fn run_engine(
                         }
                     }
 
-                    let tool_result = tool_orchestrator::execute_tool(&call.name, &call.arguments, state).await;
+                    let tool_result = tools::execute_tool(&call.name, &call.arguments, state).await;
                     crate::agent::locks::release(db, &capability).await.ok();
 
                     let (success, output, error_message) = match &tool_result {
                         Ok(response) if response.success => (true, response.output.clone(), None),
                         Ok(response) => {
-                            let error_message = response.error.clone().unwrap_or_else(|| "unknown error".into());
-                            (false, format!("Error: {error_message}"), Some(error_message))
+                            let error_message = response
+                                .error
+                                .clone()
+                                .unwrap_or_else(|| "unknown error".into());
+                            (
+                                false,
+                                format!("Error: {error_message}"),
+                                Some(error_message),
+                            )
                         }
                         Err(error) => (false, format!("Error: {error}"), Some(error.clone())),
                     };
@@ -398,12 +437,7 @@ async fn run_engine(
                         output.len(),
                     );
                     events::emit_tool_result(
-                        event_tx,
-                        run_id,
-                        session_id,
-                        &call.name,
-                        &call.id,
-                        &output,
+                        event_tx, run_id, session_id, &call.name, &call.id, &output,
                     );
                 }
 
@@ -424,7 +458,9 @@ async fn run_engine(
                 return;
             }
             InferenceOutcome::NoLlmAvailable => {
-                tracing::info!("Agent run {run_id} round {round_id} queued (no inference node available)");
+                tracing::info!(
+                    "Agent run {run_id} round {round_id} queued (no inference node available)"
+                );
                 let _ = session::finish_round(db, &round_id, "queued", None, None).await;
                 queue::mark_run_queued(db, run_id).await;
                 queue::emit_queued_event(event_tx, run_id, session_id);
@@ -482,31 +518,6 @@ impl From<AgentRoundToolCall> for ToolCallInfo {
     }
 }
 
-/// Load the prompt prefix inputs for a run.
-async fn load_prompt_prefix(
-    state: &SharedState,
-    prefill_collection_id: Option<&str>,
-) -> (String, Option<String>) {
-    let git = state.read().await.git_storage.clone();
-    if let Some(git) = git {
-        let collection_id = prefill_collection_id.map(str::to_owned);
-        tokio::task::spawn_blocking(move || {
-            let soul = git.read_file("SOUL.md").unwrap_or_default();
-            let prefill_content = collection_id.and_then(|collection_id| {
-                prefill::resolve_collection(&git, &collection_id)
-                    .ok()
-                    .flatten()
-                    .map(|(content, _)| content)
-            });
-            (soul, prefill_content)
-        })
-        .await
-        .unwrap_or_default()
-    } else {
-        (String::new(), None)
-    }
-}
-
 /// Ensure the requested model is loaded and return the selected node.
 async fn ensure_model_loaded(
     model_id: &str,
@@ -558,14 +569,21 @@ async fn ensure_model_loaded(
             .pending_requests
             .insert(unload_request_id.clone(), tx);
         if node_sender.send(frame).await.is_err() {
-            state.write().await.pending_requests.remove(&unload_request_id);
+            state
+                .write()
+                .await
+                .pending_requests
+                .remove(&unload_request_id);
         } else {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await;
         }
     }
 
     if !models_to_unload.is_empty() {
-        state.write().await.set_loaded_models(&peer_id, Vec::<LoadedModelInfo>::new());
+        state
+            .write()
+            .await
+            .set_loaded_models(&peer_id, Vec::<LoadedModelInfo>::new());
     }
 
     let load_params = ModelLoadParams {
@@ -586,7 +604,11 @@ async fn ensure_model_loaded(
         .insert(load_request_id.clone(), response_tx);
 
     if node_sender.send(frame).await.is_err() {
-        state.write().await.pending_requests.remove(&load_request_id);
+        state
+            .write()
+            .await
+            .pending_requests
+            .remove(&load_request_id);
         return Err(InferenceOutcome::Error(format!(
             "Failed to send ModelLoad request to node {peer_id}"
         )));
@@ -598,10 +620,14 @@ async fn ensure_model_loaded(
     )
     .await
     {
-        Ok(Ok(Frame::Response { ok: true, payload, .. })) => {
+        Ok(Ok(Frame::Response {
+            ok: true, payload, ..
+        })) => {
             let loaded = payload
                 .as_ref()
-                .and_then(|payload| serde_json::from_value::<ModelLoadResponse>(payload.clone()).ok())
+                .and_then(|payload| {
+                    serde_json::from_value::<ModelLoadResponse>(payload.clone()).ok()
+                })
                 .map(|response| response.loaded)
                 .unwrap_or(true);
             if loaded {
@@ -619,7 +645,9 @@ async fn ensure_model_loaded(
                 )))
             }
         }
-        Ok(Ok(Frame::Response { ok: false, error, .. })) => Err(InferenceOutcome::Error(
+        Ok(Ok(Frame::Response {
+            ok: false, error, ..
+        })) => Err(InferenceOutcome::Error(
             error
                 .map(|payload| format!("ModelLoad error: {}", payload.message))
                 .unwrap_or_else(|| format!("ModelLoad failed on node {peer_id}")),
@@ -631,7 +659,11 @@ async fn ensure_model_loaded(
             "Node disconnected during model load".into(),
         )),
         Err(_) => {
-            state.write().await.pending_requests.remove(&load_request_id);
+            state
+                .write()
+                .await
+                .pending_requests
+                .remove(&load_request_id);
             Err(InferenceOutcome::Error(format!(
                 "Model load timed out after {MODEL_LOAD_TIMEOUT_SECS}s"
             )))
@@ -644,12 +676,12 @@ async fn ensure_model_loaded(
 async fn run_inference(
     run_id: &str,
     round_id: &str,
-    messages: &[ContextMessage],
-    tool_descriptions: &str,
+    conversation_context: &[ConversationContextMessage],
+    tool_prompt_section: &str,
     tool_entries: &[ToolEntry],
     model_id: Option<&str>,
     soul_content: &str,
-    prefill_content: Option<&str>,
+    collection_context: Option<&str>,
     state: &SharedState,
     thinking: bool,
     session_id: &str,
@@ -661,13 +693,13 @@ async fn run_inference(
     if !soul_content.is_empty() {
         system_parts.push(soul_content.to_string());
     }
-    if let Some(prefill_content) = prefill_content
-        && !prefill_content.is_empty()
+    if let Some(collection_context) = collection_context
+        && !collection_context.is_empty()
     {
-        system_parts.push(prefill_content.to_string());
+        system_parts.push(collection_context.to_string());
     }
-    if !tool_descriptions.is_empty() {
-        system_parts.push(tool_descriptions.to_string());
+    if !tool_prompt_section.is_empty() {
+        system_parts.push(tool_prompt_section.to_string());
     }
 
     let system_prompt = if system_parts.is_empty() {
@@ -682,12 +714,16 @@ async fn run_inference(
         tool_call_id: None,
         tool_name: None,
     })
-    .chain(messages.iter().map(|message| AgentRoundMessage {
-        role: message.role.clone(),
-        content: message.content.clone(),
-        tool_call_id: message.tool_call_id.clone(),
-        tool_name: message.tool_name.clone(),
-    }))
+    .chain(
+        conversation_context
+            .iter()
+            .map(|message| AgentRoundMessage {
+                role: message.role.clone(),
+                content: message.content.clone(),
+                tool_call_id: message.tool_call_id.clone(),
+                tool_name: message.tool_name.clone(),
+            }),
+    )
     .collect();
 
     let tools: Vec<_> = tool_entries
@@ -741,10 +777,12 @@ async fn run_inference(
     }
 
     match tokio::time::timeout(std::time::Duration::from_secs(120), response_rx).await {
-        Ok(Ok(Frame::Response { ok: true, payload, .. })) => {
-            parse_inference_response(payload, selected_peer_id)
-        }
-        Ok(Ok(Frame::Response { ok: false, error, .. })) => InferenceOutcome::Error(
+        Ok(Ok(Frame::Response {
+            ok: true, payload, ..
+        })) => parse_inference_response(payload, selected_peer_id),
+        Ok(Ok(Frame::Response {
+            ok: false, error, ..
+        })) => InferenceOutcome::Error(
             error
                 .map(|payload| payload.message)
                 .unwrap_or_else(|| "Inference failed".into()),
@@ -980,11 +1018,16 @@ mod tests {
         match outcome {
             InferenceOutcome::ToolCalls(tool_call_outcome) => {
                 assert_eq!(tool_call_outcome.selected_peer_id, "peer-a");
-                assert_eq!(tool_call_outcome.rationale.as_deref(), Some("need to call a tool"));
+                assert_eq!(
+                    tool_call_outcome.rationale.as_deref(),
+                    Some("need to call a tool")
+                );
                 assert_eq!(tool_call_outcome.calls.len(), 1);
                 assert_eq!(tool_call_outcome.calls[0].name, "notes.list");
             }
-            InferenceOutcome::Reply(_) | InferenceOutcome::Error(_) | InferenceOutcome::NoLlmAvailable => {
+            InferenceOutcome::Reply(_)
+            | InferenceOutcome::Error(_)
+            | InferenceOutcome::NoLlmAvailable => {
                 panic!("expected tool call outcome");
             }
         }

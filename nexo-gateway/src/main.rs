@@ -1,10 +1,14 @@
+//! Binary entry point for the NEXO gateway executable.
+
 mod agent;
 mod cli;
 mod config;
 mod init;
 mod memory;
+mod runtime;
 mod schema_cmd;
 mod server;
+mod tools;
 
 use clap::Parser;
 use cli::{Cli, Command};
@@ -31,7 +35,7 @@ async fn run(command: Command) -> cli_helpers::Result {
             if let Some(p) = port {
                 config.port = p;
             }
-            server::run(&config).await
+            runtime::run(&config).await
         }
         Command::Schema { section, output } => schema_cmd::run_schema(section, output.as_deref()),
     }

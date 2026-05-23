@@ -5,12 +5,19 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GatewayConfig {
+    /// Host interface to bind the WebSocket server to.
     pub host: String,
+    /// TCP port to bind the WebSocket server to.
     pub port: u16,
+    /// Default log verbosity for the gateway process.
     pub log_level: String,
+    /// Interval between emitted tick events, in milliseconds.
     pub tick_interval_ms: u64,
+    /// SQLite database path for persistent gateway state.
     pub db_path: String,
+    /// Root storage directory used by the gateway.
     pub storage_root: String,
+    /// Shared WebSocket authentication token.
     pub auth_token: String,
     /// Path to the git-backed nexo-storage repository.
     pub nexo_storage_path: String,
@@ -32,6 +39,7 @@ impl Default for GatewayConfig {
 }
 
 impl GatewayConfig {
+    /// Return the default path of the persisted gateway config file.
     pub fn config_path() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -39,14 +47,17 @@ impl GatewayConfig {
             .join("nexo-gateway.toml")
     }
 
+    /// Load the gateway configuration, creating it with defaults when missing.
     pub fn load() -> cli_helpers::Result<Self> {
         cli_helpers::config::load_or_create(&Self::config_path())
     }
 
+    /// Persist the gateway configuration to disk.
     pub fn save(&self) -> cli_helpers::Result {
         cli_helpers::config::save(self, &Self::config_path())
     }
 
+    /// Format the bind host and port as a socket address string.
     pub fn bind_addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
