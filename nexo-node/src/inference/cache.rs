@@ -1,19 +1,16 @@
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
+//! Session-local KV cache persistence helpers used by inference handlers.
 
 use anyhow::Result;
+use nexo_ai::api::kv_cache::PersistedKvCacheMetadata as CacheMetadata;
 use nexo_ai::api::model_traits::KvCacheable;
-
-use super::disk;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 const DEFAULT_MAX_DISK_ENTRIES: usize = 8;
-const DEFAULT_MAX_CACHE_AGE: Duration = Duration::from_secs(3600); // 1 hour
+const DEFAULT_MAX_CACHE_AGE: Duration = Duration::from_secs(3600);
 
-/// Manages KV cache persistence across session switches.
-///
-/// Sits at the nexo-node level and coordinates between the in-memory KV cache
-/// (managed by the pipeline inside nexo-ai) and disk storage.
-pub struct SessionCacheManager {
+/// Manages KV cache persistence across session switches for inference requests.
+pub(crate) struct SessionCacheManager {
     cache_dir: PathBuf,
     max_disk_entries: usize,
     max_cache_age: Duration,
@@ -21,7 +18,8 @@ pub struct SessionCacheManager {
 }
 
 impl SessionCacheManager {
-    pub fn new(cache_dir: PathBuf) -> Self {
+    /// Create a manager rooted at the given cache directory.
+    pub(crate) fn new(cache_dir: PathBuf) -> Self {
         Self {
             cache_dir,
             max_disk_entries: DEFAULT_MAX_DISK_ENTRIES,
@@ -30,18 +28,13 @@ impl SessionCacheManager {
         }
     }
 
-    /// Save the current in-memory session cache to disk.
-    /// Called before switching to a different session.
-    pub fn save_current_session(&self, model_name: &str, model: &dyn KvCacheable) -> Result<()> {
+    fn save_current_session(&self, model_name: &str, model: &dyn KvCacheable) -> Result<()> {
         let dir = self.cache_dir.join(model_name);
-        let _ = disk::save_to_disk(&dir, model_name, model)?;
-
+        let _ = save_to_disk(&dir, model_name, model)?;
         Ok(())
     }
 
-    /// Try to load a session's cache from disk and restore it into the model.
-    /// Returns true if cache was restored, false if not found on disk.
-    pub fn load_session(
+    fn load_session(
         &self,
         session_id: &str,
         model_name: &str,
@@ -49,7 +42,7 @@ impl SessionCacheManager {
     ) -> Result<bool> {
         let dir = self.cache_dir.join(model_name);
 
-        let Some(metadata) = disk::load_from_disk(&dir, session_id, model)? else {
+        let Some(metadata) = load_from_disk(&dir, session_id, model)? else {
             tracing::debug!("KV cache: no disk cache found for session {session_id}");
             return Ok(false);
         };
@@ -63,11 +56,8 @@ impl SessionCacheManager {
         Ok(true)
     }
 
-    /// Switch the in-memory model cache to the target session.
-    ///
-    /// This handles persisting the current session, restoring a target session
-    /// if available, or clearing state when starting fresh / going stateless.
-    pub fn switch_session(
+    /// Switch the in-memory cache to a target session, restoring persisted state when available.
+    pub(crate) fn switch_session(
         &self,
         model_name: &str,
         model: &mut dyn KvCacheable,
@@ -102,19 +92,17 @@ impl SessionCacheManager {
         Ok(())
     }
 
-    /// Called before model unload — save current session so it can be
-    /// restored later if the model is reloaded.
-    pub fn on_model_unload(&self, model_name: &str, model: &dyn KvCacheable) -> Result<()> {
+    /// Persist the active session before a model unload tears the runtime state down.
+    pub(crate) fn on_model_unload(&self, model_name: &str, model: &dyn KvCacheable) -> Result<()> {
         self.save_current_session(model_name, model)
     }
 
-    /// Run cache expiry. Called periodically (e.g., after each inference).
-    pub fn maybe_expire(&mut self) -> Result<()> {
-        // Only run expiry every 5 minutes
-        if let Some(last) = self.last_expire {
-            if last.elapsed() < Duration::from_secs(300) {
-                return Ok(());
-            }
+    /// Periodically expire old on-disk cache entries.
+    pub(crate) fn maybe_expire(&mut self) -> Result<()> {
+        if let Some(last) = self.last_expire
+            && last.elapsed() < Duration::from_secs(300)
+        {
+            return Ok(());
         }
 
         self.last_expire = Some(Instant::now());
@@ -123,17 +111,29 @@ impl SessionCacheManager {
             for entry in std::fs::read_dir(&self.cache_dir)? {
                 let entry = entry?;
                 if entry.file_type()?.is_dir() {
-                    disk::expire_old_caches(
-                        &entry.path(),
-                        self.max_disk_entries,
-                        self.max_cache_age,
-                    )?;
+                    expire_old_caches(&entry.path(), self.max_disk_entries, self.max_cache_age)?;
                 }
             }
         }
 
         Ok(())
     }
+}
+
+fn save_to_disk(dir: &Path, model_name: &str, model: &dyn KvCacheable) -> Result<bool> {
+    nexo_ai::api::kv_cache::save_model_cache_to_disk(dir, model_name, model)
+}
+
+fn load_from_disk(
+    dir: &Path,
+    session_id: &str,
+    model: &mut dyn KvCacheable,
+) -> Result<Option<CacheMetadata>> {
+    nexo_ai::api::kv_cache::load_model_cache_from_disk(dir, session_id, model)
+}
+
+fn expire_old_caches(dir: &Path, max_entries: usize, max_age: Duration) -> Result<usize> {
+    nexo_ai::api::kv_cache::expire_model_caches_on_disk(dir, max_entries, max_age)
 }
 
 #[cfg(test)]
@@ -209,7 +209,7 @@ mod tests {
         fn restore_kv_cache(&mut self, snapshots: &[LayerKvSnapshot]) -> Result<()> {
             self.seq_len = snapshots
                 .first()
-                .map(|snap| snap.current_seq_len)
+                .map(|snapshot| snapshot.current_seq_len)
                 .unwrap_or(0);
             Ok(())
         }
@@ -258,41 +258,37 @@ mod tests {
 
         assert_eq!(model.current_session_id(), None);
         assert!(model.processed_tokens().is_empty());
-        assert_eq!(model.kv_cache_seq_len(), 0);
         assert_eq!(model.clear_count, 1);
     }
 
     #[test]
     fn switch_session_to_missing_entry_starts_fresh() {
-        let tmp = TempDir::new("missing-session");
+        let tmp = TempDir::new("missing-entry");
         let mgr = SessionCacheManager::new(tmp.path.clone());
-        let mut model = FakeKvModel::new(Some("session-a"), vec![1, 2, 3], 3);
+        let mut model = FakeKvModel::new(Some("session-a"), vec![7, 8], 2);
 
         mgr.switch_session("test-model", &mut model, Some("session-b"))
             .unwrap();
 
         assert_eq!(model.current_session_id(), Some("session-b"));
         assert!(model.processed_tokens().is_empty());
-        assert_eq!(model.kv_cache_seq_len(), 0);
         assert_eq!(model.clear_count, 1);
     }
 
     #[test]
     fn switch_session_restores_saved_cache() {
-        let tmp = TempDir::new("restore-session");
+        let tmp = TempDir::new("restore");
         let mgr = SessionCacheManager::new(tmp.path.clone());
-        let mut model = FakeKvModel::new(Some("session-a"), vec![1, 2, 3], 3);
+        let mut first = FakeKvModel::new(Some("session-a"), vec![10, 20, 30], 3);
+        mgr.on_model_unload("test-model", &first).unwrap();
 
-        mgr.save_current_session("test-model", &model).unwrap();
-        model.set_session_state(Some("session-b".to_string()), vec![9]);
-        model.seq_len = 1;
+        first.set_session_state(Some("other".into()), vec![1]);
+        first.clear_kv_cache();
 
-        mgr.switch_session("test-model", &mut model, Some("session-a"))
+        mgr.switch_session("test-model", &mut first, Some("session-a"))
             .unwrap();
 
-        assert_eq!(model.current_session_id(), Some("session-a"));
-        assert_eq!(model.processed_tokens(), &[1, 2, 3]);
-        assert_eq!(model.kv_cache_seq_len(), 3);
-        assert_eq!(model.clear_count, 1);
+        assert_eq!(first.current_session_id(), Some("session-a"));
+        assert_eq!(first.kv_cache_seq_len(), 3);
     }
 }

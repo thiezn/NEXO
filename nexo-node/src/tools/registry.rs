@@ -1,17 +1,19 @@
+use super::builtins::{EchoTool, PingTool};
 use nexo_spec::tool::{Tool, ToolResult};
 use nexo_ws_schema::ToolSpecEntry;
 
-/// Local tool registry holding all tools this node can execute.
+/// In-memory registry of tools this node can advertise and execute.
 pub struct ToolRegistry {
     tools: Vec<Box<dyn Tool>>,
 }
 
 impl ToolRegistry {
+    /// Create an empty tool registry.
     pub fn new() -> Self {
         Self { tools: vec![] }
     }
 
-    /// Create a registry with the built-in tools.
+    /// Create a registry populated with the built-in node tools.
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(EchoTool));
@@ -19,22 +21,31 @@ impl ToolRegistry {
         registry
     }
 
+    /// Register a tool so it can be advertised to and executed for the gateway.
+    ///
+    /// # Arguments
+    ///
+    /// * `tool` - The boxed tool implementation to add to the registry.
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         tracing::info!("Loaded tool: {}", tool.name());
         self.tools.push(tool);
     }
 
-    /// Get tool specs as schema-compatible entries for `tools.register`.
+    /// Return schema-compatible tool specs for the `tools.register` handshake.
     pub fn specs(&self) -> Vec<ToolSpecEntry> {
         self.tools.iter().map(|tool| tool.spec()).collect()
     }
 
-    /// Get capability names (unique tool name prefixes) and command names for `ConnectParams`.
+    /// Return advertised capabilities and command names for the gateway handshake.
     pub fn capabilities_and_commands(&self) -> (Vec<String>, Vec<String>) {
-        let commands: Vec<String> = self.tools.iter().map(|t| t.name().to_string()).collect();
+        let commands: Vec<String> = self
+            .tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect();
         let mut capabilities: Vec<String> = commands
             .iter()
-            .map(|c| c.split('.').next().unwrap_or(c).to_string())
+            .map(|command| command.split('.').next().unwrap_or(command).to_string())
             .collect();
 
         capabilities.sort();
@@ -42,19 +53,25 @@ impl ToolRegistry {
         (capabilities, commands)
     }
 
-    /// Find and execute a tool by name.
+    /// Execute a registered tool by name.
+    ///
+    /// # Arguments
+    ///
+    /// * `tool_name` - The name advertised to the gateway.
+    /// * `args` - JSON arguments forwarded to the tool implementation.
     pub async fn execute(&self, tool_name: &str, args: serde_json::Value) -> Option<ToolResult> {
-        let tool = self.tools.iter().find(|t| t.name() == tool_name)?;
+        let tool = self.tools.iter().find(|tool| tool.name() == tool_name)?;
         match tool.execute(args).await {
             Ok(result) => Some(result),
-            Err(e) => Some(ToolResult {
+            Err(error) => Some(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(e.to_string()),
+                error: Some(error.to_string()),
             }),
         }
     }
 
+    /// Return the number of tools currently registered on this node.
     pub fn tool_count(&self) -> usize {
         self.tools.len()
     }
@@ -63,78 +80,6 @@ impl ToolRegistry {
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// -- Built-in tools --
-
-/// Simple echo tool for testing the node pipeline end-to-end.
-struct EchoTool;
-
-#[async_trait::async_trait]
-impl Tool for EchoTool {
-    fn name(&self) -> &str {
-        "echo.run"
-    }
-
-    fn description(&self) -> &str {
-        "Echoes the input back as output"
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "input": {
-                    "type": "string",
-                    "description": "The text to echo back"
-                }
-            },
-            "required": ["input"]
-        })
-    }
-
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        let input = args
-            .get("input")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        tracing::debug!("Echo tool executing with input: {input}");
-        Ok(ToolResult {
-            success: true,
-            output: input,
-            error: None,
-        })
-    }
-}
-
-/// Simple ping tool that returns "pong".
-struct PingTool;
-
-#[async_trait::async_trait]
-impl Tool for PingTool {
-    fn name(&self) -> &str {
-        "ping"
-    }
-
-    fn description(&self) -> &str {
-        "Returns pong - useful for testing connectivity"
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {}
-        })
-    }
-
-    async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        Ok(ToolResult {
-            success: true,
-            output: "pong".to_string(),
-            error: None,
-        })
     }
 }
 

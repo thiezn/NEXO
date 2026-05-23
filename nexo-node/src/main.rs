@@ -1,9 +1,10 @@
+//! Command-line entry point for the `nexo-node` binary.
+
 mod cli;
 mod config;
-mod connect;
-mod download;
-mod kv_cache;
-mod registry;
+mod inference;
+mod tools;
+mod transport;
 
 use clap::Parser;
 use cli::base::Cli;
@@ -13,7 +14,7 @@ async fn main() {
     let cli = Cli::parse();
     cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
 
-    if let Err(e) = cli::commands::dispatch(cli.command).await {
+    if let Err(e) = cli::base::dispatch(cli.command).await {
         tracing::error!("{e}");
         std::process::exit(1);
     }

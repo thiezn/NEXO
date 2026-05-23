@@ -1,3 +1,5 @@
+//! Node configuration types and persistence helpers.
+
 use nexo_ai::config::{CoordinatorConfig, ModelSettings};
 use nexo_ws_schema::Platform;
 use serde::{Deserialize, Serialize};
@@ -81,6 +83,7 @@ impl NodeConfig {
 }
 
 impl NodeConfig {
+    /// Return the default on-disk path for the node configuration file.
     pub fn config_path() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -88,10 +91,20 @@ impl NodeConfig {
             .join("nexo-node.toml")
     }
 
+    /// Load the node configuration from disk, creating a default file when needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration file cannot be read or written.
     pub fn load() -> cli_helpers::Result<Self> {
         cli_helpers::config::load_or_create(&Self::config_path())
     }
 
+    /// Persist the current node configuration to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration file cannot be written.
     pub fn save(&self) -> cli_helpers::Result {
         cli_helpers::config::save(self, &Self::config_path())
     }

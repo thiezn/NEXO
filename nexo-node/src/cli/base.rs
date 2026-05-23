@@ -1,6 +1,10 @@
+//! Clap-powered command definitions for the `nexo-node` binary.
+
+use crate::cli::commands::{init, models_list, models_pull, start};
 use clap::{Parser, Subcommand};
 use cli_helpers::LogLevel;
 
+/// Top-level CLI arguments accepted by the `nexo-node` binary.
 #[derive(Parser)]
 #[command(
     name = "nexo-node",
@@ -17,6 +21,7 @@ pub struct Cli {
     pub no_color: bool,
 }
 
+/// Root CLI commands supported by `nexo-node`.
 #[derive(Subcommand)]
 pub enum Command {
     /// Initialize node configuration
@@ -36,6 +41,7 @@ pub enum Command {
     },
 }
 
+/// Subcommands for local model management.
 #[derive(Subcommand)]
 pub enum ModelsCommand {
     /// Download a model by name (e.g. "qwen3.5-35b-ab3b") or "all"
@@ -50,4 +56,24 @@ pub enum ModelsCommand {
 
     /// List known models and their download status
     List,
+}
+
+/// Dispatch a parsed CLI command to its concrete handler.
+///
+/// # Arguments
+///
+/// * `command` - The parsed top-level CLI command.
+///
+/// # Errors
+///
+/// Returns any error produced by the selected command handler.
+pub async fn dispatch(command: Command) -> cli_helpers::Result {
+    match command {
+        Command::Init => init::run(),
+        Command::Start { url } => start::run(url).await,
+        Command::Models { action } => match action {
+            ModelsCommand::Pull { model, force } => models_pull::run(&model, force).await,
+            ModelsCommand::List => models_list::run(),
+        },
+    }
 }

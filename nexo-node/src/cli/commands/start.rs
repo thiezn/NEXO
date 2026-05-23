@@ -1,11 +1,20 @@
 use crate::config::NodeConfig;
-use crate::registry::ToolRegistry;
+use crate::tools::ToolRegistry;
 use nexo_ai::api::types::ModelCategory;
 use nexo_ai::coordinator::Coordinator;
 use nexo_ai::registry::{detect_available_models, find_manifest, manifests_for_category};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
+/// Start the node runtime, auto-load configured models, and connect to the gateway.
+///
+/// # Arguments
+///
+/// * `url` - Optional gateway URL override for this launch.
+///
+/// # Errors
+///
+/// Returns an error if configuration loading, model startup, or the node runtime fails.
 pub async fn run(url: Option<String>) -> cli_helpers::Result {
     let mut config = NodeConfig::load()?;
     if let Some(u) = url {
@@ -59,7 +68,7 @@ pub async fn run(url: Option<String>) -> cli_helpers::Result {
     );
 
     let coordinator = Arc::new(Mutex::new(coordinator));
-    crate::connect::run_node(&config, &available_models, &registry, coordinator).await
+    crate::transport::run_node(&config, &available_models, &registry, coordinator).await
 }
 
 /// Determine the minimum set of models to load at startup, deduplicating

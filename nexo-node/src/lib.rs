@@ -1,5 +1,6 @@
+//! Library entry points for the `nexo-node` runtime and supporting modules.
+
 pub mod config;
-pub mod connect;
-pub mod download;
-pub mod kv_cache;
-pub mod registry;
+pub mod inference;
+pub mod tools;
+pub mod transport;
