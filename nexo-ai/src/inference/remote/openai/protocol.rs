@@ -111,11 +111,24 @@ pub enum OpenAiContentPart {
 #[derive(Debug, Serialize)]
 pub struct ImageUrlDetail {
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<ImageDetailLevel>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageDetailLevel {
+    Auto,
+    Low,
+    High,
 }
 
 #[derive(Debug, Serialize)]
 pub struct AudioDetail {
+    /// Base64-encoded audio data.
     pub data: String,
+
+    /// Audio format, e.g. "wav" or "mp3".
     pub format: String,
 }
 
@@ -245,6 +258,7 @@ mod tests {
                 OpenAiContentPart::ImageUrl {
                     image_url: ImageUrlDetail {
                         url: "data:image/png;base64,abc".to_string(),
+                        detail: None,
                     },
                 },
             ])),

@@ -1,15 +1,17 @@
 use crate::{
     agent::{
-        context::{self, ConversationContextMessage},
+        context::{self},
         session,
     },
     server::state::SharedState,
     tools,
 };
+use nexo_spec::message::{MessageRole, TranscriptMessage};
 use nexo_spec::model::LoadedModelInfo;
+use nexo_spec::transcript::TranscriptEntryKind;
 use nexo_ws_schema::{
-    AgentRoundMessage, AgentRoundRequest, AgentRoundResponse, AgentRoundToolCall, AgentStatus,
-    Frame, Method, ModelLoadParams, ModelLoadResponse, ModelUnloadParams, ToolEntry,
+    Frame, Method, ModelLoadParams, ModelLoadResponse, ModelUnloadParams, RunRoundRequest,
+    RunRoundResponse, RunRoundToolCall, RunStatus, ToolEntry,
 };
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
@@ -21,6 +23,9 @@ const MAX_ITERATIONS: usize = 20;
 /// Timeout for model load operations.
 const MODEL_LOAD_TIMEOUT_SECS: u64 = 300;
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
+
+// TODO: The think tokens and thinking block are hardcoded here but they relate specifically to gemma4.
+// We should pull this from model definition instead.
 const THINK_TOKEN: &str = "<|think|>";
 const THINKING_BLOCK_OPEN: &str = "<|channel>thought\n";
 const THINKING_BLOCK_CLOSE: &str = "<channel|>";
@@ -40,18 +45,18 @@ async fn run_cancelled(db: &SqlitePool, run_id: &str) -> bool {
 }
 
 /// Start a run from a fresh user request.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn start_run(
     run_id: &str,
     session_id: &str,
-    prompt: &str,
-    context: Option<&serde_json::Value>,
+    input: &str,
+    instructions: Option<&serde_json::Value>,
     peer_id: &str,
     db: &SqlitePool,
     state: &SharedState,
     event_tx: &broadcast::Sender<Frame>,
     model_id: Option<&str>,
-    prefill_collection_id: Option<&str>,
+    prompt_collection_id: Option<&str>,
     thinking: bool,
 ) {
     if let Err(error) = session::insert_transcript_entry(
@@ -60,8 +65,8 @@ pub async fn start_run(
         Some(run_id),
         None,
         "user",
-        prompt,
-        "request",
+        input,
+        TranscriptEntryKind::UserInput,
         None,
         None,
     )
@@ -71,16 +76,16 @@ pub async fn start_run(
         return;
     }
 
-    if let Some(extra_context) = context {
-        let context_string = serde_json::to_string(extra_context).unwrap_or_default();
+    if let Some(extra_instructions) = instructions {
+        let instructions_string = serde_json::to_string(extra_instructions).unwrap_or_default();
         let _ = session::insert_transcript_entry(
             db,
             session_id,
             Some(run_id),
             None,
             "system",
-            &context_string,
-            "request_context",
+            &instructions_string,
+            TranscriptEntryKind::Instruction,
             None,
             None,
         )
@@ -95,14 +100,14 @@ pub async fn start_run(
         state,
         event_tx,
         model_id,
-        prefill_collection_id,
+        prompt_collection_id,
         thinking,
     )
     .await;
 }
 
 /// Resume a queued run without replaying its original transcript input.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn resume_run(
     run_id: &str,
     session_id: &str,
@@ -111,7 +116,7 @@ pub async fn resume_run(
     state: &SharedState,
     event_tx: &broadcast::Sender<Frame>,
     model_id: Option<&str>,
-    prefill_collection_id: Option<&str>,
+    prompt_collection_id: Option<&str>,
     thinking: bool,
 ) {
     run_engine(
@@ -122,14 +127,14 @@ pub async fn resume_run(
         state,
         event_tx,
         model_id,
-        prefill_collection_id,
+        prompt_collection_id,
         thinking,
     )
     .await;
 }
 
 /// Drive the round-based loop for a run until it completes, fails, or queues.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn run_engine(
     run_id: &str,
     session_id: &str,
@@ -138,13 +143,12 @@ async fn run_engine(
     state: &SharedState,
     event_tx: &broadcast::Sender<Frame>,
     model_id: Option<&str>,
-    prefill_collection_id: Option<&str>,
+    prompt_collection_id: Option<&str>,
     thinking: bool,
 ) {
     let _ = crate::agent::locks::reap_expired(db).await;
 
-    let prompt_assets: context::SystemPromptAssets =
-        context::load_system_prompt_assets(state, prefill_collection_id).await;
+    let system_prompt = context::load_system_prompt(state, prompt_collection_id).await;
 
     let starting_round_index = match session::next_round_index(db, run_id).await {
         Ok(index) => index,
@@ -174,12 +178,12 @@ async fn run_engine(
             event_tx,
             run_id,
             session_id,
-            AgentStatus::Thinking,
+            RunStatus::Thinking,
             None,
             None,
         );
 
-        let conversation_context = match context::load_conversation_context(db, session_id).await {
+        let transcript_context = match context::load_transcript_messages(db, session_id).await {
             Ok(messages) => messages,
             Err(error) => {
                 let _ = session::finish_round(db, &round_id, "failed", None, None).await;
@@ -194,9 +198,9 @@ async fn run_engine(
         };
         let tool_prompt_section = context::build_tool_prompt_section(&tool_entries);
         tracing::info!(
-            "Agent run {run_id} entering round {} (round_id={round_id}, messages={}, tools={}, model={:?}, thinking={thinking})",
+            "Run {run_id} entering round {} (round_id={round_id}, messages={}, tools={}, model={:?}, thinking={thinking})",
             round_index,
-            conversation_context.len(),
+            transcript_context.len(),
             tool_entries.iter().filter(|tool| tool.available).count(),
             model_id,
         );
@@ -204,12 +208,11 @@ async fn run_engine(
         let inference = run_inference(
             run_id,
             &round_id,
-            &conversation_context,
+            &transcript_context,
             &tool_prompt_section,
             &tool_entries,
             model_id,
-            &prompt_assets.soul_markdown,
-            prompt_assets.collection_markdown.as_deref(),
+            system_prompt.as_ref(),
             state,
             thinking,
             session_id,
@@ -232,7 +235,7 @@ async fn run_engine(
                     (reply.raw_text, None)
                 };
                 tracing::info!(
-                    "Agent run {run_id} round {round_id} completed with assistant reply from {} (chars={}, rationale_chars={})",
+                    "Run {run_id} round {round_id} completed with assistant reply from {} (chars={}, rationale_chars={})",
                     reply.selected_peer_id,
                     visible_text.len(),
                     reply.rationale.as_deref().map_or(0, str::len),
@@ -245,7 +248,7 @@ async fn run_engine(
                     Some(&round_id),
                     "assistant",
                     &visible_text,
-                    "assistant_response",
+                    TranscriptEntryKind::AssistantResponse,
                     None,
                     None,
                 )
@@ -263,7 +266,7 @@ async fn run_engine(
                     event_tx,
                     run_id,
                     session_id,
-                    AgentStatus::Streaming,
+                    RunStatus::Streaming,
                     Some(&visible_text),
                     None,
                     thinking_content.as_deref(),
@@ -272,14 +275,13 @@ async fn run_engine(
                     event_tx,
                     run_id,
                     session_id,
-                    AgentStatus::Completed,
+                    RunStatus::Completed,
                     None,
                     None,
                 );
 
-                let _ =
-                    session::finish_run(db, run_id, AgentStatus::Completed, Some(&visible_text))
-                        .await;
+                let _ = session::finish_run(db, run_id, RunStatus::Completed, Some(&visible_text))
+                    .await;
                 crate::agent::locks::release_all_for_run(db, run_id)
                     .await
                     .ok();
@@ -287,7 +289,7 @@ async fn run_engine(
             }
             InferenceOutcome::ToolCalls(outcome) => {
                 tracing::info!(
-                    "Agent run {run_id} round {round_id} requested {} tool call(s) from {}",
+                    "Run {run_id} round {round_id} requested {} tool call(s) from {}",
                     outcome.calls.len(),
                     outcome.selected_peer_id,
                 );
@@ -299,7 +301,7 @@ async fn run_engine(
                     Some(&round_id),
                     "assistant",
                     &assistant_tool_history,
-                    "tool_call_intent",
+                    TranscriptEntryKind::ToolCallIntent,
                     None,
                     None,
                 )
@@ -333,7 +335,7 @@ async fn run_engine(
                     .ok();
 
                     tracing::info!(
-                        "Agent run {run_id} round {round_id} invoking tool {} (call_id={})",
+                        "Run {run_id} round {round_id} invoking tool {} (call_id={})",
                         call.name,
                         call.id,
                     );
@@ -361,7 +363,7 @@ async fn run_engine(
                                 Some(&round_id),
                                 "tool",
                                 &output,
-                                "tool_result",
+                                TranscriptEntryKind::ToolResult,
                                 Some(&call.id),
                                 Some(&call.name),
                             )
@@ -424,13 +426,13 @@ async fn run_engine(
                         Some(&round_id),
                         "tool",
                         &output,
-                        "tool_result",
+                        TranscriptEntryKind::ToolResult,
                         Some(&call.id),
                         Some(&call.name),
                     )
                     .await;
                     tracing::info!(
-                        "Agent run {run_id} round {round_id} tool {} finished (call_id={}, success={}, output_chars={})",
+                        "Run {run_id} round {round_id} tool {} finished (call_id={}, success={}, output_chars={})",
                         call.name,
                         call.id,
                         success,
@@ -452,18 +454,18 @@ async fn run_engine(
                 continue;
             }
             InferenceOutcome::Error(error) => {
-                tracing::info!("Agent run {run_id} round {round_id} failed: {error}");
+                tracing::info!("Run {run_id} round {round_id} failed: {error}");
                 let _ = session::finish_round(db, &round_id, "failed", None, None).await;
                 events::fail_run(event_tx, db, run_id, session_id, &error).await;
                 return;
             }
             InferenceOutcome::NoLlmAvailable => {
                 tracing::info!(
-                    "Agent run {run_id} round {round_id} queued (no inference node available)"
+                    "Run {run_id} round {round_id} queued (no inference node available)"
                 );
                 let _ = session::finish_round(db, &round_id, "queued", None, None).await;
                 queue::mark_run_queued(db, run_id).await;
-                queue::emit_queued_event(event_tx, run_id, session_id);
+                events::emit_queued_event(event_tx, run_id, session_id);
                 return;
             }
         }
@@ -474,7 +476,7 @@ async fn run_engine(
         db,
         run_id,
         session_id,
-        &format!("Agent loop exceeded {MAX_ITERATIONS} iterations"),
+        &format!("Run loop exceeded {MAX_ITERATIONS} iterations"),
     )
     .await;
 }
@@ -508,8 +510,8 @@ struct ToolCallInfo {
     arguments: serde_json::Value,
 }
 
-impl From<AgentRoundToolCall> for ToolCallInfo {
-    fn from(value: AgentRoundToolCall) -> Self {
+impl From<RunRoundToolCall> for ToolCallInfo {
+    fn from(value: RunRoundToolCall) -> Self {
         Self {
             id: value.id,
             name: value.name,
@@ -672,16 +674,15 @@ async fn ensure_model_loaded(
 }
 
 /// Execute one typed inference round on a node.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn run_inference(
     run_id: &str,
     round_id: &str,
-    conversation_context: &[ConversationContextMessage],
+    transcript_context: &[TranscriptMessage],
     tool_prompt_section: &str,
     tool_entries: &[ToolEntry],
     model_id: Option<&str>,
-    soul_content: &str,
-    collection_context: Option<&str>,
+    system_prompt: Option<&nexo_spec::prompt::SystemPrompt>,
     state: &SharedState,
     thinking: bool,
     session_id: &str,
@@ -690,13 +691,10 @@ async fn run_inference(
     if thinking {
         system_parts.push(THINK_TOKEN.to_string());
     }
-    if !soul_content.is_empty() {
-        system_parts.push(soul_content.to_string());
-    }
-    if let Some(collection_context) = collection_context
-        && !collection_context.is_empty()
+    if let Some(system_prompt) = system_prompt
+        && !system_prompt.content.is_empty()
     {
-        system_parts.push(collection_context.to_string());
+        system_parts.push(system_prompt.content.clone());
     }
     if !tool_prompt_section.is_empty() {
         system_parts.push(tool_prompt_section.to_string());
@@ -708,23 +706,10 @@ async fn run_inference(
         system_parts.join("\n\n")
     };
 
-    let round_messages: Vec<AgentRoundMessage> = std::iter::once(AgentRoundMessage {
-        role: "system".into(),
-        content: system_prompt,
-        tool_call_id: None,
-        tool_name: None,
-    })
-    .chain(
-        conversation_context
-            .iter()
-            .map(|message| AgentRoundMessage {
-                role: message.role.clone(),
-                content: message.content.clone(),
-                tool_call_id: message.tool_call_id.clone(),
-                tool_name: message.tool_name.clone(),
-            }),
-    )
-    .collect();
+    let round_messages: Vec<TranscriptMessage> =
+        std::iter::once(TranscriptMessage::new(MessageRole::System, system_prompt))
+            .chain(transcript_context.iter().cloned())
+            .collect();
 
     let tools: Vec<_> = tool_entries
         .iter()
@@ -732,7 +717,7 @@ async fn run_inference(
         .map(|tool| tool.spec.clone())
         .collect();
 
-    let round_request = AgentRoundRequest {
+    let round_request = RunRoundRequest {
         run_id: run_id.to_string(),
         round_id: round_id.to_string(),
         session_id: session_id.to_string(),
@@ -758,7 +743,7 @@ async fn run_inference(
     let forwarded_id = Frame::new_id();
     let forwarded_frame = Frame::Request {
         id: forwarded_id.clone(),
-        method: Method::Agent,
+        method: Method::RunRound,
         params: serde_json::to_value(&round_request).unwrap_or_default(),
     };
 
@@ -806,7 +791,7 @@ fn parse_inference_response(
         return InferenceOutcome::Error("Empty inference response".into());
     };
 
-    let response: AgentRoundResponse = match serde_json::from_value(payload) {
+    let response: RunRoundResponse = match serde_json::from_value(payload) {
         Ok(response) => response,
         Err(error) => {
             return InferenceOutcome::Error(format!("Invalid round response: {error}"));

@@ -1,28 +1,41 @@
 //! Session lifecycle queries and deletion helpers.
 
-use nexo_ws_schema::{ConversationMessage, Frame, SessionEntry, SessionGetResponse};
+use nexo_ws_schema::{
+    Frame, MessageRole, SessionEntry, SessionGetResponse, TranscriptEntry, TranscriptEntryKind,
+    TranscriptMessage,
+};
 use sqlx::SqlitePool;
 
-/// Create a new session for a user. Returns `(session_id, prefill_collection_id)`.
+fn decode_role(role: String) -> Result<MessageRole, sqlx::Error> {
+    serde_json::from_value(serde_json::Value::String(role))
+        .map_err(|error| sqlx::Error::Decode(Box::new(error)))
+}
+
+fn decode_entry_kind(kind: String) -> Result<TranscriptEntryKind, sqlx::Error> {
+    serde_json::from_value(serde_json::Value::String(kind))
+        .map_err(|error| sqlx::Error::Decode(Box::new(error)))
+}
+
+/// Create a new session for a user. Returns `(session_id, prompt_collection_id)`.
 pub async fn create_session(
     pool: &SqlitePool,
     user_id: &str,
     name: Option<&str>,
-    prefill_collection_id: Option<&str>,
+    prompt_collection_id: Option<&str>,
 ) -> Result<(String, Option<String>), sqlx::Error> {
     let id = Frame::new_id();
 
     sqlx::query(
-        "INSERT INTO sessions (id, user_id, name, prefill_collection_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO sessions (id, user_id, name, prompt_collection_id) VALUES (?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(user_id)
     .bind(name)
-    .bind(prefill_collection_id)
+    .bind(prompt_collection_id)
     .execute(pool)
     .await?;
 
-    Ok((id, prefill_collection_id.map(String::from)))
+    Ok((id, prompt_collection_id.map(String::from)))
 }
 
 /// List all sessions for a user, ordered by most recently active.
@@ -30,8 +43,8 @@ pub async fn list_sessions(
     pool: &SqlitePool,
     user_id: &str,
 ) -> Result<Vec<SessionEntry>, sqlx::Error> {
-    let rows: Vec<(String, Option<String>, String, String, i32)> = sqlx::query_as(
-        "SELECT s.id, s.name, s.created_at, s.last_active_at, COUNT(m.id) as message_count
+    let rows: Vec<(String, Option<String>, Option<String>, String, String, i32)> = sqlx::query_as(
+        "SELECT s.id, s.name, s.prompt_collection_id, s.created_at, s.last_active_at, COUNT(m.id) as message_count
          FROM sessions s
          LEFT JOIN transcript_entries m ON m.session_id = s.id
          WHERE s.user_id = ?
@@ -45,9 +58,10 @@ pub async fn list_sessions(
     Ok(rows
         .into_iter()
         .map(
-            |(id, name, created_at, last_active_at, count)| SessionEntry {
+            |(id, name, prompt_collection_id, created_at, last_active_at, count)| SessionEntry {
                 session_id: id,
                 name,
+                prompt_collection_id,
                 created_at,
                 last_active_at,
                 message_count: count as u32,
@@ -61,13 +75,13 @@ pub async fn get_session(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<Option<SessionGetResponse>, sqlx::Error> {
-    let session: Option<(String, Option<String>, String)> =
-        sqlx::query_as("SELECT id, name, created_at FROM sessions WHERE id = ?")
+    let session: Option<(String, Option<String>, Option<String>, String)> =
+        sqlx::query_as("SELECT id, name, prompt_collection_id, created_at FROM sessions WHERE id = ?")
             .bind(session_id)
             .fetch_optional(pool)
             .await?;
 
-    let Some((id, name, created_at)) = session else {
+    let Some((id, name, prompt_collection_id, created_at)) = session else {
         return Ok(None);
     };
 
@@ -76,10 +90,11 @@ pub async fn get_session(
         String,
         String,
         String,
+        String,
         Option<String>,
         Option<String>,
     )> = sqlx::query_as(
-        "SELECT id, role, content, created_at, tool_call_id, tool_name
+        "SELECT id, role, content, entry_kind, created_at, tool_call_id, tool_name
             FROM transcript_entries WHERE session_id = ? ORDER BY created_at ASC, rowid ASC",
     )
     .bind(session_id)
@@ -88,20 +103,26 @@ pub async fn get_session(
     let messages = msg_rows
         .into_iter()
         .map(
-            |(mid, role, content, msg_created, tool_call_id, tool_name)| ConversationMessage {
-                id: mid,
-                role,
-                content,
-                created_at: msg_created,
-                tool_call_id,
-                tool_name,
+            |(mid, role, content, entry_kind, msg_created, tool_call_id, tool_name)| {
+                Ok(TranscriptEntry {
+                    id: mid,
+                    message: TranscriptMessage {
+                        role: decode_role(role)?,
+                        content,
+                        tool_call_id,
+                        tool_name,
+                    },
+                    kind: decode_entry_kind(entry_kind)?,
+                    created_at: msg_created,
+                })
             },
         )
-        .collect();
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
 
     Ok(Some(SessionGetResponse {
         session_id: id,
         name,
+        prompt_collection_id,
         messages,
         created_at,
     }))
@@ -113,13 +134,13 @@ pub async fn clear_session(pool: &SqlitePool, session_id: &str) -> Result<bool, 
 
     // Delete in dependency order so the session is removed atomically.
     sqlx::query(
-        "DELETE FROM run_summaries WHERE run_id IN (SELECT id FROM agent_runs WHERE session_id = ?)",
+        "DELETE FROM run_summaries WHERE run_id IN (SELECT id FROM runs WHERE session_id = ?)",
     )
     .bind(session_id)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
-        "DELETE FROM tool_traces WHERE run_id IN (SELECT id FROM agent_runs WHERE session_id = ?)",
+        "DELETE FROM tool_traces WHERE run_id IN (SELECT id FROM runs WHERE session_id = ?)",
     )
     .bind(session_id)
     .execute(&mut *tx)
@@ -129,18 +150,18 @@ pub async fn clear_session(pool: &SqlitePool, session_id: &str) -> Result<bool, 
         .execute(&mut *tx)
         .await?;
     sqlx::query(
-        "DELETE FROM agent_rounds WHERE run_id IN (SELECT id FROM agent_runs WHERE session_id = ?)",
+        "DELETE FROM run_rounds WHERE run_id IN (SELECT id FROM runs WHERE session_id = ?)",
     )
     .bind(session_id)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
-        "DELETE FROM capability_locks WHERE run_id IN (SELECT id FROM agent_runs WHERE session_id = ?)",
+        "DELETE FROM capability_locks WHERE run_id IN (SELECT id FROM runs WHERE session_id = ?)",
     )
     .bind(session_id)
     .execute(&mut *tx)
     .await?;
-    sqlx::query("DELETE FROM agent_runs WHERE session_id = ?")
+    sqlx::query("DELETE FROM runs WHERE session_id = ?")
         .bind(session_id)
         .execute(&mut *tx)
         .await?;

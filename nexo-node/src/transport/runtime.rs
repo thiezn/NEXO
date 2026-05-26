@@ -1,7 +1,7 @@
 use super::{push_model_status, send_busy_error};
 use crate::config::NodeConfig;
 use crate::inference::{
-    SessionCacheManager, dispatch_agent_inference, dispatch_image_analyze, handle_model_load,
+    SessionCacheManager, dispatch_image_analyze, dispatch_run_round, handle_model_load,
     handle_model_unload,
 };
 use crate::tools::{ToolRegistry, handle_tool_execute, register_tools};
@@ -219,14 +219,14 @@ async fn handle_gateway_frame(
         }
         Some(Frame::Request {
             id,
-            method: Method::Agent,
+            method: Method::RunRound,
             params,
         }) => {
             if *context.inference_busy {
                 send_busy_error(writer, &id).await?;
             } else {
                 *context.inference_busy = true;
-                dispatch_agent_inference(
+                dispatch_run_round(
                     &id,
                     params,
                     context.coordinator,

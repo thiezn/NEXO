@@ -192,7 +192,7 @@ final class NexoService {
         case .shutdown:
             Logger.nexo.warning("Server shutdown event")
             connectionState = .disconnected
-        case .agent, .presence, .cron:
+        case .run, .presence, .cron:
             break
         }
         // Always forward to the public event stream
@@ -256,22 +256,24 @@ final class NexoService {
         return try response.payload(as: SendResponse.self)
     }
 
-    func agent(
-        prompt: String,
+    func runStart(
+        input: String,
         idempotencyKey: String,
         sessionId: String? = nil,
-        context: JSONValue? = nil,
-        modelId: String? = nil
-    ) async throws -> AgentResponse {
-        let params = AgentParams(
-            prompt: prompt,
+        instructions: JSONValue? = nil,
+        modelId: String? = nil,
+        thinking: Bool? = nil
+    ) async throws -> RunStartResponse {
+        let params = RunStartParams(
+            input: input,
             idempotencyKey: idempotencyKey,
             sessionId: sessionId,
-            context: context,
-            modelId: modelId
+            instructions: instructions,
+            modelId: modelId,
+            thinking: thinking
         )
-        let response = try await guardedRequest(.agent, params: params)
-        return try response.payload(as: AgentResponse.self)
+        let response = try await guardedRequest(.runStart, params: params)
+        return try response.payload(as: RunStartResponse.self)
     }
 
     func imageAnalyze(imageData: String, prompt: String, idempotencyKey: String) async throws -> ImageAnalyzeResponse {
@@ -294,8 +296,8 @@ final class NexoService {
 
     // MARK: - Session Methods
 
-    func sessionCreate(name: String? = nil, prefillCollectionId: String? = nil) async throws -> SessionCreateResponse {
-        let params = SessionCreateParams(name: name, prefillCollectionId: prefillCollectionId)
+    func sessionCreate(name: String? = nil, promptCollectionId: String? = nil) async throws -> SessionCreateResponse {
+        let params = SessionCreateParams(name: name, promptCollectionId: promptCollectionId)
         let response = try await guardedRequest(.sessionCreate, params: params)
         return try response.payload(as: SessionCreateResponse.self)
     }
@@ -319,8 +321,8 @@ final class NexoService {
 
     // MARK: - Cron Methods
 
-    func cronCreate(name: String, schedule: String, prompt: String, sessionId: String? = nil) async throws -> CronCreateResponse {
-        let params = CronCreateParams(name: name, schedule: schedule, prompt: prompt, sessionId: sessionId)
+    func cronCreate(name: String, schedule: String, input: String, sessionId: String? = nil) async throws -> CronCreateResponse {
+        let params = CronCreateParams(name: name, schedule: schedule, input: input, sessionId: sessionId)
         let response = try await guardedRequest(.cronCreate, params: params)
         return try response.payload(as: CronCreateResponse.self)
     }
@@ -336,42 +338,42 @@ final class NexoService {
         return try response.payload(as: CronDeleteResponse.self)
     }
 
-    // MARK: - Prefill Markdown Methods
+    // MARK: - Prompt Document Methods
 
-    func prefillMarkdownCreate(category: String, description: String, content: String) async throws -> PrefillMarkdownCreateResponse {
-        let params = PrefillMarkdownCreateParams(category: category, description: description, content: content)
-        let response = try await guardedRequest(.prefillMarkdownCreate, params: params)
-        return try response.payload(as: PrefillMarkdownCreateResponse.self)
+    func promptDocumentCreate(id: String, content: String) async throws -> PromptDocumentCreateResponse {
+        let params = PromptDocumentCreateParams(id: id, content: content)
+        let response = try await guardedRequest(.promptDocumentCreate, params: params)
+        return try response.payload(as: PromptDocumentCreateResponse.self)
     }
 
-    func prefillMarkdownList() async throws -> PrefillMarkdownListResponse {
-        let response = try await guardedRequest(.prefillMarkdownList, params: PrefillMarkdownListParams())
-        return try response.payload(as: PrefillMarkdownListResponse.self)
+    func promptDocumentList() async throws -> PromptDocumentListResponse {
+        let response = try await guardedRequest(.promptDocumentList, params: PromptDocumentListParams())
+        return try response.payload(as: PromptDocumentListResponse.self)
     }
 
-    func prefillMarkdownDelete(id: String) async throws -> PrefillMarkdownDeleteResponse {
-        let params = PrefillMarkdownDeleteParams(id: id)
-        let response = try await guardedRequest(.prefillMarkdownDelete, params: params)
-        return try response.payload(as: PrefillMarkdownDeleteResponse.self)
+    func promptDocumentDelete(id: String) async throws -> PromptDocumentDeleteResponse {
+        let params = PromptDocumentDeleteParams(id: id)
+        let response = try await guardedRequest(.promptDocumentDelete, params: params)
+        return try response.payload(as: PromptDocumentDeleteResponse.self)
     }
 
-    // MARK: - Prefill Collection Methods
+    // MARK: - Prompt Collection Methods
 
-    func prefillCollectionCreate(name: String, description: String? = nil, markdownIds: [String]) async throws -> PrefillCollectionCreateResponse {
-        let params = PrefillCollectionCreateParams(name: name, description: description, markdownIds: markdownIds)
-        let response = try await guardedRequest(.prefillCollectionCreate, params: params)
-        return try response.payload(as: PrefillCollectionCreateResponse.self)
+    func promptCollectionCreate(id: String, name: String, description: String? = nil, documents: [String]) async throws -> PromptCollectionCreateResponse {
+        let params = PromptCollectionCreateParams(id: id, name: name, description: description, documents: documents)
+        let response = try await guardedRequest(.promptCollectionCreate, params: params)
+        return try response.payload(as: PromptCollectionCreateResponse.self)
     }
 
-    func prefillCollectionList() async throws -> PrefillCollectionListResponse {
-        let response = try await guardedRequest(.prefillCollectionList, params: PrefillCollectionListParams())
-        return try response.payload(as: PrefillCollectionListResponse.self)
+    func promptCollectionList() async throws -> PromptCollectionListResponse {
+        let response = try await guardedRequest(.promptCollectionList, params: PromptCollectionListParams())
+        return try response.payload(as: PromptCollectionListResponse.self)
     }
 
-    func prefillCollectionDelete(id: String) async throws -> PrefillCollectionDeleteResponse {
-        let params = PrefillCollectionDeleteParams(id: id)
-        let response = try await guardedRequest(.prefillCollectionDelete, params: params)
-        return try response.payload(as: PrefillCollectionDeleteResponse.self)
+    func promptCollectionDelete(id: String) async throws -> PromptCollectionDeleteResponse {
+        let params = PromptCollectionDeleteParams(id: id)
+        let response = try await guardedRequest(.promptCollectionDelete, params: params)
+        return try response.payload(as: PromptCollectionDeleteResponse.self)
     }
 
     // MARK: - Private Helpers

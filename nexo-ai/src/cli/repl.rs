@@ -1,4 +1,4 @@
-use crate::api::types::{ChatMessage, ChatRole, ModelCategory};
+use crate::api::types::{MessageRole, ModelCategory, TranscriptMessage};
 use crate::coordinator::Coordinator;
 use crate::inference::models::support::conversation::ConversationManager;
 use crate::registry::{find_manifest, known_manifests};
@@ -1217,7 +1217,7 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str, conversation: &mut Con
         return;
     };
 
-    conversation.push(ChatMessage::new(ChatRole::User, text.to_string()));
+    conversation.push(TranscriptMessage::new(MessageRole::User, text.to_string()));
 
     let settings = coordinator.config().model_settings(&model_name);
     let request = crate::api::types::ChatRequest {
@@ -1243,8 +1243,8 @@ fn handle_chat(coordinator: &mut Coordinator, text: &str, conversation: &mut Con
 
     match result {
         Ok(response) => {
-            conversation.push(ChatMessage::new(
-                ChatRole::Assistant,
+            conversation.push(TranscriptMessage::new(
+                MessageRole::Assistant,
                 response.text.clone(),
             ));
 
@@ -1275,7 +1275,7 @@ fn handle_tool(coordinator: &mut Coordinator, text: &str) {
 
     let settings = coordinator.config().model_settings(&model_name);
     let request = crate::api::types::ToolCallRequest {
-        messages: vec![ChatMessage::new(ChatRole::User, text.to_string())],
+        messages: vec![TranscriptMessage::new(MessageRole::User, text.to_string())],
         tools: vec![],
         max_tokens: settings.max_tokens.unwrap_or(DEFAULT_CHAT_MAX_TOKENS),
         temperature: settings.temperature.unwrap_or(0.3),

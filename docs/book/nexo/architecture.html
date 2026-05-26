@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b491b92b.js";
+            window.path_to_searchindex_js = "../searchindex-240f1b22.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-aa7fd050.js"></script>
@@ -183,6 +183,8 @@ Gateway over <strong>WebSocket</strong> on the configured bind host (default
 <code>127.0.0.1:6969</code>).</li>
 <li><strong>Nodes</strong> (macOS/iOS/headless) also connect over <strong>WebSocket</strong>, but
 declare <code>role: node</code> with explicit capabilities/commands.</li>
+<li>There is no peer-to-peer client transport. Client-to-client messaging is
+routed through the gateway.</li>
 </ul>
 <h2 id="components-and-flows"><a class="header" href="#components-and-flows">Components and flows</a></h2>
 <h3 id="gateway-daemon"><a class="header" href="#gateway-daemon">Gateway (daemon)</a></h3>
@@ -190,14 +192,17 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
 <li>Maintains connections to clients and nodes</li>
 <li>Exposes a typed WS API (requests, responses, server‑push events).</li>
 <li>Validates inbound frames against JSON Schema.</li>
-<li>Emits events like <code>agent</code>, <code>chat</code>, <code>presence</code>, <code>health</code>, <code>heartbeat</code>, <code>cron</code>.</li>
+<li>Emits events like <code>run</code>, <code>message</code>, <code>presence</code>, <code>heartbeat</code>, <code>cron</code>, <code>tick</code>, <code>shutdown</code>.</li>
 </ul>
 <h3 id="clients-macos--ios-app--cli"><a class="header" href="#clients-macos--ios-app--cli">Clients (macOS / iOS app / CLI)</a></h3>
 <ul>
 <li>One WS connection per client.</li>
-<li>Provide a user identity in <code>connect</code> and client identity; pairing is <strong>user‑based</strong> (<code>role: "user"</code>), client identity is informational (e.g. <code>cli</code>, <code>iOS</code>, <code>macOS</code>). The <code>role</code> field is the sole discriminator between users and nodes.</li>
-<li>Send requests (<code>health</code>, <code>status</code>, <code>send</code>, <code>agent</code>, <code>system-presence</code>).</li>
-<li>Subscribe to events (<code>tick</code>, <code>agent</code>, <code>presence</code>, <code>shutdown</code>).</li>
+<li>Provide a user routing identity in <code>connect</code>; today the gateway uses <code>client.id</code> for
+<code>role: "user"</code> connections when routing directed messages and associating sessions.
+Multiple connected peers can share the same <code>client.id</code>, in which case all of them
+receive directed <code>message</code> events. <code>device.id</code> identifies the concrete device.</li>
+<li>Send requests (<code>health</code>, <code>status</code>, <code>send</code>, <code>run.start</code>, <code>run.stop</code>, <code>run.instructions.append</code>, <code>system-presence</code>).</li>
+<li>Subscribe to events (<code>tick</code>, <code>run</code>, <code>message</code>, <code>presence</code>, <code>shutdown</code>).</li>
 </ul>
 <h3 id="nodes-macos--ios--headless"><a class="header" href="#nodes-macos--ios--headless">Nodes (macOS / iOS / headless)</a></h3>
 <ul>
@@ -205,7 +210,7 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
 <li>Provide a device identity in <code>connect</code>; pairing is <strong>device‑based</strong> (role <code>node</code>)</li>
 <li>After handshake, register full tool specs via <code>tools.register</code>.</li>
 <li>Listen for <code>tools.execute</code> requests forwarded by the gateway.</li>
-<li>Handle <code>agent</code> inference requests from the gateway loop runner.</li>
+<li>Handle <code>run.round</code> inference requests from the gateway loop runner.</li>
 <li>Respond to <code>model.load</code> / <code>model.unload</code> commands; push <code>model.status</code> updates.</li>
 <li>Expose commands like <code>epub_extractor.*</code>, <code>echo.*</code>, <code>ping</code>.</li>
 <li>Automatically reconnect and re-register on disconnect.</li>
@@ -224,10 +229,10 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
     Gateway--&gt;&gt;Client: event:presence
     Gateway--&gt;&gt;Client: event:tick
 
-    Client-&gt;&gt;Gateway: request:agent
-    Gateway--&gt;&gt;Client: response:agent&lt;br&gt;ack {runId, status:"accepted"}
-    Gateway--&gt;&gt;Client: event:agent&lt;br&gt;(streaming)
-    Gateway--&gt;&gt;Client: response:agent&lt;br&gt;final {runId, status, summary}
+    Client-&gt;&gt;Gateway: request:run.start
+    Gateway--&gt;&gt;Client: response:run.start&lt;br&gt;ack {runId, sessionId, status:"accepted"}
+    Gateway--&gt;&gt;Client: event:run&lt;br&gt;(streaming)
+    Gateway--&gt;&gt;Client: event:run&lt;br&gt;{status:"completed"}
 </pre>
 
 <h2 id="node-registration--tool-execution"><a class="header" href="#node-registration--tool-execution">Node registration + tool execution</a></h2>
@@ -253,39 +258,42 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
     Note over Node,Gateway: On disconnect: gateway deregisters&lt;br&gt;all tools from this node
 </pre>
 
-<h2 id="brain-agent-loop"><a class="header" href="#brain-agent-loop">Brain (agent loop)</a></h2>
-<p>The gateway spawns an <strong>AgentHandle</strong> at startup — a background task that processes
-agent commands sequentially. When a client sends an <code>agent</code> request:</p>
+<h2 id="client-to-client-messaging"><a class="header" href="#client-to-client-messaging">Client-to-client messaging</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant Alice as Client A
+    participant Gateway
+    participant Bob as Client B
+
+    Alice-&gt;&gt;Gateway: request:send {target:"bob", payload:{...}}
+    Gateway--&gt;&gt;Alice: response {delivered:true}
+    Gateway--&gt;&gt;Bob: event:message {from:"alice", target:"bob", payload:{...}}
+</pre>
+
+<h2 id="run-loop"><a class="header" href="#run-loop">Run loop</a></h2>
+<p>The gateway spawns a <strong>RunHandle</strong> at startup — a background task that processes
+run commands sequentially. When a client sends a <code>run.start</code> request:</p>
 <ol>
-<li>The handler creates (or resumes) a session and an agent run in SQLite</li>
-<li>It submits an <code>AgentCommand::RunAgent</code> to the brain via an mpsc channel</li>
-<li>The brain runs the loop: context assembly → inference → tool calls → repeat</li>
+<li>The handler creates (or resumes) a session and a run row in SQLite</li>
+<li>It submits a <code>RunCommand::StartRun</code> to the run task via an mpsc channel</li>
+<li>The run task executes the loop: transcript assembly → inference → tool calls → repeat</li>
 <li>Lifecycle events (<code>thinking</code>, <code>tool_call</code>, <code>streaming</code>, <code>completed</code>) are broadcast
 to all connected clients via the event channel</li>
 </ol>
-<pre class="mermaid">flowchart LR
-    Client --&gt;|request:agent| Handler
-    Handler --&gt;|AgentCommand| Brain
-    Brain --&gt;|inference request| Node
-    Node --&gt;|response| Brain
-    Brain --&gt;|event:agent| Client
-    Brain --&gt;|tools.execute| Node
-</pre>
-
+<p>Details: <a href="/nexo/agent_loop.html">Run Loop</a></p>
 <h3 id="capability-locking"><a class="header" href="#capability-locking">Capability locking</a></h3>
-<p>When the brain invokes a node capability (inference or tool execution), it acquires
+<p>When the run loop invokes a node capability (inference or tool execution), it acquires
 an advisory lock in the <code>capability_locks</code> SQLite table. This prevents concurrent
-agent runs from using the same capability. Locks expire after 5 minutes for crash
+run executions from using the same capability. Locks expire after 5 minutes for crash
 recovery.</p>
 <h3 id="cron-scheduler"><a class="header" href="#cron-scheduler">Cron scheduler</a></h3>
-<p>A background scheduler task runs alongside the brain, checking every 60 seconds for
-due cron jobs. When a job fires, it emits a <code>cron</code> event and submits an agent command
-to the brain.</p>
+<p>A background scheduler task runs alongside the run loop, checking every 60 seconds for
+due cron jobs. When a job fires, it emits a <code>cron</code> event and submits a run command
+to the run task.</p>
 <h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
 <p>A client can have multiple sessions and maintains a <code>sessionId</code> locally. Sessions are
-created explicitly via <code>session.create</code> or implicitly when an <code>agent</code> request is sent
+created explicitly via <code>session.create</code> or implicitly when a <code>run.start</code> request is sent
 without a <code>sessionId</code>. After a client restart, it can query <code>session.list</code> to resume
-previous conversations.</p>
+previous transcript sessions.</p>
 <h2 id="wire-protocol-summary"><a class="header" href="#wire-protocol-summary">Wire protocol (summary)</a></h2>
 <ul>
 <li>
@@ -302,7 +310,7 @@ previous conversations.</p>
 </ul>
 </li>
 <li>
-<p>Idempotency keys are required for side‑effecting methods (<code>send</code>, <code>agent</code>) to
+<p>Idempotency keys are required for side‑effecting methods (<code>send</code>, <code>run.start</code>) to
 safely retry; the server keeps a short‑lived dedupe cache.</p>
 </li>
 <li>

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b491b92b.js";
+            window.path_to_searchindex_js = "../searchindex-240f1b22.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-aa7fd050.js"></script>
@@ -185,24 +185,21 @@
 <p>The git-backed storage repository holds user-facing persistent data. Every write triggers a pull → write → commit → push cycle, keeping all data versioned and portable.</p>
 <h3 id="repository-structure"><a class="header" href="#repository-structure">Repository structure</a></h3>
 <pre><code>~/.nexo/nexo-storage/
-├── SOUL.md                  # Agent personality (always prepended to system prompt)
-├── PREFILL/
-│   ├── collections.json     # Collection definitions
-│   ├── identity.md          # Example prefill markdown
-│   └── skills.md            # Example prefill markdown
+├── PROMPTS/
+│   ├── collections.json     # Prompt collection definitions
+│   ├── identity.md          # Example prompt document
+│   └── skills.md            # Example prompt document
 └── NOTES/
     ├── SUMMARY.md           # Auto-generated summary of all notes
     └── 2026-01-15T12-00-00.md  # Timestamped notes
 </code></pre>
-<h3 id="soulmd"><a class="header" href="#soulmd">SOUL.md</a></h3>
-<p>A markdown file whose content is always prepended to the agent’s system prompt. Use it to define personality, communication style, or persistent instructions.</p>
-<h3 id="prefill-system-prefill"><a class="header" href="#prefill-system-prefill">Prefill system (<code>PREFILL/</code>)</a></h3>
-<p>Composable context templates that can be attached to sessions:</p>
+<h3 id="prompt-library-prompts"><a class="header" href="#prompt-library-prompts">Prompt library (<code>PROMPTS/</code>)</a></h3>
+<p>Composable prompt documents that can be attached to sessions:</p>
 <ul>
-<li><strong>Markdown files</strong> — Individual <code>.md</code> files stored in <code>PREFILL/</code></li>
-<li><strong>Collections</strong> — Named groups of markdown files defined in <code>PREFILL/collections.json</code></li>
+<li><strong>Prompt documents</strong> — Individual <code>.md</code> files stored in <code>PROMPTS/</code></li>
+<li><strong>Prompt collections</strong> — Named groups of prompt documents defined in <code>PROMPTS/collections.json</code></li>
 </ul>
-<p>When a session has a <code>prefill_collection_id</code>, the gateway resolves the collection at inference time: reads each referenced markdown file in order, concatenates them, and includes the result in the system prompt (after SOUL.md, before tool descriptions).</p>
+<p>When a session has a <code>prompt_collection_id</code>, the gateway resolves the collection at inference time: reads each referenced prompt document in order, concatenates them, and includes the result in the system prompt before tool descriptions.</p>
 <p><code>collections.json</code> schema:</p>
 <pre><code class="language-json">{
   "collections": [
@@ -210,13 +207,13 @@
       "id": "default",
       "name": "Default Identity",
       "description": "Core personality",
-      "markdown_files": ["identity.md", "skills.md"]
+      "documents": ["identity.md", "skills.md"]
     }
   ]
 }
 </code></pre>
 <h3 id="notes-system-notes"><a class="header" href="#notes-system-notes">Notes system (<code>NOTES/</code>)</a></h3>
-<p>Agent-accessible note storage with gateway-native tools:</p>
+<p>Run-accessible note storage with gateway-native tools:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -230,7 +227,7 @@
 </tbody>
 </table>
 </div>
-<p>A default cron job (<code>notes-summary</code>, every 6 hours) prompts the agent to read all notes and generate an organized summary.</p>
+<p>A default cron job (<code>notes-summary</code>, every 6 hours) prompts the run loop to read all notes and generate an organized summary.</p>
 <h2 id="sqlite-schema"><a class="header" href="#sqlite-schema">SQLite schema</a></h2>
 <p>The gateway’s SQLite database stores structured operational state:</p>
 <h3 id="core-tables"><a class="header" href="#core-tables">Core tables</a></h3>
@@ -246,35 +243,41 @@
 </tbody>
 </table>
 </div>
-<h3 id="session--agent-tables"><a class="header" href="#session--agent-tables">Session &amp; agent tables</a></h3>
+<h3 id="session--run-tables"><a class="header" href="#session--run-tables">Session &amp; run tables</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Table</th><th>Purpose</th></tr>
 </thead>
 <tbody>
-<tr><td><code>sessions</code></td><td>Conversation containers, linked to a user</td></tr>
-<tr><td><code>agent_runs</code></td><td>One row per agent invocation, tracks status and summary</td></tr>
-<tr><td><code>messages</code></td><td>Conversation messages (user, assistant, tool, system), ordered by time</td></tr>
-<tr><td><code>capability_locks</code></td><td>Advisory locks for tool/model exclusivity during agent runs</td></tr>
-<tr><td><code>cron_jobs</code></td><td>Scheduled agent tasks with cron expressions</td></tr>
+<tr><td><code>sessions</code></td><td>Transcript containers, linked to a user</td></tr>
+<tr><td><code>runs</code></td><td>One row per run invocation, tracks lifecycle state for the run</td></tr>
+<tr><td><code>run_rounds</code></td><td>One row per inference round within a run</td></tr>
+<tr><td><code>transcript_entries</code></td><td>Transcript entries (user, assistant, tool, system), ordered by time</td></tr>
+<tr><td><code>tool_traces</code></td><td>Detailed records for tool execution attempts within a round</td></tr>
+<tr><td><code>run_summaries</code></td><td>Terminal summaries stored separately from run lifecycle metadata</td></tr>
+<tr><td><code>capability_locks</code></td><td>Advisory locks for tool/model exclusivity during runs</td></tr>
+<tr><td><code>cron_jobs</code></td><td>Scheduled run tasks with cron expressions</td></tr>
 </tbody>
 </table>
 </div>
 <h3 id="data-flow"><a class="header" href="#data-flow">Data flow</a></h3>
-<pre><code>User prompt
-  → messages table (role: "user")
-  → context assembly (SELECT * FROM messages WHERE session_id ORDER BY created_at)
+<pre><code>User input
+  → transcript_entries table (role: "user")
+  → context assembly (SELECT * FROM transcript_entries WHERE session_id ORDER BY created_at)
   → LLM inference (via node)
-  → messages table (role: "assistant" or "tool")
-  → agent_runs table (status: "completed")
+  → run_rounds table (round status + rationale + selected peer)
+  → transcript_entries table (role: "assistant" or "tool")
+  → tool_traces table (per tool invocation)
+  → runs table (status: "completed")
+  → run_summaries table (final summary text)
 </code></pre>
 <h2 id="categories"><a class="header" href="#categories">Categories</a></h2>
 <ul>
-<li><strong>Conversation / chat transcripts</strong> — stored in <code>messages</code> table per session</li>
-<li><strong>Daily / session summaries</strong> — stored as <code>agent_runs.summary</code></li>
-<li><strong>Core / long-term facts</strong> — SOUL.md and prefill markdown files in git storage</li>
-<li><strong>Notes</strong> — Timestamped agent-created notes in git storage</li>
+<li><strong>Transcript / chat history</strong> — stored in <code>transcript_entries</code> per session</li>
+<li><strong>Daily / session summaries</strong> — stored in <code>run_summaries</code></li>
+<li><strong>Core / long-term facts</strong> — Prompt documents in git storage</li>
+<li><strong>Notes</strong> — Timestamped run-created notes in git storage</li>
 </ul>
 
                     </main>

@@ -3,9 +3,9 @@ use nexo_ws_schema::Frame;
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
-/// Drain all queued agent runs, resuming them in the order they were queued.
+/// Drain all queued runs, resuming them in the order they were queued.
 ///
-/// This is called whenever a new LLM-capable node connects. Since `agent_task` is a single async
+/// This is called whenever a new LLM-capable node connects. Since the background run task is a
 /// task, all DrainQueue commands serialize naturally — there is no double-drain race.
 pub async fn drain_queue(
     db: &SqlitePool,
@@ -20,7 +20,7 @@ pub async fn drain_queue(
     // Fetch all queued runs in order they were queued
     let queued: Vec<(String, String, Option<String>, i64)> = match sqlx::query_as(
         "SELECT ar.id, ar.session_id, ar.model_id, ar.thinking
-            FROM agent_runs ar
+            FROM runs ar
             WHERE ar.status = 'queued'
             ORDER BY ar.queued_at ASC",
     )
@@ -38,13 +38,13 @@ pub async fn drain_queue(
         return;
     }
 
-    tracing::info!("Draining {} queued agent run(s)", queued.len());
+    tracing::info!("Draining {} queued run(s)", queued.len());
 
     for (run_id, session_id, model_id, thinking) in queued {
         // Claim the run by setting status to 'accepted'. This prevents re-processing if another
         // DrainQueue is somehow triggered before this one finishes.
         let result = sqlx::query(
-            "UPDATE agent_runs SET status = 'accepted', queued_at = NULL WHERE id = ? AND status = 'queued'",
+            "UPDATE runs SET status = 'accepted', queued_at = NULL WHERE id = ? AND status = 'queued'",
         )
         .bind(&run_id)
         .execute(db)
@@ -65,9 +65,9 @@ pub async fn drain_queue(
 
         tracing::info!("Resuming queued run {run_id} (session={session_id})");
 
-        // Look up the session's prefill_collection_id for this queued run
-        let prefill_collection_id: Option<String> = sqlx::query_as::<_, (Option<String>,)>(
-            "SELECT prefill_collection_id FROM sessions WHERE id = ?",
+        // Look up the session's prompt_collection_id for this queued run
+        let prompt_collection_id: Option<String> = sqlx::query_as::<_, (Option<String>,)>(
+            "SELECT prompt_collection_id FROM sessions WHERE id = ?",
         )
         .bind(&session_id)
         .fetch_optional(db)
@@ -84,7 +84,7 @@ pub async fn drain_queue(
             state,
             event_tx,
             model_id.as_deref(),
-            prefill_collection_id.as_deref(),
+            prompt_collection_id.as_deref(),
             thinking != 0,
         )
         .await;

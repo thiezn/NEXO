@@ -1,12 +1,12 @@
 //! WebSocket request handling for connected gateway peers.
 
-mod agent;
+mod run;
 mod base;
 mod connection;
 mod cron;
 mod dispatch;
 mod image_analyze;
-mod prefill;
+mod prompt;
 mod send;
 mod status;
 mod tools;

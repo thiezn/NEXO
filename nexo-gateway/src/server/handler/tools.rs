@@ -2,7 +2,7 @@
 
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
-    ErrorPayload, Frame, Method, Role, ToolsRegisterParams, ToolsRegisterResponse,
+    ConnectionRole, ErrorPayload, Frame, Method, ToolsRegisterParams, ToolsRegisterResponse,
 };
 
 use super::base::{
@@ -19,7 +19,7 @@ pub(super) async fn handle_register(
     {
         let state_read = state.read().await;
         match state_read.peers.get(peer_id) {
-            Some(peer) if peer.role == Role::Node => {}
+            Some(peer) if peer.role == ConnectionRole::Node => {}
             Some(_) => {
                 return Frame::error_response(
                     request_id,

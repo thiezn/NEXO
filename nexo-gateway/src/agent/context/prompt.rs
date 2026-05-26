@@ -1,19 +1,12 @@
-//! Prompt assembly helpers for agent runs.
+//! Prompt assembly helpers for runs.
 
+use nexo_spec::prompt::SystemPrompt;
 use nexo_ws_schema::ToolEntry;
 
 use crate::memory::git::GitStorage;
 use crate::server::state::SharedState;
 
-use super::{collections::load_context_collection_index, read_context_document};
-
-/// Prompt assets loaded from storage for a single agent run.
-pub struct SystemPromptAssets {
-    /// Contents of `SOUL.md`, or an empty string when unavailable.
-    pub soul_markdown: String,
-    /// Optional concatenated content from the selected stored context collection.
-    pub collection_markdown: Option<String>,
-}
+use super::{collections::load_prompt_collections, read_prompt_document};
 
 /// Build the tool-instruction section appended to the system prompt.
 pub fn build_tool_prompt_section(tools: &[ToolEntry]) -> String {
@@ -34,54 +27,40 @@ pub fn build_tool_prompt_section(tools: &[ToolEntry]) -> String {
     out
 }
 
-/// Load the stored prompt assets that contribute to a run's system prompt.
-pub async fn load_system_prompt_assets(
+/// Load the stored prompt that contributes to a run's system prompt.
+pub async fn load_system_prompt(
     state: &SharedState,
     collection_id: Option<&str>,
-) -> SystemPromptAssets {
+) -> Option<SystemPrompt> {
     let git = state.read().await.git_storage.clone();
     if let Some(git) = git {
         let selected_collection_id = collection_id.map(str::to_owned);
         tokio::task::spawn_blocking(move || {
-            let soul_markdown = git.read_file("SOUL.md").unwrap_or_default();
-            let collection_markdown = selected_collection_id.and_then(|collection_id| {
-                load_collection_prompt(&git, &collection_id)
+            selected_collection_id.and_then(|collection_id| {
+                load_prompt_collection_system_prompt(&git, &collection_id)
                     .ok()
                     .flatten()
-                    .map(|(content, _)| content)
-            });
-            SystemPromptAssets {
-                soul_markdown,
-                collection_markdown,
-            }
+            })
         })
         .await
-        .unwrap_or(SystemPromptAssets {
-            soul_markdown: String::new(),
-            collection_markdown: None,
-        })
+        .unwrap_or(None)
     } else {
-        SystemPromptAssets {
-            soul_markdown: String::new(),
-            collection_markdown: None,
-        }
+        None
     }
 }
 
-/// Load a stored context collection into concatenated markdown content plus its SHA-256 digest.
-///
+/// Load a stored prompt collection into concatenated markdown content.
 /// Returns `Ok(None)` when the collection does not exist.
 ///
 /// # Errors
 ///
 /// Returns an error when collection metadata cannot be loaded from storage.
-fn load_collection_prompt(
+fn load_prompt_collection_system_prompt(
     git: &GitStorage,
     collection_id: &str,
-) -> anyhow::Result<Option<(String, String)>> {
-    let collections_file = load_context_collection_index(git);
-    let collection = match collections_file
-        .collections
+) -> anyhow::Result<Option<SystemPrompt>> {
+    let collections = load_prompt_collections(git);
+    let collection = match collections
         .iter()
         .find(|collection| collection.id == collection_id)
     {
@@ -90,38 +69,21 @@ fn load_collection_prompt(
     };
 
     let mut parts = Vec::new();
-    for filename in &collection.markdown_files {
-        match read_context_document(git, filename) {
-            Ok(content) => parts.push(content),
+    for document_id in &collection.documents {
+        match read_prompt_document(git, document_id) {
+            Ok(document) => parts.push(document.content),
             Err(error) => {
-                tracing::warn!("Failed to read prefill file '{filename}': {error}");
+                tracing::warn!("Failed to read prompt document '{document_id}': {error}");
             }
         }
     }
 
-    let combined = parts.join("\n\n");
-    let sha = compute_content_sha(&combined);
-    Ok(Some((combined, sha)))
-}
-
-/// Compute the SHA-256 hex digest for assembled prompt content.
-fn compute_content_sha(content: &str) -> String {
-    use sha2::{Digest, Sha256};
-
-    let digest = Sha256::digest(content.as_bytes());
-    hex_encode(digest.as_ref())
-}
-
-/// Encode raw bytes as lowercase hexadecimal.
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
+    let content = parts.join("\n\n");
+    if content.is_empty() {
+        return Ok(None);
     }
-    out
+
+    Ok(Some(SystemPrompt { content }))
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! Round-based agent execution loop and supporting helpers.
+//! Round-based run execution loop and supporting helpers.
 
 mod engine;
 mod events;

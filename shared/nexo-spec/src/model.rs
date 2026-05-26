@@ -70,7 +70,7 @@ impl FromStr for ModelCategory {
 /// A loaded model with its supported categories.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct LoadedModelInfo {
     pub model_id: String,
     pub categories: Vec<ModelCategory>,

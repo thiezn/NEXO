@@ -2,7 +2,7 @@
 
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
-    ErrorPayload, EventKind, Frame, MessagePayload, Role, SendParams, SendResponse,
+    ConnectionRole, ErrorPayload, EventKind, Frame, MessagePayload, SendParams, SendResponse,
 };
 
 use super::base::{ok_or_internal_error, parse_params};
@@ -44,7 +44,7 @@ pub(super) async fn handle_send(
             }
         };
 
-        if peer.role != Role::User {
+        if peer.role != ConnectionRole::User {
             return Frame::error_response(
                 request_id,
                 ErrorPayload {

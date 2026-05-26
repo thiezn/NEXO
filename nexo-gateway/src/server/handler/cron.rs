@@ -20,7 +20,7 @@ pub(super) async fn handle_create(
         db,
         &cron_params.name,
         &cron_params.schedule,
-        &cron_params.prompt,
+        &cron_params.input,
         cron_params.session_id.as_deref(),
     )
     .await

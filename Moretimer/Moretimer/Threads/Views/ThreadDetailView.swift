@@ -98,7 +98,7 @@ struct ThreadDetailView: View {
             if thread.isLearningThread && thread.messages.isEmpty {
                 showDeckPicker = true
             }
-            await consumeAgentEvents()
+            await consumeRunEvents()
         }
     }
 
@@ -167,11 +167,11 @@ struct ThreadDetailView: View {
         try? modelContext.save()
 
         Task {
-            await sendAgentRequest(prompt: content, placeholder: placeholder)
+            await sendRunStartRequest(input: content, placeholder: placeholder)
         }
     }
 
-    private func sendAgentRequest(prompt: String, placeholder: MessageEntity) async {
+    private func sendRunStartRequest(input: String, placeholder: MessageEntity) async {
         do {
             if thread.nexoSessionId == nil {
                 let session = try await nexoService.sessionCreate(name: thread.title)
@@ -179,34 +179,34 @@ struct ThreadDetailView: View {
                 try? modelContext.save()
             }
 
-            let response = try await nexoService.agent(
-                prompt: prompt,
+            let response = try await nexoService.runStart(
+                input: input,
                 idempotencyKey: UUID().uuidString,
                 sessionId: thread.nexoSessionId
             )
             activeRun = ActiveRun(runId: response.runId, message: placeholder)
         } catch {
-            Logger.nexo.error("Agent request failed: \(error.localizedDescription)")
+            Logger.nexo.error("Run start failed: \(error.localizedDescription)")
             finishRun(content: "Failed to send message: \(error.localizedDescription)", failed: true)
         }
     }
 
     // MARK: - Event Subscription
 
-    private func consumeAgentEvents() async {
+    private func consumeRunEvents() async {
         let stream = nexoService.subscribe()
         for await frameEvent in stream {
             guard !Task.isCancelled else { break }
             guard activeRun != nil else { continue }
-            guard frameEvent.event == .agent else { continue }
-            guard let payload = try? frameEvent.payload(as: AgentEventPayload.self) else { continue }
+            guard frameEvent.event == .run else { continue }
+            guard let payload = try? frameEvent.payload(as: RunEventPayload.self) else { continue }
             guard payload.runId == activeRun?.runId else { continue }
 
-            handleAgentEvent(payload)
+            handleRunEvent(payload)
         }
     }
 
-    private func handleAgentEvent(_ payload: AgentEventPayload) {
+    private func handleRunEvent(_ payload: RunEventPayload) {
         guard let run = activeRun else { return }
         let message = run.message
 
@@ -224,7 +224,7 @@ struct ThreadDetailView: View {
             }
             finishRun(content: nil, failed: false)
         case .failed:
-            let errorMsg = payload.error ?? payload.content ?? "Agent run failed"
+            let errorMsg = payload.error ?? payload.content ?? "Run failed"
             finishRun(content: errorMsg, failed: true)
         case .toolCall:
             message.isThinking = true

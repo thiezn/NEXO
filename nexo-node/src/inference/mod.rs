@@ -5,5 +5,5 @@ mod dispatch;
 mod model_lifecycle;
 
 pub(crate) use cache::SessionCacheManager;
-pub(crate) use dispatch::{dispatch_agent_inference, dispatch_image_analyze};
+pub(crate) use dispatch::{dispatch_image_analyze, dispatch_run_round};
 pub(crate) use model_lifecycle::{handle_model_load, handle_model_unload};

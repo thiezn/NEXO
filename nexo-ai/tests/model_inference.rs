@@ -283,8 +283,8 @@ macro_rules! chat_test {
 
             let chat = model.as_chat().expect("should be a chat model");
             let request = ChatRequest {
-                messages: vec![ChatMessage::new(
-                    ChatRole::User,
+                messages: vec![TranscriptMessage::new(
+                    MessageRole::User,
                     "What is 2+2? Answer with just the number.",
                 )],
                 max_tokens: $max_tokens,
@@ -350,7 +350,7 @@ macro_rules! perf_test {
 
             // Warmup: prime Metal shader compilation
             let warmup = ChatRequest {
-                messages: vec![ChatMessage::new(ChatRole::User, "Hi")],
+                messages: vec![TranscriptMessage::new(MessageRole::User, "Hi")],
                 max_tokens: 2,
                 temperature: 0.1,
                 top_p: 0.9,
@@ -361,8 +361,8 @@ macro_rules! perf_test {
 
             // Benchmark
             let request = ChatRequest {
-                messages: vec![ChatMessage::new(
-                    ChatRole::User,
+                messages: vec![TranscriptMessage::new(
+                    MessageRole::User,
                     "Write a short paragraph about the history of computing.",
                 )],
                 max_tokens: 128,
@@ -451,8 +451,8 @@ macro_rules! tool_test {
 
             let tool = model.as_tool().expect("should be a tool model");
             let request = ToolCallRequest {
-                messages: vec![ChatMessage::new(
-                    ChatRole::User,
+                messages: vec![TranscriptMessage::new(
+                    MessageRole::User,
                     "What is the weather in Amsterdam?",
                 )],
                 tools: vec![nexo_spec::tool::ToolSpec {
@@ -531,8 +531,8 @@ macro_rules! gguf_chat_test {
 
             let chat = model.as_chat().expect("should be a chat model");
             let request = ChatRequest {
-                messages: vec![ChatMessage::new(
-                    ChatRole::User,
+                messages: vec![TranscriptMessage::new(
+                    MessageRole::User,
                     "What is 2+2? Answer with just the number.",
                 )],
                 max_tokens: $max_tokens,

@@ -51,7 +51,7 @@ final class ThreadEntity {
     var isRead: Bool
     var createdAt: Date
     var lastMessageAt: Date
-    /// Gateway session ID, set on first agent request.
+    /// Gateway session ID, set on the first run-start request.
     var nexoSessionId: String?
 
     @Relationship(deleteRule: .cascade, inverse: \MessageEntity.thread)

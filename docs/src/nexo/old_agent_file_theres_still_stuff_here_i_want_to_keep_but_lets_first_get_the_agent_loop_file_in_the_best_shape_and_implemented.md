@@ -1,8 +1,15 @@
-# Agent Loop
+# Archived Agent Loop Note
 
-The agent loop is the brain of the NEXO system. It receives structured requests from
-the gateway WebSocket, orchestrates inference and tool execution, and streams lifecycle
-events back to the client.
+This file is archived background material kept for historical notes only. The active
+source of truth is the current run-based protocol and gateway/runtime documentation in
+the main NEXO docs.
+
+The current public surface uses `run.start`, `run.instructions.append`, `run.stop`,
+`run.round`, `run` events, transcript terminology, `PROMPTS/`, `prompt_collection_id`,
+`runs`, and `run_rounds`.
+
+Any remaining content below may describe older internal names or intermediate design
+ideas and should not be treated as normative.
 
 ## Overview
 
@@ -24,12 +31,12 @@ sequenceDiagram
     participant Brain
     participant Node
 
-    Client->>Gateway: request:agent {prompt, sessionId?}
-    Gateway->>Brain: AgentCommand::RunAgent
-    Gateway-->>Client: response:agent {runId, sessionId, status:"accepted"}
+    Client->>Gateway: request:run.start {input, sessionId?}
+    Gateway->>Brain: AgentCommand::StartRun
+    Gateway-->>Client: response:run.start {runId, sessionId, status:"accepted"}
 
     Brain->>Brain: persist user message
-    Brain-->>Client: event:agent {status:"thinking"}
+    Brain-->>Client: event:run {status:"thinking"}
     Brain->>Brain: assemble context
     Brain->>Brain: acquire capability lock
     Brain->>Node: forward inference request
@@ -37,10 +44,10 @@ sequenceDiagram
 
     alt Plain reply
         Brain->>Brain: persist assistant message
-        Brain-->>Client: event:agent {status:"streaming", content}
-        Brain-->>Client: event:agent {status:"completed"}
+        Brain-->>Client: event:run {status:"streaming", content}
+        Brain-->>Client: event:run {status:"completed"}
     else Tool calls
-        Brain-->>Client: event:agent {status:"tool_call", toolName}
+        Brain-->>Client: event:run {status:"tool_call", toolName}
         Brain->>Node: tools.execute {tool, args}
         Node-->>Brain: tool result
         Brain->>Brain: persist tool result
@@ -139,10 +146,10 @@ sequenceDiagram
     GW-->>App: {sessionId}
     App->>App: store sessionId on thread
 
-    App->>GW: agent {prompt, sessionId}
+    App->>GW: run.start {input, sessionId}
     GW->>DB: INSERT run + user message
     GW-->>App: response {runId, sessionId, status: accepted}
-    GW-->>App: event:agent {status: thinking}
+    GW-->>App: event:run {status: thinking}
 
     GW->>GW: ensure_model_loaded
     alt Model not in VRAM
@@ -151,19 +158,19 @@ sequenceDiagram
         Node->>GW: model.status (push)
     end
 
-    GW->>GW: load SOUL.md + resolve prefill (if collection set)
-    GW->>GW: build system prompt (SOUL + prefill + tools)
-    GW->>Node: agent {messages, tools}
+    GW->>GW: resolve prompt collection (if session set)
+    GW->>GW: build system prompt (prompt collection + tools)
+    GW->>Node: run.round {messages, tools}
 
     Node-->>GW: inference response
 
     alt Plain reply
         GW->>DB: INSERT assistant message
-        GW-->>App: event:agent {status: streaming, content}
-        GW-->>App: event:agent {status: completed}
+        GW-->>App: event:run {status: streaming, content}
+        GW-->>App: event:run {status: completed}
         App->>App: update message bubble
     else Tool calls
-        GW-->>App: event:agent {status: tool_call, toolName}
+        GW-->>App: event:run {status: tool_call, toolName}
         alt Gateway-native tool
             GW->>GW: execute locally (e.g. notes.create)
         else Node tool
@@ -171,11 +178,11 @@ sequenceDiagram
             Node-->>GW: tool result
         end
         GW->>DB: INSERT tool message
-        GW->>Node: agent {messages + tool results}
+        GW->>Node: run.round {messages + tool results}
         Node-->>GW: final response
         GW->>DB: INSERT assistant message
-        GW-->>App: event:agent {status: streaming, content}
-        GW-->>App: event:agent {status: completed}
+        GW-->>App: event:run {status: streaming, content}
+        GW-->>App: event:run {status: completed}
     end
 
     Note over App: Later, on re-open
@@ -196,21 +203,21 @@ sequenceDiagram
     participant DB as SQLite
     participant Node as LLM Node
 
-    App->>GW: agent {prompt, sessionId}
+    App->>GW: run.start {input, sessionId}
     GW->>DB: INSERT run (status: accepted)
     GW-->>App: response {runId, status: accepted}
     GW->>GW: no LLM node available
     GW->>DB: UPDATE run (status: queued)
-    GW-->>App: event:agent {status: queued}
+    GW-->>App: event:run {status: queued}
 
     Note over Node: Node connects later
     Node->>GW: connect {models: [...]}
     GW->>GW: drain_queue
     GW->>DB: claim queued runs
-    GW->>Node: model.load + agent (inference)
+    GW->>Node: model.load + run.round
     Node-->>GW: response
-    GW-->>App: event:agent {status: streaming, content}
-    GW-->>App: event:agent {status: completed}
+    GW-->>App: event:run {status: streaming, content}
+    GW-->>App: event:run {status: completed}
 ```
 
 ## Thinking mode
@@ -245,9 +252,8 @@ When using Gemma 4 models, the recommended sampling configuration is:
 The system prompt is assembled from these sources, in order:
 
 1. **Thinking token** — If `thinking: true`, the `<|think|>` token is prepended.
-2. **SOUL.md** — Always loaded from `~/.nexo/nexo-storage/SOUL.md` (if it exists). Defines the agent's personality and persistent instructions.
-3. **Prefill collection** — If the session has a `prefill_collection_id`, the gateway resolves it from `PREFILL/collections.json`, reads each referenced markdown file, and concatenates them.
-4. **Tool descriptions** — A structured description of all available tools (both node-registered and gateway-native).
+2. **Prompt collection** — If the session has a `prompt_collection_id`, the gateway resolves it from `PROMPTS/collections.json`, reads each referenced prompt document, and concatenates them.
+3. **Tool descriptions** — A structured description of all available tools (both node-registered and gateway-native).
 
 If none of these produce content, a default "You are a helpful assistant." prompt is used.
 

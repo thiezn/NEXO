@@ -1,8 +1,8 @@
-# NEXO Agent Loop Architecture
+# NEXO Run Loop Architecture
 
 ## 1. Scope
 
-This document specifies the NEXO agent loop at the level of three actors: **Client**, **Gateway**, and **Node**. It describes how runs are coordinated, how inference and tools are orchestrated, and how progress is tracked. Transport-layer concerns (connection management, authentication, retries, message framing, delivery semantics) are out of scope.
+This document specifies the NEXO run loop at the level of three actors: **Client**, **Gateway**, and **Node**. It describes how runs are coordinated, how inference and tools are orchestrated, and how progress is tracked. Transport-layer concerns (connection management, authentication, retries, message framing, delivery semantics) are out of scope.
 
 ***
 
@@ -21,7 +21,7 @@ The client initiates and steers a run, and consumes streamed progress and result
 
 ### 2.2 Gateway
 
-The gateway is the authoritative coordinator and state holder for the agent loop.
+The gateway is the authoritative coordinator and state holder for the run loop.
 
 **Responsibilities**
 
@@ -62,7 +62,7 @@ Nodes execute inference and tools. Nodes are not authoritative and do not hold d
 ### 3.1 Terminology
 
 * **Request**: One client submission that starts (or augments) a **Run**.
-* **Run**: A full agent loop execution for a single request, consisting of one or more rounds.
+* **Run**: A full run loop execution for a single request, consisting of one or more rounds.
 * **Round**: One cycle of context assembly → single inference → tool orchestration (0..n tools) → observation/aggregation → next decision.
 
 ### 3.2 Run Record (Gateway-owned)
@@ -78,7 +78,7 @@ A run **MUST** persist:
 
 ***
 
-## 4. Agent Loop Execution
+## 4. Run Loop Execution
 
 ### 4.1 High-Level Round Structure
 
@@ -262,5 +262,5 @@ The following items are acknowledged but not finalized:
 
 ### 10. Summary
 
-NEXO is a gateway-centric agent loop where the gateway owns durable state, per-round routing, tool orchestration and context window management. Nodes provide inference and tools with shared schemas but remain ephemeral and replaceable. Each round performs exactly one inference, applies a clear read-only vs. side-effect parallelism policy, and iterates until termination conditions are met or execution becomes blocked awaiting tool availability.
+NEXO is a gateway-centric run loop where the gateway owns durable state, per-round routing, tool orchestration and context window management. Nodes provide inference and tools with shared schemas but remain ephemeral and replaceable. Each round performs exactly one inference, applies a clear read-only vs. side-effect parallelism policy, and iterates until termination conditions are met or execution becomes blocked awaiting tool availability.
 

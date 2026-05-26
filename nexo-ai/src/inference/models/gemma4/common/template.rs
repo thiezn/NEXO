@@ -1,20 +1,24 @@
-use crate::api::types::{ChatMessage, ChatRole, ToolCall};
+use crate::api::types::{MessageRole, ToolCall, TranscriptMessage};
 use crate::inference::models::support::prompting::{ChatTemplate, ReasoningMode};
 
 pub struct Gemma4Template;
 
 impl ChatTemplate for Gemma4Template {
-    fn format_prompt(&self, messages: &[ChatMessage], _reasoning: &ReasoningMode) -> String {
+    fn format_prompt(&self, messages: &[TranscriptMessage], _reasoning: &ReasoningMode) -> String {
         let mut prompt = String::new();
 
         for (i, msg) in messages.iter().enumerate() {
             let role = match msg.role {
-                ChatRole::System => "system",
-                ChatRole::User => "user",
-                ChatRole::Assistant => "model",
-                ChatRole::Tool => {
+                MessageRole::System => "system",
+                MessageRole::Developer => "developer",
+                MessageRole::User => "user",
+                MessageRole::Assistant => "model",
+                MessageRole::Tool => {
                     let needs_turn = i == 0
-                        || !matches!(messages[i - 1].role, ChatRole::Assistant | ChatRole::Tool);
+                        || !matches!(
+                            messages[i - 1].role,
+                            MessageRole::Assistant | MessageRole::Tool | MessageRole::Developer
+                        );
                     if needs_turn {
                         prompt.push_str("<|turn>model\n");
                     }
@@ -24,7 +28,7 @@ impl ChatTemplate for Gemma4Template {
                     if needs_turn {
                         let next_is_model = messages
                             .get(i + 1)
-                            .is_some_and(|m| matches!(m.role, ChatRole::Assistant));
+                            .is_some_and(|m| matches!(m.role, MessageRole::Assistant));
                         if !next_is_model {
                             prompt.push_str("<turn|>\n");
                         }
@@ -35,13 +39,13 @@ impl ChatTemplate for Gemma4Template {
 
             let next_is_tool = messages
                 .get(i + 1)
-                .is_some_and(|m| matches!(m.role, ChatRole::Tool));
+                .is_some_and(|m| matches!(m.role, MessageRole::Tool));
 
             prompt.push_str("<|turn>");
             prompt.push_str(role);
             prompt.push('\n');
             prompt.push_str(&msg.content);
-            if !(msg.role == ChatRole::Assistant && next_is_tool) {
+            if !(msg.role == MessageRole::Assistant && next_is_tool) {
                 prompt.push_str("<turn|>\n");
             }
         }
@@ -52,7 +56,7 @@ impl ChatTemplate for Gemma4Template {
 
     fn format_with_tools(
         &self,
-        messages: &[ChatMessage],
+        messages: &[TranscriptMessage],
         tools: &[nexo_spec::tool::ToolSpec],
         reasoning: &ReasoningMode,
     ) -> String {
@@ -147,9 +151,9 @@ impl ChatTemplate for Gemma4Template {
 }
 
 pub fn build_tool_messages(
-    messages: &[ChatMessage],
+    messages: &[TranscriptMessage],
     tools: &[nexo_spec::tool::ToolSpec],
-) -> Vec<ChatMessage> {
+) -> Vec<TranscriptMessage> {
     let mut tool_decls = String::new();
     for tool in tools {
         tool_decls.push_str(&format_tool_declaration(tool));
@@ -161,7 +165,7 @@ pub fn build_tool_messages(
     );
 
     let mut augmented = Vec::with_capacity(messages.len() + 1);
-    augmented.push(ChatMessage::new(ChatRole::System, system_text));
+    augmented.push(TranscriptMessage::new(MessageRole::System, system_text));
     augmented.extend_from_slice(messages);
     augmented
 }
@@ -394,7 +398,7 @@ mod tests {
     #[test]
     fn build_tool_messages_inserts_system_instruction() {
         let augmented = build_tool_messages(
-            &[ChatMessage::new(ChatRole::User, "Use a tool.")],
+            &[TranscriptMessage::new(MessageRole::User, "Use a tool.")],
             &[nexo_spec::tool::ToolSpec {
                 name: "get_weather".into(),
                 description: "Get weather for a location".into(),
@@ -412,7 +416,7 @@ mod tests {
         );
 
         assert_eq!(augmented.len(), 2);
-        assert_eq!(augmented[0].role, ChatRole::System);
+        assert_eq!(augmented[0].role, MessageRole::System);
         assert!(augmented[0].content.contains("tool_call block"));
         assert!(
             augmented[0]
@@ -423,7 +427,7 @@ mod tests {
 
     #[test]
     fn format_simple_prompt() {
-        let msgs = vec![ChatMessage::new(ChatRole::User, "Hello!")];
+        let msgs = vec![TranscriptMessage::new(MessageRole::User, "Hello!")];
 
         let result = template().format_prompt(&msgs, &ReasoningMode::Disabled);
 
@@ -434,8 +438,8 @@ mod tests {
     #[test]
     fn format_with_system() {
         let msgs = vec![
-            ChatMessage::new(ChatRole::System, "You are helpful."),
-            ChatMessage::new(ChatRole::User, "Hi"),
+            TranscriptMessage::new(MessageRole::System, "You are helpful."),
+            TranscriptMessage::new(MessageRole::User, "Hi"),
         ];
 
         let result = template().format_prompt(&msgs, &ReasoningMode::Disabled);
@@ -448,9 +452,9 @@ mod tests {
     #[test]
     fn format_multi_turn() {
         let msgs = vec![
-            ChatMessage::new(ChatRole::User, "Hi"),
-            ChatMessage::new(ChatRole::Assistant, "Hello!"),
-            ChatMessage::new(ChatRole::User, "How are you?"),
+            TranscriptMessage::new(MessageRole::User, "Hi"),
+            TranscriptMessage::new(MessageRole::Assistant, "Hello!"),
+            TranscriptMessage::new(MessageRole::User, "How are you?"),
         ];
 
         let result = template().format_prompt(&msgs, &ReasoningMode::Disabled);
@@ -549,9 +553,9 @@ mod tests {
     #[test]
     fn tool_response_merges_into_model_turn() {
         let msgs = vec![
-            ChatMessage::new(ChatRole::User, "What's the weather?"),
-            ChatMessage::new(ChatRole::Assistant, "Let me check."),
-            ChatMessage::new(ChatRole::Tool, "temperature: 15C"),
+            TranscriptMessage::new(MessageRole::User, "What's the weather?"),
+            TranscriptMessage::new(MessageRole::Assistant, "Let me check."),
+            TranscriptMessage::new(MessageRole::Tool, "temperature: 15C"),
         ];
 
         let result = template().format_prompt(&msgs, &ReasoningMode::Disabled);

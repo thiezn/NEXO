@@ -1,6 +1,6 @@
 # Inference Sessions
 
-Sessions track multi-turn conversations between a client and the agent loop. Each session maintains a unique `session_id` that flows from the gateway through to the inference node, enabling KV cache reuse across consecutive requests.
+Sessions track multi-turn transcript history between a client and the run loop. Each session maintains a unique `session_id` that flows from the gateway through to the inference node, enabling KV cache reuse across consecutive requests.
 
 ---
 
@@ -8,11 +8,11 @@ Sessions track multi-turn conversations between a client and the agent loop. Eac
 
 ### Creation
 
-Sessions are created explicitly via `session.create` or implicitly when an `agent` request is sent without a `sessionId`. The gateway stores session metadata in SQLite and returns a UUID v7 session ID.
+Sessions are created explicitly via `session.create` or implicitly when a `run.start` request is sent without a `sessionId`. The gateway stores session metadata in SQLite and returns a UUID v7 session ID.
 
 ### Resumption
 
-After a client restart, `session.list` returns all previous sessions. The client can resume by including the `sessionId` in subsequent `agent` requests. The full conversation history is loaded from the gateway's message store and sent to the node as context.
+After a client restart, `session.list` returns all previous sessions. The client can resume by including the `sessionId` in subsequent `run.start` requests. The full transcript history is loaded from the gateway's message store and sent to the node as context.
 
 ### Session ID propagation
 
@@ -21,21 +21,21 @@ The gateway forwards `session_id` to the inference node as part of the inference
 ```
 Client                  Gateway                       Node
   |                        |                            |
-  |-- agent -------------->|                            |
-  |  { prompt, sessionId } |                            |
+  |-- run.start ---------->|                            |
+  |  { input, sessionId }  |                            |
   |                        |-- inference -------------->|
   |                        |  { messages, session_id }  |
   |                        |                            | prefix matching
   |                        |                            | (reuse KV cache)
   |                        |<-- response ---------------|
-  |<-- agent event --------|                            |
+  |<-- run event ----------|                            |
 ```
 
 ---
 
 ## 2. KV Cache Prefix Reuse
 
-The most impactful optimization in session handling is **KV cache prefix reuse**. In multi-turn conversations, each new request contains the full conversation history. Without caching, the model re-processes all previous tokens from scratch on every request. For a 2000-token conversation, this wastes ~90% of prefill time on tokens already seen.
+The most impactful optimization in session handling is **KV cache prefix reuse**. In multi-turn transcript flows, each new request contains the full transcript history. Without caching, the model re-processes all previous tokens from scratch on every request. For a 2000-token transcript, this wastes ~90% of prefill time on tokens already seen.
 
 ### How it works
 

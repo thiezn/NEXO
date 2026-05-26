@@ -1,6 +1,6 @@
 //! Application bootstrap that wires storage, background tasks, and the WebSocket server.
 
-use crate::agent::AgentHandle;
+use crate::agent::RunHandle;
 use crate::config::GatewayConfig;
 use crate::memory::git::GitStorage;
 use crate::server::state::{GatewayState, SharedState};
@@ -40,10 +40,10 @@ pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
     let event_tx = gateway_state.event_tx.clone();
     let state: SharedState = Arc::new(RwLock::new(gateway_state));
 
-    let agent_handle = AgentHandle::spawn(db.clone(), state.clone(), event_tx.clone());
+    let run_handle = RunHandle::spawn(db.clone(), state.clone(), event_tx.clone());
 
     seed_default_cron_jobs(&db);
-    spawn_background_tasks(config, &db, &event_tx, &agent_handle);
+    spawn_background_tasks(config, &db, &event_tx, &run_handle);
 
     let addr = config.bind_addr();
     let listener = TcpListener::bind(&addr)
@@ -65,7 +65,7 @@ pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
         let state = state.clone();
         let db = db.clone();
         let auth_token = auth_token.clone();
-        let agent_handle = agent_handle.clone();
+        let run_handle = run_handle.clone();
 
         tokio::spawn(async move {
             #[allow(clippy::result_large_err)]
@@ -93,7 +93,7 @@ pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
             };
 
             let event_rx = state.read().await.event_tx.subscribe();
-            crate::server::handler::handle_connection(ws_stream, state, db, event_rx, agent_handle)
+            crate::server::handler::handle_connection(ws_stream, state, db, event_rx, run_handle)
                 .await;
         });
     }
@@ -174,9 +174,9 @@ fn spawn_background_tasks(
     config: &GatewayConfig,
     db: &sqlx::SqlitePool,
     event_tx: &tokio::sync::broadcast::Sender<nexo_ws_schema::Frame>,
-    agent_handle: &AgentHandle,
+    run_handle: &RunHandle,
 ) {
-    let cron_handle = agent_handle.clone();
+    let cron_handle = run_handle.clone();
     let cron_db = db.clone();
     let cron_event_tx = event_tx.clone();
     tokio::spawn(async move {

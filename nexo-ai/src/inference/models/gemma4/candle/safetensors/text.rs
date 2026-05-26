@@ -318,7 +318,7 @@ struct Attention {
 }
 
 impl Attention {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn new(
         rotary_emb_global: Arc<ProportionalRotaryEmbedding>,
         rotary_emb_local: Arc<RotaryEmbedding>,

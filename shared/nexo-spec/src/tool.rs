@@ -27,7 +27,7 @@ pub enum ToolSideEffectLevel {
 /// Scheduling constraints that guide gateway tool orchestration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ToolExecutionConstraints {
     /// The declared side-effect level for this tool.
     #[serde(default)]
@@ -47,7 +47,7 @@ impl ToolExecutionConstraints {
 /// Description of a tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ToolSpec {
     pub name: String,
     pub description: String,

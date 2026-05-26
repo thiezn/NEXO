@@ -192,7 +192,7 @@ mod tests {
                 version: "1.2.3".into(),
                 platform: Platform::Macos,
             },
-            role: Role::User,
+            role: ConnectionRole::User,
             scopes: vec![Scope::UserRead, Scope::UserWrite],
             capabilities: vec![],
             commands: vec![],

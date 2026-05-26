@@ -98,8 +98,8 @@ Node tools are provided by external processes (nexo-node instances) that connect
 1. A **nexo-node** starts and connects to the gateway with `role: node`
 2. After handshake, the node sends `tools.register` with full tool specifications (name, description, JSON Schema parameters)
 3. The gateway stores these in an **in-memory registry** (not persisted to disk)
-4. Users/agents can query available tools via `tools.catalog`
-5. Users/agents can execute tools via `tools.execute` — the gateway routes the request to the owning node and relays the response
+4. Clients and automated runs can query available tools via `tools.catalog`
+5. Clients and automated runs can execute tools via `tools.execute` — the gateway routes the request to the owning node and relays the response
 
 ### Lifecycle
 

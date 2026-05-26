@@ -268,11 +268,12 @@ Error cases:
 - `tool_unavailable`: the node hosting the tool is disconnected
 - `timeout`: the node did not respond within 30 seconds
 
-## Agent (`agent`)
+## Runs
 
-Start an agent run. The gateway creates (or resumes) a session, acknowledges
-immediately with `status: "accepted"`, then streams `agent` events as the brain
-processes the request.
+The public run lifecycle is split across `run.start`, `run.instructions.append`,
+and `run.stop`. The gateway creates (or resumes) a session, acknowledges
+immediately with `status: "accepted"`, then streams `run` events as the background
+run task processes the request.
 
 Client → Gateway:
 
@@ -280,12 +281,12 @@ Client → Gateway:
 {
   "type": "request",
   "id": "…",
-  "method": "agent",
+  "method": "run.start",
   "params": {
-    "prompt": "Summarize today's news",
+    "input": "Summarize today's news",
     "idempotencyKey": "key-456",
     "sessionId": "optional-session-id",
-    "context": { "files": ["notes.md"] },
+    "instructions": { "files": ["notes.md"] },
     "thinking": true,
     "modelId": "gemma4-27b"
   }
@@ -310,24 +311,24 @@ Gateway → Client (immediate ack):
 Gateway → Client (streaming events):
 
 ```json
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run" } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run", "toolCallId": "call-1" } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
 ```
 
-### Agent params
+### `run.start` params
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `prompt` | string | yes | The user message |
+| `input` | string | yes | The user message |
 | `idempotencyKey` | string | yes | Deduplication key |
 | `sessionId` | string | no | Resume existing session |
-| `context` | object | no | Additional context blob |
+| `instructions` | object | no | Additional structured instructions persisted into the transcript |
 | `thinking` | bool | no | Enable extended thinking mode (default: false) |
 | `modelId` | string | no | Request a specific model |
 
-### Agent event payload
+### `run` event payload
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -337,25 +338,67 @@ Gateway → Client (streaming events):
 | `content` | string? | Visible reply text (on `streaming`) |
 | `thinkingContent` | string? | Ephemeral thinking text (on `streaming`, when thinking enabled) |
 | `toolName` | string? | Tool being called (on `tool_call`) |
+| `toolCallId` | string? | Tool call identifier (on tool events) |
 | `error` | string? | Error message (on `failed`) |
 
-### Agent status values
+### `run` status values
 
 `accepted` → `thinking` → `streaming` → `completed`
 `accepted` → `thinking` → `tool_call` → `thinking` → ... → `completed`
 Any state → `failed` (on error) or `cancelled` (client-initiated).
 
+### `run.instructions.append`
+
+Append structured instructions to an active run. The gateway persists the payload as an
+`instruction` transcript entry and the next round will observe it.
+
+```json
+{
+  "type": "request",
+  "id": "…",
+  "method": "run.instructions.append",
+  "params": {
+    "runId": "run-uuid-v7",
+    "instructions": { "notes": ["daily.md"] }
+  }
+}
+```
+
+```json
+{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": {
+    "queued": true,
+    "messageId": "msg-uuid-v7"
+  }
+}
+```
+
+### `run.stop`
+
+Stop an active run.
+
+```json
+{ "type": "request", "id": "…", "method": "run.stop", "params": { "runId": "run-uuid-v7" } }
+```
+
+```json
+{ "type": "response", "id": "…", "ok": true, "payload": { "stopped": true } }
+```
+
 ## Sessions
 
 ### `session.create`
 
-Create a new conversation session.
+Create a new transcript session.
 
 ```json
-{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat" } }
+{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat", "promptCollectionId": "default" } }
 ```
 ```json
-{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…" } }
+{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…", "promptCollectionId": "default" } }
 ```
 
 ### `session.list`
@@ -370,7 +413,7 @@ List all sessions for the current user.
   "type": "response", "id": "…", "ok": true,
   "payload": {
     "sessions": [
-      { "sessionId": "…", "name": "My chat", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
+      { "sessionId": "…", "name": "My chat", "promptCollectionId": "default", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
     ]
   }
 }
@@ -378,7 +421,7 @@ List all sessions for the current user.
 
 ### `session.get`
 
-Retrieve a session with its full message history.
+Retrieve a session with its full transcript history.
 
 ```json
 { "type": "request", "id": "…", "method": "session.get", "params": { "sessionId": "…" } }
@@ -387,10 +430,10 @@ Retrieve a session with its full message history.
 {
   "type": "response", "id": "…", "ok": true,
   "payload": {
-    "sessionId": "…", "name": "My chat", "createdAt": "…",
+    "sessionId": "…", "name": "My chat", "promptCollectionId": "default", "createdAt": "…",
     "messages": [
-      { "id": "…", "role": "user", "content": "hello", "createdAt": "…" },
-      { "id": "…", "role": "assistant", "content": "hi back", "createdAt": "…" }
+      { "id": "…", "role": "user", "content": "hello", "kind": "user_input", "createdAt": "…" },
+      { "id": "…", "role": "assistant", "content": "hi back", "kind": "assistant_response", "createdAt": "…" }
     ]
   }
 }
@@ -411,12 +454,12 @@ Delete a session and all associated data (messages, runs).
 
 ### `cron.create`
 
-Create a scheduled agent task.
+Create a scheduled run task.
 
 ```json
 {
   "type": "request", "id": "…", "method": "cron.create",
-  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "prompt": "Summarize yesterday" }
+  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "input": "Summarize yesterday" }
 }
 ```
 ```json

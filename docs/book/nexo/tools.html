@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b491b92b.js";
+            window.path_to_searchindex_js = "../searchindex-240f1b22.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-aa7fd050.js"></script>
@@ -257,6 +257,13 @@
 <li><strong>JSON</strong> — compacted (values preserved, long strings truncated, arrays summarized)</li>
 <li><strong>Other</strong> — returned as plain text with truncation</li>
 </ul>
+<h3 id="todo-tools"><a class="header" href="#todo-tools">Todo tools</a></h3>
+<p>TODO operations (<code>create</code>, <code>add</code>, <code>list</code>, <code>complete</code>, <code>delete</code>, <code>reorder</code>) are exposed as tools.</p>
+<ul>
+<li>These tools execute on the gateway (like other gateway-hosted tools).</li>
+<li>Results are appended to the transcript exactly like any other tool result.</li>
+<li>The gateway does <strong>not</strong> enforce TODO completion for run termination, it’s up to the model to manage the TODO list and decide when it’s “done.”</li>
+</ul>
 <h3 id="notes-tools"><a class="header" href="#notes-tools">Notes tools</a></h3>
 <p>Git-backed note-taking for persistent memory across conversations.</p>
 <div class="table-wrapper">
@@ -280,8 +287,8 @@
 <li>A <strong>nexo-node</strong> starts and connects to the gateway with <code>role: node</code></li>
 <li>After handshake, the node sends <code>tools.register</code> with full tool specifications (name, description, JSON Schema parameters)</li>
 <li>The gateway stores these in an <strong>in-memory registry</strong> (not persisted to disk)</li>
-<li>Users/agents can query available tools via <code>tools.catalog</code></li>
-<li>Users/agents can execute tools via <code>tools.execute</code> — the gateway routes the request to the owning node and relays the response</li>
+<li>Clients and automated runs can query available tools via <code>tools.catalog</code></li>
+<li>Clients and automated runs can execute tools via <code>tools.execute</code> — the gateway routes the request to the owning node and relays the response</li>
 </ol>
 <h3 id="lifecycle"><a class="header" href="#lifecycle">Lifecycle</a></h3>
 <ul>

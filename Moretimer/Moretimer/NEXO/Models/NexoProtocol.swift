@@ -16,7 +16,9 @@ enum NexoMethod: String, Codable, Sendable {
     case health
     case status
     case send
-    case agent
+    case runStart = "run.start"
+    case runStop = "run.stop"
+    case runInstructionsAppend = "run.instructions.append"
     case systemPresence = "system-presence"
 
     // Tools
@@ -43,20 +45,19 @@ enum NexoMethod: String, Codable, Sendable {
     // Image
     case imageAnalyze = "image.analyze"
 
-    // Prefill
-    case prefillFetch = "prefill.fetch"
-    case prefillMarkdownCreate = "prefill.markdown.create"
-    case prefillMarkdownList = "prefill.markdown.list"
-    case prefillMarkdownDelete = "prefill.markdown.delete"
-    case prefillCollectionCreate = "prefill.collection.create"
-    case prefillCollectionList = "prefill.collection.list"
-    case prefillCollectionDelete = "prefill.collection.delete"
+    // Prompt library
+    case promptDocumentCreate = "prompt.document.create"
+    case promptDocumentList = "prompt.document.list"
+    case promptDocumentDelete = "prompt.document.delete"
+    case promptCollectionCreate = "prompt.collection.create"
+    case promptCollectionList = "prompt.collection.list"
+    case promptCollectionDelete = "prompt.collection.delete"
 }
 
 /// Server-push event kinds.
 enum NexoEventKind: String, Codable, Sendable {
     case tick
-    case agent
+    case run
     case presence
     case shutdown
     case heartbeat
@@ -64,7 +65,7 @@ enum NexoEventKind: String, Codable, Sendable {
 }
 
 /// Connection role: user (control-plane client) or node (capability host).
-enum NexoRole: String, Codable, Sendable {
+enum NexoConnectionRole: String, Codable, Sendable {
     case user
     case node
 }
@@ -94,9 +95,9 @@ enum NexoPlatform: String, Codable, Sendable {
     }
 }
 
-/// Agent run lifecycle status.
+/// Run lifecycle status.
 /// Wire format uses snake_case (e.g. `"tool_call"`).
-enum AgentStatus: String, Codable, Sendable {
+enum RunStatus: String, Codable, Sendable {
     case accepted
     case queued
     case thinking
@@ -176,7 +177,7 @@ struct NexoConnectParams: Codable, Sendable {
     let minProtocol: UInt32
     let maxProtocol: UInt32
     let client: NexoClientInfo
-    let role: NexoRole
+    let role: NexoConnectionRole
     var scopes: [NexoScope] = []
     var capabilities: [String] = []
     var commands: [String] = []
@@ -222,12 +223,13 @@ struct SendParams: Codable, Sendable {
     let idempotencyKey: String
 }
 
-struct AgentParams: Codable, Sendable {
-    let prompt: String
+struct RunStartParams: Codable, Sendable {
+    let input: String
     let idempotencyKey: String
     var sessionId: String?
-    var context: JSONValue?
+    var instructions: JSONValue?
     var modelId: String?
+    var thinking: Bool?
 }
 
 struct SystemPresenceParams: Codable, Sendable {
@@ -269,10 +271,10 @@ struct SendResponse: Codable, Sendable {
     let delivered: Bool
 }
 
-struct AgentResponse: Codable, Sendable {
+struct RunStartResponse: Codable, Sendable {
     let runId: String
     let sessionId: String
-    let status: AgentStatus
+    let status: RunStatus
     var summary: String?
 }
 
@@ -295,19 +297,20 @@ struct TickPayload: Codable, Sendable {
     let seq: UInt64
 }
 
-struct AgentEventPayload: Codable, Sendable {
+struct RunEventPayload: Codable, Sendable {
     let runId: String
     let sessionId: String
-    let status: AgentStatus
+    let status: RunStatus
     var content: String?
     var toolName: String?
     var toolCallId: String?
     var error: String?
+    var thinkingContent: String?
 }
 
 struct PresencePayload: Codable, Sendable {
     let clientId: String
-    let role: NexoRole
+    let role: NexoConnectionRole
     let status: String
 }
 
@@ -340,12 +343,12 @@ struct ToolsExecuteResponse: Codable, Sendable {
 
 struct SessionCreateParams: Codable, Sendable {
     var name: String?
-    var prefillCollectionId: String?
+    var promptCollectionId: String?
 }
 
 struct SessionCreateResponse: Codable, Sendable {
     let sessionId: String
-    var prefillCollectionId: String?
+    var promptCollectionId: String?
 }
 
 struct SessionListParams: Codable, Sendable {}
@@ -353,6 +356,7 @@ struct SessionListParams: Codable, Sendable {}
 struct SessionEntry: Codable, Sendable, Identifiable {
     let sessionId: String
     var name: String?
+    var promptCollectionId: String?
     let createdAt: String
     let lastActiveAt: String
     let messageCount: UInt32
@@ -368,10 +372,26 @@ struct SessionGetParams: Codable, Sendable {
     let sessionId: String
 }
 
-struct ConversationMessage: Codable, Sendable, Identifiable {
+enum NexoMessageRole: String, Codable, Sendable {
+    case system
+    case user
+    case assistant
+    case tool
+}
+
+enum TranscriptEntryKind: String, Codable, Sendable {
+    case userInput = "user_input"
+    case instruction
+    case assistantResponse = "assistant_response"
+    case toolCallIntent = "tool_call_intent"
+    case toolResult = "tool_result"
+}
+
+struct TranscriptEntry: Codable, Sendable, Identifiable {
     let id: String
-    let role: String
+    let role: NexoMessageRole
     let content: String
+    let kind: TranscriptEntryKind
     let createdAt: String
     var toolCallId: String?
     var toolName: String?
@@ -380,7 +400,8 @@ struct ConversationMessage: Codable, Sendable, Identifiable {
 struct SessionGetResponse: Codable, Sendable {
     let sessionId: String
     var name: String?
-    let messages: [ConversationMessage]
+    var promptCollectionId: String?
+    let messages: [TranscriptEntry]
     let createdAt: String
 }
 
@@ -397,7 +418,7 @@ struct SessionClearResponse: Codable, Sendable {
 struct CronCreateParams: Codable, Sendable {
     let name: String
     let schedule: String
-    let prompt: String
+    let input: String
     var sessionId: String?
 }
 
@@ -430,72 +451,65 @@ struct CronDeleteResponse: Codable, Sendable {
     let deleted: Bool
 }
 
-// MARK: - Prefill Markdown
+// MARK: - Prompt Documents
 
-struct PrefillMarkdownCreateParams: Codable, Sendable {
-    let category: String
-    let description: String
+struct PromptDocumentCreateParams: Codable, Sendable {
+    let id: String
     let content: String
 }
 
-struct PrefillMarkdownCreateResponse: Codable, Sendable {
+struct PromptDocumentCreateResponse: Codable, Sendable {
     let id: String
 }
 
-struct PrefillMarkdownListParams: Codable, Sendable {}
+struct PromptDocumentListParams: Codable, Sendable {}
 
-struct MarkdownFileEntry: Codable, Sendable, Identifiable {
-    let id: String
-    let category: String
-    let description: String
-    let filename: String
-    let createdAt: String
-    let updatedAt: String
-}
-
-struct PrefillMarkdownListResponse: Codable, Sendable {
-    let files: [MarkdownFileEntry]
-}
-
-struct PrefillMarkdownDeleteParams: Codable, Sendable {
+struct PromptDocumentEntry: Codable, Sendable, Identifiable {
     let id: String
 }
 
-struct PrefillMarkdownDeleteResponse: Codable, Sendable {
+struct PromptDocumentListResponse: Codable, Sendable {
+    let documents: [PromptDocumentEntry]
+}
+
+struct PromptDocumentDeleteParams: Codable, Sendable {
+    let id: String
+}
+
+struct PromptDocumentDeleteResponse: Codable, Sendable {
     let deleted: Bool
 }
 
-// MARK: - Prefill Collection
+// MARK: - Prompt Collections
 
-struct PrefillCollectionCreateParams: Codable, Sendable {
-    let name: String
-    var description: String?
-    let markdownIds: [String]
-}
-
-struct PrefillCollectionCreateResponse: Codable, Sendable {
-    let id: String
-}
-
-struct PrefillCollectionListParams: Codable, Sendable {}
-
-struct CollectionEntry: Codable, Sendable, Identifiable {
+struct PromptCollectionCreateParams: Codable, Sendable {
     let id: String
     let name: String
     var description: String?
-    let markdownIds: [String]
-    let createdAt: String
-    let updatedAt: String
+    let documents: [String]
 }
 
-struct PrefillCollectionListResponse: Codable, Sendable {
-    let collections: [CollectionEntry]
-}
-
-struct PrefillCollectionDeleteParams: Codable, Sendable {
+struct PromptCollectionCreateResponse: Codable, Sendable {
     let id: String
 }
 
-struct PrefillCollectionDeleteResponse: Codable, Sendable {
+struct PromptCollectionListParams: Codable, Sendable {}
+
+struct PromptCollection: Codable, Sendable, Identifiable {
+    let id: String
+    let name: String
+    var description: String?
+    let documents: [String]
+}
+
+struct PromptCollectionListResponse: Codable, Sendable {
+    let collections: [PromptCollection]
+}
+
+struct PromptCollectionDeleteParams: Codable, Sendable {
+    let id: String
+}
+
+struct PromptCollectionDeleteResponse: Codable, Sendable {
     let deleted: Bool
 }

@@ -1,12 +1,12 @@
 //! Connection lifecycle handling for a single WebSocket peer.
 
 use super::dispatch_method;
-use crate::agent::AgentHandle;
+use crate::agent::RunHandle;
 use crate::server::state::{PeerInfo, SharedState};
 use futures_util::{SinkExt, StreamExt};
 use nexo_ws_schema::{
-    ConnectParams, ErrorPayload, EventKind, Frame, HelloOk, Method, PROTOCOL_VERSION,
-    PresencePayload, Role, WsError,
+    ConnectParams, ConnectionRole, ErrorPayload, EventKind, Frame, HelloOk, Method,
+    PROTOCOL_VERSION, PresencePayload, WsError,
 };
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
@@ -31,7 +31,7 @@ pub async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
     state: SharedState,
     db: SqlitePool,
     mut event_rx: broadcast::Receiver<Frame>,
-    agent_handle: AgentHandle,
+    run_handle: RunHandle,
 ) {
     let (peer_id, _connect_request_id, mut directed_rx) =
         match wait_for_connect(&mut ws, &state, &db).await {
@@ -55,7 +55,7 @@ pub async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
             msg = ws.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Some(response) = handle_incoming_message(&text, &peer_id, &state, &db, &agent_handle).await {
+                        if let Some(response) = handle_incoming_message(&text, &peer_id, &state, &db, &run_handle).await {
                             let json = match serde_json::to_string(&response) {
                                 Ok(json) => json,
                                 Err(error) => {
@@ -176,7 +176,7 @@ async fn wait_for_connect<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpi
         {
             tracing::warn!("Failed to persist device: {error}");
         }
-        if params.role == Role::User
+        if params.role == ConnectionRole::User
             && let Err(error) =
                 crate::memory::persistent::upsert_user(db, &params.client.id, &device.id).await
         {
@@ -231,7 +231,7 @@ async fn handle_incoming_message(
     peer_id: &str,
     state: &SharedState,
     db: &SqlitePool,
-    agent_handle: &AgentHandle,
+    run_handle: &RunHandle,
 ) -> Option<Frame> {
     let frame: Frame = match serde_json::from_str(text) {
         Ok(frame) => frame,
@@ -248,7 +248,7 @@ async fn handle_incoming_message(
 
     match frame {
         Frame::Request { id, method, params } => {
-            Some(dispatch_method(&id, &method, params, peer_id, state, db, agent_handle).await)
+            Some(dispatch_method(&id, &method, params, peer_id, state, db, run_handle).await)
         }
         Frame::Response { ref id, .. } => {
             let sender = {

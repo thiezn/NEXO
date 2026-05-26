@@ -1,4 +1,4 @@
-use crate::api::types::{ChatMessage, ChatRole};
+use crate::api::types::{MessageRole, TranscriptMessage};
 
 use super::prompting::{ChatTemplate, ReasoningMode};
 
@@ -6,8 +6,11 @@ use super::prompting::{ChatTemplate, ReasoningMode};
 ///
 /// Model-agnostic: stores messages and delegates formatting to a `ChatTemplate`.
 /// Designed for future extension to persistent storage (sqlite/file).
+///
+/// TODO: This is only used by the repl of nexo-ai. It does a bunch of stuff that nexo-gateway also
+/// does, I might consider unifying it or removing it completely from nexo-ai.
 pub struct ConversationManager {
-    messages: Vec<ChatMessage>,
+    messages: Vec<TranscriptMessage>,
     system_prompt: Option<String>,
     reasoning: ReasoningMode,
 }
@@ -24,18 +27,18 @@ impl ConversationManager {
     pub fn with_system_prompt(prompt: String) -> Self {
         let content = prompt.clone();
         Self {
-            messages: vec![ChatMessage::new(ChatRole::System, content)],
+            messages: vec![TranscriptMessage::new(MessageRole::System, content)],
             system_prompt: Some(prompt),
             reasoning: ReasoningMode::default(),
         }
     }
 
-    pub fn push(&mut self, message: ChatMessage) {
+    pub fn push(&mut self, message: TranscriptMessage) {
         self.messages.push(message);
     }
 
     /// Get all messages (including system prompt if set).
-    pub fn messages(&self) -> &[ChatMessage] {
+    pub fn messages(&self) -> &[TranscriptMessage] {
         &self.messages
     }
 
@@ -44,7 +47,7 @@ impl ConversationManager {
         self.messages.clear();
         if let Some(ref prompt) = self.system_prompt {
             self.messages
-                .push(ChatMessage::new(ChatRole::System, prompt.clone()));
+                .push(TranscriptMessage::new(MessageRole::System, prompt.clone()));
         }
     }
 
@@ -57,10 +60,10 @@ impl ConversationManager {
         };
 
         // Count turn pairs (user + assistant = 1 turn).
-        let non_system: Vec<ChatMessage> = self
+        let non_system: Vec<TranscriptMessage> = self
             .messages
             .iter()
-            .filter(|m| m.role != ChatRole::System)
+            .filter(|m| m.role != MessageRole::System)
             .cloned()
             .collect();
 
@@ -87,14 +90,14 @@ impl ConversationManager {
 
         let len = self.messages.len();
         let start = len.saturating_sub(2);
-        let last_pair: Vec<ChatMessage> = self.messages[start..].to_vec();
+        let last_pair: Vec<TranscriptMessage> = self.messages[start..].to_vec();
 
         self.messages.clear();
         if let Some(sys) = system_msg {
             self.messages.push(sys);
         }
-        self.messages.push(ChatMessage::new(
-            ChatRole::System,
+        self.messages.push(TranscriptMessage::new(
+            MessageRole::System,
             format!("Previous conversation summary: {summary}"),
         ));
         self.messages.extend(last_pair);
@@ -104,7 +107,7 @@ impl ConversationManager {
     pub fn turn_count(&self) -> usize {
         self.messages
             .iter()
-            .filter(|m| m.role == ChatRole::User)
+            .filter(|m| m.role == MessageRole::User)
             .count()
     }
 
@@ -153,15 +156,15 @@ mod tests {
     fn with_system_prompt_starts_with_system() {
         let cm = ConversationManager::with_system_prompt("Be helpful.".into());
         assert_eq!(cm.messages().len(), 1);
-        assert_eq!(cm.messages()[0].role, ChatRole::System);
+        assert_eq!(cm.messages()[0].role, MessageRole::System);
         assert_eq!(cm.messages()[0].content, "Be helpful.");
     }
 
     #[test]
     fn push_and_turn_count() {
         let mut cm = ConversationManager::new();
-        cm.push(ChatMessage::new(ChatRole::User, "hi"));
-        cm.push(ChatMessage::new(ChatRole::Assistant, "hello"));
+        cm.push(TranscriptMessage::new(MessageRole::User, "hi"));
+        cm.push(TranscriptMessage::new(MessageRole::Assistant, "hello"));
         assert_eq!(cm.turn_count(), 1);
         assert_eq!(cm.messages().len(), 2);
     }
@@ -169,17 +172,17 @@ mod tests {
     #[test]
     fn clear_keeps_system_prompt() {
         let mut cm = ConversationManager::with_system_prompt("system".into());
-        cm.push(ChatMessage::new(ChatRole::User, "hi"));
+        cm.push(TranscriptMessage::new(MessageRole::User, "hi"));
         assert_eq!(cm.messages().len(), 2);
         cm.clear();
         assert_eq!(cm.messages().len(), 1);
-        assert_eq!(cm.messages()[0].role, ChatRole::System);
+        assert_eq!(cm.messages()[0].role, MessageRole::System);
     }
 
     #[test]
     fn clear_empty_without_system() {
         let mut cm = ConversationManager::new();
-        cm.push(ChatMessage::new(ChatRole::User, "hi"));
+        cm.push(TranscriptMessage::new(MessageRole::User, "hi"));
         cm.clear();
         assert!(cm.messages().is_empty());
     }
@@ -188,8 +191,11 @@ mod tests {
     fn slide_keeps_last_n_turns() {
         let mut cm = ConversationManager::with_system_prompt("sys".into());
         for i in 0..4 {
-            cm.push(ChatMessage::new(ChatRole::User, format!("q{i}")));
-            cm.push(ChatMessage::new(ChatRole::Assistant, format!("a{i}")));
+            cm.push(TranscriptMessage::new(MessageRole::User, format!("q{i}")));
+            cm.push(TranscriptMessage::new(
+                MessageRole::Assistant,
+                format!("a{i}"),
+            ));
         }
         // 1 system + 8 messages = 9
         assert_eq!(cm.messages().len(), 9);
@@ -197,7 +203,7 @@ mod tests {
         cm.slide(2); // keep last 2 turns
         // 1 system + 4 messages = 5
         assert_eq!(cm.messages().len(), 5);
-        assert_eq!(cm.messages()[0].role, ChatRole::System);
+        assert_eq!(cm.messages()[0].role, MessageRole::System);
         assert_eq!(cm.messages()[1].content, "q2");
         assert_eq!(cm.messages()[4].content, "a3");
     }

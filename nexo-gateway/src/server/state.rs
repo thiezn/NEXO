@@ -1,7 +1,7 @@
 use crate::memory::git::GitStorage;
 use crate::tools::GatewayToolExecutor;
 use nexo_spec::model::{LoadedModelInfo, ModelCategory};
-use nexo_ws_schema::{Frame, Role, Scope, ToolEntry, ToolSpecEntry};
+use nexo_ws_schema::{ConnectionRole, Frame, Scope, ToolEntry, ToolSpecEntry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ pub struct PeerInfo {
     /// Stable client identifier provided by the connecting peer.
     pub client_id: String,
     /// Peer role used for routing and authorization decisions.
-    pub role: Role,
+    pub role: ConnectionRole,
     /// Declared protocol scopes granted to the peer.
     pub scopes: Vec<Scope>,
     /// Declared capability families available on the peer.
@@ -66,7 +66,7 @@ pub struct GatewayState {
     pub storage_root: PathBuf,
     /// Tools that execute locally on the gateway (e.g., notes).
     pub gateway_tools: GatewayToolExecutor,
-    /// Git-backed storage for persistent data (notes, prefill, SOUL.md).
+    /// Git-backed storage for persistent data such as notes and prompt documents.
     pub git_storage: Option<Arc<GitStorage>>,
 }
 
@@ -95,7 +95,7 @@ impl GatewayState {
         mut matches: impl FnMut(&PeerId, &PeerInfo) -> bool,
     ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
         self.peers.iter().find_map(|(peer_id, peer)| {
-            if peer.role != Role::Node || !matches(peer_id, peer) {
+            if peer.role != ConnectionRole::Node || !matches(peer_id, peer) {
                 return None;
             }
 
@@ -196,7 +196,7 @@ impl GatewayState {
         self.peers
             .iter()
             .filter_map(|(peer_id, peer)| {
-                if peer.role != Role::User
+                if peer.role != ConnectionRole::User
                     || peer.client_id != client_id
                     || peer_id == exclude_peer_id
                 {
@@ -275,12 +275,18 @@ impl GatewayState {
 
     /// Count currently connected user peers.
     pub fn connected_users(&self) -> u32 {
-        self.peers.values().filter(|p| p.role == Role::User).count() as u32
+        self.peers
+            .values()
+            .filter(|p| p.role == ConnectionRole::User)
+            .count() as u32
     }
 
     /// Count currently connected node peers.
     pub fn connected_nodes(&self) -> u32 {
-        self.peers.values().filter(|p| p.role == Role::Node).count() as u32
+        self.peers
+            .values()
+            .filter(|p| p.role == ConnectionRole::Node)
+            .count() as u32
     }
 
     /// Return the deduplicated capability families exposed by connected nodes.
@@ -288,7 +294,7 @@ impl GatewayState {
         let mut caps: Vec<String> = self
             .peers
             .values()
-            .filter(|p| p.role == Role::Node)
+            .filter(|p| p.role == ConnectionRole::Node)
             .flat_map(|peer| peer.capabilities.iter().cloned())
             .collect();
         caps.sort();
@@ -336,7 +342,7 @@ mod tests {
         PeerInfo {
             id: id.into(),
             client_id: "cli".into(),
-            role: Role::User,
+            role: ConnectionRole::User,
             scopes: vec![Scope::UserRead],
             capabilities: vec![],
             commands: vec![],
@@ -349,7 +355,7 @@ mod tests {
         PeerInfo {
             id: id.into(),
             client_id: "rust-node".into(),
-            role: Role::Node,
+            role: ConnectionRole::Node,
             scopes: vec![],
             capabilities,
             commands: vec![],
@@ -384,7 +390,7 @@ mod tests {
             PeerInfo {
                 id: "sender".into(),
                 client_id: "user-a".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![Scope::UserRead],
                 capabilities: vec![],
                 commands: vec![],
@@ -397,7 +403,7 @@ mod tests {
             PeerInfo {
                 id: "target".into(),
                 client_id: "user-b".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![Scope::UserRead],
                 capabilities: vec![],
                 commands: vec![],

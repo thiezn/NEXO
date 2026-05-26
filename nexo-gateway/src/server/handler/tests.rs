@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
-use crate::agent::AgentHandle;
+use crate::agent::RunHandle;
 use crate::server::state::{GatewayState, PeerInfo, SharedState, dummy_sender};
-use nexo_ws_schema::{EventKind, Frame, Method, Role};
+use nexo_ws_schema::{ConnectionRole, EventKind, Frame, Method};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -14,12 +14,12 @@ fn make_state() -> SharedState {
     ))))
 }
 
-fn make_agent_handle(state: &SharedState, db: &SqlitePool) -> AgentHandle {
+fn make_run_handle(state: &SharedState, db: &SqlitePool) -> RunHandle {
     let event_tx = {
         let st = state.try_read().unwrap();
         st.event_tx.clone()
     };
-    AgentHandle::spawn(db.clone(), state.clone(), event_tx)
+    RunHandle::spawn(db.clone(), state.clone(), event_tx)
 }
 
 // Helper: dispatch with a real DB pool
@@ -30,15 +30,15 @@ async fn dispatch(
     peer_id: &str,
     state: &SharedState,
     db: &SqlitePool,
-    agent_handle: &AgentHandle,
+    run_handle: &RunHandle,
 ) -> Frame {
-    dispatch_method(req_id, method, params, peer_id, state, db, agent_handle).await
+    dispatch_method(req_id, method, params, peer_id, state, db, run_handle).await
 }
 
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_health_returns_ok(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
     let resp = dispatch(
         "req-1",
         &Method::Health,
@@ -61,14 +61,14 @@ async fn dispatch_health_returns_ok(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_status_returns_counts(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
     {
         let mut s = state.write().await;
         s.add_peer(
             PeerInfo {
                 id: "p1".into(),
                 client_id: "cli".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -101,7 +101,7 @@ async fn dispatch_status_returns_counts(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_connect_after_handshake_rejected(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
     let resp = dispatch(
         "req-1",
         &Method::Connect,
@@ -123,14 +123,14 @@ async fn dispatch_connect_after_handshake_rejected(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_tools_register_from_node(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
     {
         let mut s = state.write().await;
         s.add_peer(
             PeerInfo {
                 id: "n1".into(),
                 client_id: "node".into(),
-                role: Role::Node,
+                role: ConnectionRole::Node,
                 scopes: vec![],
                 capabilities: vec!["echo".into()],
                 commands: vec!["echo.run".into()],
@@ -190,14 +190,14 @@ async fn dispatch_tools_register_from_node(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_tools_register_from_user_rejected(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
     {
         let mut s = state.write().await;
         s.add_peer(
             PeerInfo {
                 id: "u1".into(),
                 client_id: "cli".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -230,7 +230,7 @@ async fn dispatch_tools_register_from_user_rejected(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_tools_execute_tool_not_found(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
     let params = serde_json::json!({
         "tool": "nonexistent",
         "args": {},
@@ -257,7 +257,7 @@ async fn dispatch_tools_execute_tool_not_found(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_send_routes_message_to_target_user(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
     let (target_tx, mut target_rx) = mpsc::channel(1);
 
     {
@@ -266,7 +266,7 @@ async fn dispatch_send_routes_message_to_target_user(pool: SqlitePool) {
             PeerInfo {
                 id: "sender-peer".into(),
                 client_id: "user-a".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -279,7 +279,7 @@ async fn dispatch_send_routes_message_to_target_user(pool: SqlitePool) {
             PeerInfo {
                 id: "target-peer".into(),
                 client_id: "user-b".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -327,7 +327,7 @@ async fn dispatch_send_routes_message_to_target_user(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_send_to_unknown_target_reports_not_delivered(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
 
     {
         let mut s = state.write().await;
@@ -335,7 +335,7 @@ async fn dispatch_send_to_unknown_target_reports_not_delivered(pool: SqlitePool)
             PeerInfo {
                 id: "sender-peer".into(),
                 client_id: "user-a".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -372,7 +372,7 @@ async fn dispatch_send_to_unknown_target_reports_not_delivered(pool: SqlitePool)
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_send_from_node_rejected(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
 
     {
         let mut s = state.write().await;
@@ -380,7 +380,7 @@ async fn dispatch_send_from_node_rejected(pool: SqlitePool) {
             PeerInfo {
                 id: "node-peer".into(),
                 client_id: "node-a".into(),
-                role: Role::Node,
+                role: ConnectionRole::Node,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -417,7 +417,7 @@ async fn dispatch_send_from_node_rejected(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_session_create_returns_id(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
 
     // Set up user FK
     sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
@@ -436,7 +436,7 @@ async fn dispatch_session_create_returns_id(pool: SqlitePool) {
             PeerInfo {
                 id: "p1".into(),
                 client_id: "cli".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -470,14 +470,14 @@ async fn dispatch_session_create_returns_id(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_session_list_empty(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
     {
         let mut s = state.write().await;
         s.add_peer(
             PeerInfo {
                 id: "p1".into(),
                 client_id: "cli".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -508,9 +508,9 @@ async fn dispatch_session_list_empty(pool: SqlitePool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
-async fn dispatch_agent_returns_accepted_with_session(pool: SqlitePool) {
+async fn dispatch_run_start_returns_accepted_with_session(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
 
     sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
         .execute(&pool)
@@ -527,7 +527,7 @@ async fn dispatch_agent_returns_accepted_with_session(pool: SqlitePool) {
             PeerInfo {
                 id: "p1".into(),
                 client_id: "cli".into(),
-                role: Role::User,
+                role: ConnectionRole::User,
                 scopes: vec![],
                 capabilities: vec![],
                 commands: vec![],
@@ -539,10 +539,10 @@ async fn dispatch_agent_returns_accepted_with_session(pool: SqlitePool) {
     }
 
     let params = serde_json::json!({
-        "prompt": "hello",
+        "input": "hello",
         "idempotencyKey": "k1"
     });
-    let resp = dispatch("req-1", &Method::Agent, params, "p1", &state, &pool, &ah).await;
+    let resp = dispatch("req-1", &Method::RunStart, params, "p1", &state, &pool, &ah).await;
     if let Frame::Response { ok, payload, .. } = resp {
         assert!(ok);
         let p = payload.unwrap();
@@ -555,9 +555,9 @@ async fn dispatch_agent_returns_accepted_with_session(pool: SqlitePool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
-async fn dispatch_agent_stop_marks_run_cancelled(pool: SqlitePool) {
+async fn dispatch_run_stop_marks_run_cancelled(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
 
     sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
         .execute(&pool)
@@ -572,7 +572,7 @@ async fn dispatch_agent_stop_marks_run_cancelled(pool: SqlitePool) {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO agent_runs (id, session_id, idempotency_key, status) VALUES ('run-1', 'sess-1', 'idem-1', 'accepted')",
+        "INSERT INTO runs (id, session_id, idempotency_key, status) VALUES ('run-1', 'sess-1', 'idem-1', 'accepted')",
     )
     .execute(&pool)
     .await
@@ -580,7 +580,7 @@ async fn dispatch_agent_stop_marks_run_cancelled(pool: SqlitePool) {
 
     let resp = dispatch(
         "req-1",
-        &Method::AgentStop,
+        &Method::RunStop,
         serde_json::json!({"runId": "run-1"}),
         "p1",
         &state,
@@ -596,7 +596,7 @@ async fn dispatch_agent_stop_marks_run_cancelled(pool: SqlitePool) {
     }
 
     let (status, finished_at): (String, Option<String>) =
-        sqlx::query_as("SELECT status, finished_at FROM agent_runs WHERE id = 'run-1'")
+        sqlx::query_as("SELECT status, finished_at FROM runs WHERE id = 'run-1'")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -605,9 +605,9 @@ async fn dispatch_agent_stop_marks_run_cancelled(pool: SqlitePool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
-async fn dispatch_agent_context_append_persists_message(pool: SqlitePool) {
+async fn dispatch_run_instructions_append_persists_message(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
 
     sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
         .execute(&pool)
@@ -622,7 +622,7 @@ async fn dispatch_agent_context_append_persists_message(pool: SqlitePool) {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO agent_runs (id, session_id, idempotency_key, status) VALUES ('run-1', 'sess-1', 'idem-1', 'accepted')",
+        "INSERT INTO runs (id, session_id, idempotency_key, status) VALUES ('run-1', 'sess-1', 'idem-1', 'accepted')",
     )
     .execute(&pool)
     .await
@@ -630,10 +630,10 @@ async fn dispatch_agent_context_append_persists_message(pool: SqlitePool) {
 
     let resp = dispatch(
         "req-1",
-        &Method::AgentContextAppend,
+        &Method::RunInstructionsAppend,
         serde_json::json!({
             "runId": "run-1",
-            "context": {"notes": ["agent_loop.md"]}
+            "instructions": {"notes": ["agent_loop.md"]}
         }),
         "p1",
         &state,
@@ -663,12 +663,12 @@ async fn dispatch_agent_context_append_persists_message(pool: SqlitePool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn dispatch_cron_create_and_list(pool: SqlitePool) {
     let state = make_state();
-    let ah = make_agent_handle(&state, &pool);
+    let ah = make_run_handle(&state, &pool);
 
     let params = serde_json::json!({
         "name": "test job",
         "schedule": "0 * * * *",
-        "prompt": "hello"
+        "input": "hello"
     });
     let resp = dispatch(
         "req-1",

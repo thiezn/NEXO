@@ -1,13 +1,13 @@
-use nexo_ws_schema::{AgentEventPayload, AgentStatus, EventKind, Frame};
+use nexo_ws_schema::{EventKind, Frame, RunEventPayload, RunStatus};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
-/// Emit a simple agent status event.
+/// Emit a simple run status event.
 pub fn emit_status(
     event_tx: &broadcast::Sender<Frame>,
     run_id: &str,
     session_id: &str,
-    status: AgentStatus,
+    status: RunStatus,
     content: Option<&str>,
     tool_name: Option<&str>,
 ) {
@@ -16,17 +16,17 @@ pub fn emit_status(
     );
 }
 
-/// Emit an agent status event that may also carry ephemeral thinking content.
+/// Emit a run status event that may also carry ephemeral thinking content.
 pub fn emit_status_with_thinking(
     event_tx: &broadcast::Sender<Frame>,
     run_id: &str,
     session_id: &str,
-    status: AgentStatus,
+    status: RunStatus,
     content: Option<&str>,
     tool_name: Option<&str>,
     thinking_content: Option<&str>,
 ) {
-    let payload = AgentEventPayload {
+    let payload = RunEventPayload {
         run_id: run_id.to_string(),
         session_id: session_id.to_string(),
         status,
@@ -36,7 +36,7 @@ pub fn emit_status_with_thinking(
         error: None,
         thinking_content: thinking_content.map(str::to_owned),
     };
-    if let Ok(frame) = Frame::event(EventKind::Agent, &payload) {
+    if let Ok(frame) = Frame::event(EventKind::Run, &payload) {
         let _ = event_tx.send(frame);
     }
 }
@@ -49,17 +49,17 @@ pub fn emit_tool_started(
     tool_name: &str,
     tool_call_id: &str,
 ) {
-    let payload = AgentEventPayload {
+    let payload = RunEventPayload {
         run_id: run_id.to_string(),
         session_id: session_id.to_string(),
-        status: AgentStatus::ToolCall,
+        status: RunStatus::ToolCall,
         content: None,
         tool_name: Some(tool_name.to_string()),
         tool_call_id: Some(tool_call_id.to_string()),
         error: None,
         thinking_content: None,
     };
-    if let Ok(frame) = Frame::event(EventKind::Agent, &payload) {
+    if let Ok(frame) = Frame::event(EventKind::Run, &payload) {
         let _ = event_tx.send(frame);
     }
 }
@@ -73,19 +73,34 @@ pub fn emit_tool_result(
     tool_call_id: &str,
     content: &str,
 ) {
-    let payload = AgentEventPayload {
+    let payload = RunEventPayload {
         run_id: run_id.to_string(),
         session_id: session_id.to_string(),
-        status: AgentStatus::ToolCall,
+        status: RunStatus::ToolCall,
         content: Some(content.to_string()),
         tool_name: Some(tool_name.to_string()),
         tool_call_id: Some(tool_call_id.to_string()),
         error: None,
         thinking_content: None,
     };
-    if let Ok(frame) = Frame::event(EventKind::Agent, &payload) {
+    if let Ok(frame) = Frame::event(EventKind::Run, &payload) {
         let _ = event_tx.send(frame);
     }
+}
+
+/// Emit a queued status event for a paused run.
+pub fn emit_queued_event(event_tx: &broadcast::Sender<Frame>, run_id: &str, session_id: &str) {
+    emit_status_with_thinking(
+        event_tx,
+        run_id,
+        session_id,
+        RunStatus::Queued,
+        Some(
+            "No inference node is currently available. Your request has been queued and will be processed as soon as a node becomes available.",
+        ),
+        None,
+        None,
+    );
 }
 
 /// Emit a failed terminal event and finish the run in storage.
@@ -96,21 +111,21 @@ pub async fn fail_run(
     session_id: &str,
     error: &str,
 ) {
-    tracing::error!("Agent run {run_id} failed: {error}");
-    let payload = AgentEventPayload {
+    tracing::error!("Run {run_id} failed: {error}");
+    let payload = RunEventPayload {
         run_id: run_id.to_string(),
         session_id: session_id.to_string(),
-        status: AgentStatus::Failed,
+        status: RunStatus::Failed,
         content: None,
         tool_name: None,
         tool_call_id: None,
         error: Some(error.to_string()),
         thinking_content: None,
     };
-    if let Ok(frame) = Frame::event(EventKind::Agent, &payload) {
+    if let Ok(frame) = Frame::event(EventKind::Run, &payload) {
         let _ = event_tx.send(frame);
     }
-    let _ = crate::agent::session::finish_run(pool, run_id, AgentStatus::Failed, Some(error)).await;
+    let _ = crate::agent::session::finish_run(pool, run_id, RunStatus::Failed, Some(error)).await;
     crate::agent::locks::release_all_for_run(pool, run_id)
         .await
         .ok();

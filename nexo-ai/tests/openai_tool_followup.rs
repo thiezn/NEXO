@@ -11,7 +11,7 @@ use std::thread;
 
 use anyhow::Result;
 use nexo_ai::api::model_traits::{ModelInfo, ToolModel};
-use nexo_ai::api::types::{ChatMessage, ChatRole, ModelCategory, ToolCallRequest};
+use nexo_ai::api::types::{MessageRole, ModelCategory, ToolCallRequest, TranscriptMessage};
 use nexo_ai::inference::models::gemma4::openai::Gemma4OpenAiFamily;
 use nexo_ai::inference::remote::openai::model::{OpenAiModel, OpenAiServerControl};
 
@@ -28,7 +28,7 @@ impl OpenAiServerControl for NoopServer {
     }
 }
 
-fn tool_request(messages: Vec<ChatMessage>) -> ToolCallRequest {
+fn tool_request(messages: Vec<TranscriptMessage>) -> ToolCallRequest {
     ToolCallRequest {
         messages,
         tools: vec![nexo_spec::tool::ToolSpec {
@@ -177,8 +177,8 @@ async fn tool_followup_round_serializes_structured_assistant_history() {
     model.load().expect("load mock model");
 
     let initial = model
-        .call_tools(&tool_request(vec![ChatMessage::new(
-            ChatRole::User,
+        .call_tools(&tool_request(vec![TranscriptMessage::new(
+            MessageRole::User,
             "say hello",
         )]))
         .expect("initial tool selection succeeds");
@@ -187,13 +187,13 @@ async fn tool_followup_round_serializes_structured_assistant_history() {
 
     let follow_up = model
         .call_tools(&tool_request(vec![
-            ChatMessage::new(ChatRole::User, "say hello"),
-            ChatMessage::new(
-                ChatRole::Assistant,
+            TranscriptMessage::new(MessageRole::User, "say hello"),
+            TranscriptMessage::new(
+                MessageRole::Assistant,
                 "<|tool_call>call:echo.run{message:<|\"|>hello<|\"|>}<tool_call|>",
             ),
-            ChatMessage::with_tool_metadata(
-                ChatRole::Tool,
+            TranscriptMessage::with_tool_metadata(
+                MessageRole::Tool,
                 "exit_code: 0\nstdout:\nhello\n",
                 Some("call-1".into()),
                 Some("echo.run".into()),

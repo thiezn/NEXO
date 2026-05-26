@@ -1,9 +1,9 @@
 //! Run, round, and tool-trace persistence helpers.
 
-use nexo_ws_schema::{AgentStatus, Frame};
+use nexo_ws_schema::{Frame, RunStatus};
 use sqlx::SqlitePool;
 
-/// Create a new agent run record.
+/// Create a new run record.
 pub async fn create_run(
     pool: &SqlitePool,
     run_id: &str,
@@ -13,7 +13,7 @@ pub async fn create_run(
     thinking: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO agent_runs (id, session_id, idempotency_key, model_id, thinking)
+        "INSERT INTO runs (id, session_id, idempotency_key, model_id, thinking)
          VALUES (?, ?, ?, ?, ?)",
     )
     .bind(run_id)
@@ -29,7 +29,7 @@ pub async fn create_run(
 /// Return the next round index that should be used for a run.
 pub async fn next_round_index(pool: &SqlitePool, run_id: &str) -> Result<usize, sqlx::Error> {
     let (next_index,): (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(round_index), 0) + 1 FROM agent_rounds WHERE run_id = ?",
+        "SELECT COALESCE(MAX(round_index), 0) + 1 FROM run_rounds WHERE run_id = ?",
     )
     .bind(run_id)
     .fetch_one(pool)
@@ -46,7 +46,7 @@ pub async fn create_round(
     model_id: Option<&str>,
 ) -> Result<String, sqlx::Error> {
     let round_id = Frame::new_id();
-    sqlx::query("INSERT INTO agent_rounds (id, run_id, round_index, model_id) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT INTO run_rounds (id, run_id, round_index, model_id) VALUES (?, ?, ?, ?)")
         .bind(&round_id)
         .bind(run_id)
         .bind(round_index as i64)
@@ -65,7 +65,7 @@ pub async fn finish_round(
     selected_peer_id: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE agent_rounds
+        "UPDATE run_rounds
          SET status = ?, rationale = ?, selected_peer_id = ?, finished_at = datetime('now')
          WHERE id = ?",
     )
@@ -153,7 +153,7 @@ pub async fn store_run_summary(
 /// Stop an active run and return its session ID when the stop was applied.
 pub async fn stop_run(pool: &SqlitePool, run_id: &str) -> Result<Option<String>, sqlx::Error> {
     let session_row: Option<(String,)> =
-        sqlx::query_as("SELECT session_id FROM agent_runs WHERE id = ? AND finished_at IS NULL")
+        sqlx::query_as("SELECT session_id FROM runs WHERE id = ? AND finished_at IS NULL")
             .bind(run_id)
             .fetch_optional(pool)
             .await?;
@@ -162,12 +162,12 @@ pub async fn stop_run(pool: &SqlitePool, run_id: &str) -> Result<Option<String>,
         return Ok(None);
     };
 
-    let status = serde_json::to_value(AgentStatus::Cancelled)
+    let status = serde_json::to_value(RunStatus::Cancelled)
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_else(|| "cancelled".to_string());
     let result = sqlx::query(
-        "UPDATE agent_runs SET status = ?, finished_at = datetime('now') \
+        "UPDATE runs SET status = ?, finished_at = datetime('now') \
          WHERE id = ? AND finished_at IS NULL",
     )
     .bind(status)
@@ -184,7 +184,7 @@ pub async fn stop_run(pool: &SqlitePool, run_id: &str) -> Result<Option<String>,
 
 /// Return whether a run has already been marked as cancelled.
 pub async fn is_run_cancelled(pool: &SqlitePool, run_id: &str) -> Result<bool, sqlx::Error> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT status FROM agent_runs WHERE id = ?")
+    let row: Option<(String,)> = sqlx::query_as("SELECT status FROM runs WHERE id = ?")
         .bind(run_id)
         .fetch_optional(pool)
         .await?;
@@ -195,18 +195,18 @@ pub async fn is_run_cancelled(pool: &SqlitePool, run_id: &str) -> Result<bool, s
     ))
 }
 
-/// Mark an agent run as finished with a status and optional summary.
+/// Mark a run as finished with a status and optional summary.
 pub async fn finish_run(
     pool: &SqlitePool,
     run_id: &str,
-    status: AgentStatus,
+    status: RunStatus,
     summary: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     let status_str = serde_json::to_value(status)
         .ok()
         .and_then(|value| value.as_str().map(String::from));
     let result = sqlx::query(
-        "UPDATE agent_runs SET status = ?, finished_at = datetime('now') \
+        "UPDATE runs SET status = ?, finished_at = datetime('now') \
          WHERE id = ? AND finished_at IS NULL",
     )
     .bind(status_str.as_deref().unwrap_or("failed"))
@@ -218,9 +218,9 @@ pub async fn finish_run(
         && let Some(summary_text) = summary
     {
         let kind = match status {
-            AgentStatus::Completed => "final_response",
-            AgentStatus::Failed => "failure",
-            AgentStatus::Cancelled => "cancelled",
+            RunStatus::Completed => "final_response",
+            RunStatus::Failed => "failure",
+            RunStatus::Cancelled => "cancelled",
             _ => "terminal_state",
         };
         let _ = store_run_summary(pool, run_id, None, kind, summary_text).await;

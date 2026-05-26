@@ -37,7 +37,7 @@ chrono = { workspace = true }
 dirs = { workspace = true }
 http = { workspace = true }
 sha2 = { workspace = true }
-git2 = "0"
+git2 = { version = "0", features = ["https", "ssh"] }
 anyhow = { workspace = true }
 nexo-notes = { path = "../nexo-tools/core/nexo-notes" }
 nexo-io = { path = "../nexo-tools/nexo-io" }

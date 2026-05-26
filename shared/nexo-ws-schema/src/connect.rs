@@ -1,15 +1,15 @@
-use crate::types::{ClientInfo, DeviceInfo, Role, Scope};
+use crate::types::{ClientInfo, ConnectionRole, DeviceInfo, Scope};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Parameters for the `connect` handshake request.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ConnectParams {
     pub min_protocol: u32,
     pub max_protocol: u32,
     pub client: ClientInfo,
-    pub role: Role,
+    pub role: ConnectionRole,
     #[serde(default)]
     pub scopes: Vec<Scope>,
     #[serde(default)]
@@ -29,7 +29,7 @@ pub struct ConnectParams {
 
 /// Tick/heartbeat policy sent in the hello-ok response.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct Policy {
     pub tick_interval_ms: u64,
 }
@@ -71,7 +71,7 @@ mod tests {
                 version: "1.2.3".into(),
                 platform: Platform::Macos,
             },
-            role: Role::User,
+            role: ConnectionRole::User,
             scopes: vec![Scope::UserRead, Scope::UserWrite],
             capabilities: vec![],
             commands: vec![],
@@ -105,7 +105,7 @@ mod tests {
                 version: "1.2.3".into(),
                 platform: Platform::Macos,
             },
-            role: Role::Node,
+            role: ConnectionRole::Node,
             scopes: vec![],
             capabilities: vec!["game_extractor".into(), "epub_extractor".into()],
             commands: vec![
@@ -137,7 +137,7 @@ mod tests {
                 version: "0.1.0".into(),
                 platform: Platform::Linux,
             },
-            role: Role::User,
+            role: ConnectionRole::User,
             scopes: vec![Scope::UserRead],
             capabilities: vec![],
             commands: vec![],

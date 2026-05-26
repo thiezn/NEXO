@@ -1,6 +1,6 @@
 //! Test helpers for integration tests. Not intended for production use.
 
-use crate::agent::AgentHandle;
+use crate::agent::RunHandle;
 use crate::server::auth;
 use crate::server::handler;
 use crate::server::state::{GatewayState, SharedState};
@@ -41,7 +41,7 @@ pub async fn start_test_gateway() -> TestGateway {
     let event_tx = gateway_state.event_tx.clone();
     let state: SharedState = Arc::new(RwLock::new(gateway_state));
 
-    let agent_handle = AgentHandle::spawn(db.clone(), state.clone(), event_tx.clone());
+    let run_handle = RunHandle::spawn(db.clone(), state.clone(), event_tx.clone());
 
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -61,7 +61,7 @@ pub async fn start_test_gateway() -> TestGateway {
             let state = accept_state.clone();
             let db = accept_db.clone();
             let auth_token = auth_token.clone();
-            let agent_handle = agent_handle.clone();
+            let run_handle = run_handle.clone();
 
             tokio::spawn(async move {
                 let callback = |req: &http::Request<()>,
@@ -83,7 +83,7 @@ pub async fn start_test_gateway() -> TestGateway {
                 };
 
                 let event_rx = state.read().await.event_tx.subscribe();
-                handler::handle_connection(ws_stream, state, db, event_rx, agent_handle).await;
+                handler::handle_connection(ws_stream, state, db, event_rx, run_handle).await;
             });
         }
     });

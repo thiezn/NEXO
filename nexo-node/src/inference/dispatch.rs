@@ -2,11 +2,11 @@ use crate::inference::SessionCacheManager;
 use base64::Engine;
 use cli_helpers::Error;
 use nexo_ai::api::types::{
-    ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, ModelCategory, ToolCallRequest,
+    ChatRequest, ImageAnalysisRequest, ModelCategory, ToolCallRequest, TranscriptMessage,
 };
 use nexo_ai::coordinator::Coordinator;
 use nexo_ws_schema::{
-    AgentRoundRequest, AgentRoundResponse, AgentRoundToolCall, Frame, ImageAnalyzeParams,
+    Frame, ImageAnalyzeParams, RunRoundRequest, RunRoundResponse, RunRoundToolCall,
 };
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -18,47 +18,30 @@ fn lock_mutex<'a, T>(mutex: &'a Mutex<T>, name: &str) -> Result<MutexGuard<'a, T
         .map_err(|error| format!("Failed to lock {name}: {error}"))
 }
 
-/// Queue an agent inference round on the blocking pool and send the result back by channel.
-pub(crate) async fn dispatch_agent_inference(
+/// Queue a run round inference on the blocking pool and send the result back by channel.
+pub(crate) async fn dispatch_run_round(
     request_id: &str,
     params: serde_json::Value,
     coordinator: &Arc<Mutex<Coordinator>>,
     tx: &InferenceSender,
     cache_manager: &Arc<Mutex<SessionCacheManager>>,
 ) -> cli_helpers::Result {
-    let round_request: AgentRoundRequest = match serde_json::from_value(params) {
+    let round_request: RunRoundRequest = match serde_json::from_value(params) {
         Ok(request) => request,
         Err(error) => {
             let _ = tx
                 .send((
                     request_id.to_string(),
-                    Err(format!("Invalid typed agent round params: {error}")),
+                    Err(format!("Invalid typed run round params: {error}")),
                 ))
                 .await;
             return Ok(());
         }
     };
 
-    let chat_messages: Vec<ChatMessage> = round_request
-        .messages
-        .iter()
-        .map(|message| {
-            let role = match message.role.as_str() {
-                "system" => ChatRole::System,
-                "assistant" => ChatRole::Assistant,
-                "tool" => ChatRole::Tool,
-                _ => ChatRole::User,
-            };
-            ChatMessage::with_tool_metadata(
-                role,
-                message.content.clone(),
-                message.tool_call_id.clone(),
-                message.tool_name.clone(),
-            )
-        })
-        .collect();
+    let transcript_messages: Vec<TranscriptMessage> = round_request.messages.clone();
 
-    if let Some(last) = chat_messages.last() {
+    if let Some(last) = transcript_messages.last() {
         tracing::info!(
             "Inference request {}: last message role={:?}, content='{:.120}'",
             request_id,
@@ -68,12 +51,12 @@ pub(crate) async fn dispatch_agent_inference(
     }
 
     tracing::debug!(
-        "dispatch_agent_inference {}: resolving model (model_id={:?}, has_tools={}, session_id={:?}, messages={})",
+        "dispatch_run_round {}: resolving model (model_id={:?}, has_tools={}, session_id={:?}, messages={})",
         request_id,
         round_request.model_id,
         !round_request.tools.is_empty(),
         round_request.session_id,
-        chat_messages.len(),
+        transcript_messages.len(),
     );
     let (model_name, settings) = {
         let coord = lock_mutex(coordinator.as_ref(), "coordinator").map_err(Error::Other)?;
@@ -101,10 +84,7 @@ pub(crate) async fn dispatch_agent_inference(
     let tool_specs = round_request.tools.clone();
 
     if model_name.is_empty() {
-        tracing::warn!(
-            "dispatch_agent_inference {}: no model available",
-            request_id
-        );
+        tracing::warn!("dispatch_run_round {}: no model available", request_id);
         let _ = tx
             .send((
                 request_id.to_string(),
@@ -115,7 +95,7 @@ pub(crate) async fn dispatch_agent_inference(
     }
 
     tracing::debug!(
-        "dispatch_agent_inference {}: using model '{}', temperature={}, top_p={}, top_k={:?}, max_tokens={}",
+        "dispatch_run_round {}: using model '{}', temperature={}, top_p={}, top_k={:?}, max_tokens={}",
         request_id,
         model_name,
         settings.temperature.unwrap_or(1.0),
@@ -138,18 +118,15 @@ pub(crate) async fn dispatch_agent_inference(
     let max_tokens = settings.max_tokens.unwrap_or(2048);
 
     tokio::task::spawn_blocking(move || {
-        tracing::debug!(
-            "dispatch_agent_inference {}: spawn_blocking started",
-            request_id
-        );
+        tracing::debug!("dispatch_run_round {}: spawn_blocking started", request_id);
         let result = (|| -> Result<serde_json::Value, String> {
             tracing::debug!(
-                "dispatch_agent_inference {}: acquiring coordinator lock",
+                "dispatch_run_round {}: acquiring coordinator lock",
                 request_id
             );
             let mut coord = lock_mutex(coord.as_ref(), "coordinator")?;
             tracing::debug!(
-                "dispatch_agent_inference {}: coordinator lock acquired",
+                "dispatch_run_round {}: coordinator lock acquired",
                 request_id
             );
             let model = coord
@@ -159,7 +136,7 @@ pub(crate) async fn dispatch_agent_inference(
             if let Some(kv) = model.as_kv_cacheable() {
                 let target = Some(session_id.as_str());
                 tracing::debug!(
-                    "dispatch_agent_inference {}: switching KV cache to target={:?}",
+                    "dispatch_run_round {}: switching KV cache to target={:?}",
                     request_id,
                     target,
                 );
@@ -175,7 +152,7 @@ pub(crate) async fn dispatch_agent_inference(
             }
 
             tracing::debug!(
-                "dispatch_agent_inference {}: KV cache handling complete",
+                "dispatch_run_round {}: KV cache handling complete",
                 request_id
             );
 
@@ -184,14 +161,14 @@ pub(crate) async fn dispatch_agent_inference(
                 .ok_or_else(|| format!("Model '{model_name}' not loaded"))?;
 
             tracing::debug!(
-                "dispatch_agent_inference {}: dispatching to {} path",
+                "dispatch_run_round {}: dispatching to {} path",
                 request_id,
                 if has_tools { "tool-call" } else { "chat" },
             );
 
             if has_tools {
                 let req = ToolCallRequest {
-                    messages: chat_messages.clone(),
+                    messages: transcript_messages.clone(),
                     tools: tool_specs.clone(),
                     max_tokens,
                     temperature,
@@ -204,7 +181,7 @@ pub(crate) async fn dispatch_agent_inference(
                     kv.clear_kv_cache();
                     kv.set_session_state(Some(session_id.clone()), Vec::new());
                     tracing::debug!(
-                        "dispatch_agent_inference {}: cleared in-memory KV state before tool selection inference",
+                        "dispatch_run_round {}: cleared in-memory KV state before tool selection inference",
                         request_id,
                     );
                 }
@@ -213,7 +190,7 @@ pub(crate) async fn dispatch_agent_inference(
                     .as_tool()
                     .ok_or_else(|| format!("Model '{model_name}' does not support tool calling"))?;
                 tracing::debug!(
-                    "dispatch_agent_inference {}: starting tool inference ({} tools, {} messages)",
+                    "dispatch_run_round {}: starting tool inference ({} tools, {} messages)",
                     request_id,
                     req.tools.len(),
                     req.messages.len()
@@ -223,7 +200,7 @@ pub(crate) async fn dispatch_agent_inference(
                     .map_err(|error| error.to_string())?;
 
                 tracing::debug!(
-                    "dispatch_agent_inference {}: tool inference complete, {} tool calls",
+                    "dispatch_run_round {}: tool inference complete, {} tool calls",
                     request_id,
                     resp.tool_calls.len()
                 );
@@ -232,12 +209,12 @@ pub(crate) async fn dispatch_agent_inference(
                     kv.clear_kv_cache();
                     kv.set_session_state(Some(session_id.clone()), Vec::new());
                     tracing::debug!(
-                        "dispatch_agent_inference {}: reset in-memory KV state after tool selection inference",
+                        "dispatch_run_round {}: reset in-memory KV state after tool selection inference",
                         request_id,
                     );
                 }
 
-                let response = AgentRoundResponse {
+                let response = RunRoundResponse {
                     content: if resp.tool_calls.is_empty() {
                         resp.reasoning.clone().filter(|text| !text.is_empty())
                     } else {
@@ -247,7 +224,7 @@ pub(crate) async fn dispatch_agent_inference(
                     tool_calls: resp
                         .tool_calls
                         .into_iter()
-                        .map(|tool_call| AgentRoundToolCall {
+                        .map(|tool_call| RunRoundToolCall {
                             id: Frame::new_id(),
                             name: tool_call.name,
                             arguments: tool_call.arguments,
@@ -255,7 +232,7 @@ pub(crate) async fn dispatch_agent_inference(
                         .collect(),
                 };
                 tracing::info!(
-                    "Agent round {round_id_for_task} for run {run_id_for_task} completed on tool path: tool_calls={}, content_chars={}, reasoning_chars={}",
+                    "Round {round_id_for_task} for run {run_id_for_task} completed on tool path: tool_calls={}, content_chars={}, reasoning_chars={}",
                     response.tool_calls.len(),
                     response.content.as_deref().map_or(0, str::len),
                     response.rationale.as_deref().map_or(0, str::len),
@@ -263,7 +240,7 @@ pub(crate) async fn dispatch_agent_inference(
                 Ok(serde_json::to_value(response).map_err(|error| error.to_string())?)
             } else {
                 let req = ChatRequest {
-                    messages: chat_messages,
+                    messages: transcript_messages,
                     max_tokens,
                     temperature,
                     top_p,
@@ -275,7 +252,7 @@ pub(crate) async fn dispatch_agent_inference(
                     .as_chat()
                     .ok_or_else(|| format!("Model '{model_name}' does not support chat"))?;
                 tracing::debug!(
-                    "dispatch_agent_inference {}: starting chat inference ({} messages, max_tokens={})",
+                    "dispatch_run_round {}: starting chat inference ({} messages, max_tokens={})",
                     request_id,
                     req.messages.len(),
                     req.max_tokens
@@ -283,12 +260,12 @@ pub(crate) async fn dispatch_agent_inference(
                 let resp = chat_model.chat(&req).map_err(|error| error.to_string())?;
 
                 tracing::debug!(
-                    "dispatch_agent_inference {}: chat inference complete, response length={}",
+                    "dispatch_run_round {}: chat inference complete, response length={}",
                     request_id,
                     resp.text.len()
                 );
 
-                Ok(serde_json::to_value(AgentRoundResponse {
+                Ok(serde_json::to_value(RunRoundResponse {
                     content: Some(resp.text),
                     rationale: None,
                     tool_calls: Vec::new(),
@@ -297,7 +274,7 @@ pub(crate) async fn dispatch_agent_inference(
             }
         })();
         tracing::debug!(
-            "dispatch_agent_inference {}: sending result (ok={})",
+            "dispatch_run_round {}: sending result (ok={})",
             request_id,
             result.is_ok(),
         );

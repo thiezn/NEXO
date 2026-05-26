@@ -351,7 +351,7 @@ impl DoubleStreamBlock {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn forward(
         &self,
         img: &Tensor,
@@ -588,7 +588,7 @@ impl Flux2Transformer {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn forward(
         &self,
         img: &Tensor,
@@ -648,7 +648,7 @@ pub enum Flux2TransformerWrapper {
 }
 
 impl Flux2TransformerWrapper {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn denoise(
         &self,
         img: &Tensor,

@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 /// Connection role: user (control-plane client) or node (capability host).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
-pub enum Role {
+pub enum ConnectionRole {
     User,
     Node,
 }
 
-impl Role {
+impl ConnectionRole {
     pub fn as_str(&self) -> &str {
         match self {
             Self::User => "user",
@@ -75,14 +75,14 @@ mod tests {
 
     #[test]
     fn role_serialization() {
-        assert_eq!(serde_json::to_string(&Role::User).unwrap(), "\"user\"");
-        assert_eq!(serde_json::to_string(&Role::Node).unwrap(), "\"node\"");
+        assert_eq!(serde_json::to_string(&ConnectionRole::User).unwrap(), "\"user\"");
+        assert_eq!(serde_json::to_string(&ConnectionRole::Node).unwrap(), "\"node\"");
     }
 
     #[test]
     fn role_deserialization() {
-        let r: Role = serde_json::from_str("\"node\"").unwrap();
-        assert_eq!(r, Role::Node);
+        let r: ConnectionRole = serde_json::from_str("\"node\"").unwrap();
+        assert_eq!(r, ConnectionRole::Node);
     }
 
     #[test]

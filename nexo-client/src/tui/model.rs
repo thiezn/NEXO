@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use nexo_ws_schema::{AgentStatus, HelloOk};
+use nexo_ws_schema::{HelloOk, RunStatus};
 use ratatui::layout::Rect;
 
 use super::completion;
@@ -68,7 +68,7 @@ pub enum PendingRequest {
     Health,
     Status { silent: bool },
     Send,
-    Agent,
+    RunStart,
     SessionCreate,
     SessionList,
     SessionGet,
@@ -78,12 +78,12 @@ pub enum PendingRequest {
     CronCreate,
     CronList,
     CronDelete,
-    PrefillMarkdownCreate,
-    PrefillMarkdownList,
-    PrefillMarkdownDelete,
-    PrefillCollectionCreate,
-    PrefillCollectionList,
-    PrefillCollectionDelete,
+    PromptDocumentCreate,
+    PromptDocumentList,
+    PromptDocumentDelete,
+    PromptCollectionCreate,
+    PromptCollectionList,
+    PromptCollectionDelete,
     SystemPresence,
     ImageAnalyze,
 }
@@ -94,7 +94,7 @@ impl PendingRequest {
             Self::Health => "health",
             Self::Status { .. } => "status",
             Self::Send => "send",
-            Self::Agent => "agent",
+            Self::RunStart => "run",
             Self::SessionCreate => "session create",
             Self::SessionList => "session list",
             Self::SessionGet => "session get",
@@ -104,12 +104,12 @@ impl PendingRequest {
             Self::CronCreate => "cron create",
             Self::CronList => "cron list",
             Self::CronDelete => "cron delete",
-            Self::PrefillMarkdownCreate => "prefill markdown create",
-            Self::PrefillMarkdownList => "prefill markdown list",
-            Self::PrefillMarkdownDelete => "prefill markdown delete",
-            Self::PrefillCollectionCreate => "prefill collection create",
-            Self::PrefillCollectionList => "prefill collection list",
-            Self::PrefillCollectionDelete => "prefill collection delete",
+            Self::PromptDocumentCreate => "prompt document create",
+            Self::PromptDocumentList => "prompt document list",
+            Self::PromptDocumentDelete => "prompt document delete",
+            Self::PromptCollectionCreate => "prompt collection create",
+            Self::PromptCollectionList => "prompt collection list",
+            Self::PromptCollectionDelete => "prompt collection delete",
             Self::SystemPresence => "system presence",
             Self::ImageAnalyze => "image analyze",
         }
@@ -131,7 +131,7 @@ pub struct SummaryStatus {
 pub struct ActiveStream {
     pub run_id: String,
     pub session_id: String,
-    pub status: AgentStatus,
+    pub status: RunStatus,
     pub content: String,
     pub tool_name: Option<String>,
     pub error: Option<String>,

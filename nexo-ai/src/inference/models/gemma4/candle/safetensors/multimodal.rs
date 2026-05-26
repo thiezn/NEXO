@@ -73,7 +73,7 @@ impl Model {
     /// `pixel_values`: optional batch of images, each `(1, C, H, W)`.
     /// `audio_mel`: optional `(batch, time, mel_bins)` mel spectrogram.
     /// `audio_mel_mask`: optional `(batch, time)` mask (1.0 = padding).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn forward_multimodal(
         &mut self,
         input_ids: &Tensor,

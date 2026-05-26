@@ -1,4 +1,4 @@
-//! Tool execution helpers for the agent loop.
+//! Tool execution helpers for the run loop.
 
 use crate::server::state::SharedState;
 use nexo_ws_schema::{Frame, Method, ToolsExecuteParams, ToolsExecuteResponse};

@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use nexo_ws_schema::{
-    AgentParams, CronCreateParams, CronDeleteParams, ImageAnalyzeParams,
-    PrefillCollectionCreateParams, PrefillCollectionDeleteParams, PrefillMarkdownCreateParams,
-    PrefillMarkdownDeleteParams, SendParams, SessionClearParams, SessionCreateParams,
-    SessionGetParams, SystemPresenceParams, ToolsExecuteParams,
+    CronCreateParams, CronDeleteParams, ImageAnalyzeParams, PromptCollectionCreateParams,
+    PromptCollectionDeleteParams, PromptDocumentCreateParams, PromptDocumentDeleteParams,
+    RunStartParams, SendParams, SessionClearParams, SessionCreateParams, SessionGetParams,
+    SystemPresenceParams, ToolsExecuteParams,
 };
 
 pub struct CommandContext<'a> {
@@ -22,7 +22,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "health",
     "status",
     "send",
-    "agent",
+    "run",
     "session create",
     "session list",
     "session get",
@@ -32,12 +32,12 @@ pub const COMMAND_NAMES: &[&str] = &[
     "cron create",
     "cron list",
     "cron delete",
-    "prefill markdown create",
-    "prefill markdown list",
-    "prefill markdown delete",
-    "prefill collection create",
-    "prefill collection list",
-    "prefill collection delete",
+    "prompt document create",
+    "prompt document list",
+    "prompt document delete",
+    "prompt collection create",
+    "prompt collection list",
+    "prompt collection delete",
     "system presence",
     "image analyze",
 ];
@@ -50,7 +50,7 @@ pub enum AppCommand {
     Health,
     Status,
     Send(SendParams),
-    Agent(AgentParams),
+    RunStart(RunStartParams),
     SessionCreate(SessionCreateParams),
     SessionList,
     SessionGet(SessionGetParams),
@@ -60,12 +60,12 @@ pub enum AppCommand {
     CronCreate(CronCreateParams),
     CronList,
     CronDelete(CronDeleteParams),
-    PrefillMarkdownCreate(PrefillMarkdownCreateParams),
-    PrefillMarkdownList,
-    PrefillMarkdownDelete(PrefillMarkdownDeleteParams),
-    PrefillCollectionCreate(PrefillCollectionCreateParams),
-    PrefillCollectionList,
-    PrefillCollectionDelete(PrefillCollectionDeleteParams),
+    PromptDocumentCreate(PromptDocumentCreateParams),
+    PromptDocumentList,
+    PromptDocumentDelete(PromptDocumentDeleteParams),
+    PromptCollectionCreate(PromptCollectionCreateParams),
+    PromptCollectionList,
+    PromptCollectionDelete(PromptCollectionDeleteParams),
     SystemPresence(SystemPresenceParams),
     ImageAnalyze(ImageAnalyzeParams),
 }
@@ -73,7 +73,7 @@ pub enum AppCommand {
 pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, String> {
     let trimmed = input.trim();
     let Some(without_slash) = trimmed.strip_prefix('/') else {
-        return parse_agent(trimmed, context);
+        return parse_run(trimmed, context);
     };
 
     let Some((command, args)) = split_command(without_slash) else {
@@ -94,14 +94,14 @@ pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, Str
         "health" => Ok(AppCommand::Health),
         "status" => Ok(AppCommand::Status),
         "send" => parse_send(args),
-        "agent" => parse_agent(args, context),
+        "run" => parse_run(args, context),
         "session create" => Ok(AppCommand::SessionCreate(SessionCreateParams {
             name: if args.is_empty() {
                 context.default_session_name.map(ToOwned::to_owned)
             } else {
                 Some(args.to_string())
             },
-            prefill_collection_id: None,
+            prompt_collection_id: None,
         })),
         "session list" => Ok(AppCommand::SessionList),
         "session get" => required_arg(args, "/session get <session-id>")
@@ -116,19 +116,19 @@ pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, Str
         "cron list" => Ok(AppCommand::CronList),
         "cron delete" => required_arg(args, "/cron delete <job-id>")
             .map(|job_id| AppCommand::CronDelete(CronDeleteParams { job_id })),
-        "prefill markdown create" => parse_json_args(args, "/prefill markdown create <json>")
-            .map(AppCommand::PrefillMarkdownCreate),
-        "prefill markdown list" => Ok(AppCommand::PrefillMarkdownList),
-        "prefill markdown delete" => {
-            required_arg(args, "/prefill markdown delete <filename>").map(|filename| {
-                AppCommand::PrefillMarkdownDelete(PrefillMarkdownDeleteParams { filename })
+        "prompt document create" => parse_json_args(args, "/prompt document create <json>")
+            .map(AppCommand::PromptDocumentCreate),
+        "prompt document list" => Ok(AppCommand::PromptDocumentList),
+        "prompt document delete" => {
+            required_arg(args, "/prompt document delete <id>").map(|id| {
+                AppCommand::PromptDocumentDelete(PromptDocumentDeleteParams { id })
             })
         }
-        "prefill collection create" => parse_json_args(args, "/prefill collection create <json>")
-            .map(AppCommand::PrefillCollectionCreate),
-        "prefill collection list" => Ok(AppCommand::PrefillCollectionList),
-        "prefill collection delete" => required_arg(args, "/prefill collection delete <id>")
-            .map(|id| AppCommand::PrefillCollectionDelete(PrefillCollectionDeleteParams { id })),
+        "prompt collection create" => parse_json_args(args, "/prompt collection create <json>")
+            .map(AppCommand::PromptCollectionCreate),
+        "prompt collection list" => Ok(AppCommand::PromptCollectionList),
+        "prompt collection delete" => required_arg(args, "/prompt collection delete <id>")
+            .map(|id| AppCommand::PromptCollectionDelete(PromptCollectionDeleteParams { id })),
         "system presence" => Ok(AppCommand::SystemPresence(SystemPresenceParams {
             status: if args.is_empty() {
                 "active".to_string()
@@ -155,7 +155,7 @@ Core:
 
 Messaging:
 /send <target> <json>
-/agent [--session <id>] [--model <id>] <prompt>
+/run [--session <id>] [--model <id>] <prompt>
 /image analyze <@image-path|path> <prompt>
 
 Sessions:
@@ -171,13 +171,13 @@ Tools and jobs:
 /cron list
 /cron delete <job-id>
 
-Prefills:
-/prefill markdown create <json>
-/prefill markdown list
-/prefill markdown delete <filename>
-/prefill collection create <json>
-/prefill collection list
-/prefill collection delete <id>
+Prompts:
+/prompt document create <json>
+/prompt document list
+/prompt document delete <id>
+/prompt collection create <json>
+/prompt collection list
+/prompt collection delete <id>
 
 Presence:
 /system presence [status]
@@ -185,8 +185,8 @@ Presence:
 Autocomplete:
 - Use Tab to accept the current suggestion.
 - Use Up/Down or Shift+Tab to cycle suggestions.
-- Type plain text to run it as `/agent <prompt>`.
-- Use @path in /agent prompts to inline file contents.
+- Type plain text to run it as `/run <prompt>`.
+- Use @path in /run prompts to inline file contents.
 - Use @path as the image argument for /image analyze.
 - Press F1 or type /help to open this help view.
 - Press Esc to close the help view or dismiss autocomplete.
@@ -229,9 +229,9 @@ fn parse_send(args: &str) -> Result<AppCommand, String> {
     }))
 }
 
-fn parse_agent(args: &str, context: CommandContext<'_>) -> Result<AppCommand, String> {
+fn parse_run(args: &str, context: CommandContext<'_>) -> Result<AppCommand, String> {
     if args.is_empty() {
-        return Err("Usage: /agent [--session <id>] [--model <id>] <prompt>".into());
+        return Err("Usage: /run [--session <id>] [--model <id>] <prompt>".into());
     }
 
     let mut session_id = context.current_session_id.map(ToOwned::to_owned);
@@ -260,15 +260,15 @@ fn parse_agent(args: &str, context: CommandContext<'_>) -> Result<AppCommand, St
     }
 
     if prompt_parts.is_empty() {
-        return Err("Usage: /agent [--session <id>] [--model <id>] <prompt>".into());
+        return Err("Usage: /run [--session <id>] [--model <id>] <prompt>".into());
     }
 
     let prompt = expand_prompt_file_references(&prompt_parts.join(" "), context.workspace_root)?;
-    Ok(AppCommand::Agent(AgentParams {
-        prompt,
+    Ok(AppCommand::RunStart(RunStartParams {
+        input: prompt,
         idempotency_key: nexo_ws_schema::Frame::new_id(),
         session_id,
-        context: None,
+        instructions: None,
         model_id,
         thinking: None,
     }))
@@ -393,44 +393,44 @@ mod tests {
     }
 
     #[test]
-    fn parses_agent_with_default_context() {
-        let command = parse("/agent summarize this", context(Path::new("."))).unwrap();
+    fn parses_run_with_default_context() {
+        let command = parse("/run summarize this", context(Path::new("."))).unwrap();
         match command {
-            AppCommand::Agent(params) => {
+            AppCommand::RunStart(params) => {
                 assert_eq!(params.session_id.as_deref(), Some("sess-1"));
                 assert_eq!(params.model_id.as_deref(), Some("gemma-4"));
-                assert_eq!(params.prompt, "summarize this");
+                assert_eq!(params.input, "summarize this");
             }
             other => panic!("unexpected command: {other:?}"),
         }
     }
 
     #[test]
-    fn parses_plain_text_as_agent_command() {
+    fn parses_plain_text_as_run_command() {
         let command = parse("summarize this", context(Path::new("."))).unwrap();
         match command {
-            AppCommand::Agent(params) => {
+            AppCommand::RunStart(params) => {
                 assert_eq!(params.session_id.as_deref(), Some("sess-1"));
                 assert_eq!(params.model_id.as_deref(), Some("gemma-4"));
-                assert_eq!(params.prompt, "summarize this");
+                assert_eq!(params.input, "summarize this");
             }
             other => panic!("unexpected command: {other:?}"),
         }
     }
 
     #[test]
-    fn expands_agent_file_references() {
+    fn expands_run_file_references() {
         let temp_root =
             std::env::temp_dir().join(format!("nexo-client-command-test-{}", std::process::id()));
         fs::create_dir_all(&temp_root).unwrap();
         let file_path = temp_root.join("sample.txt");
         fs::write(&file_path, "hello world").unwrap();
 
-        let command = parse("/agent inspect @sample.txt", context(&temp_root)).unwrap();
+        let command = parse("/run inspect @sample.txt", context(&temp_root)).unwrap();
         match command {
-            AppCommand::Agent(params) => {
-                assert!(params.prompt.contains("File: sample.txt"));
-                assert!(params.prompt.contains("hello world"));
+            AppCommand::RunStart(params) => {
+                assert!(params.input.contains("File: sample.txt"));
+                assert!(params.input.contains("hello world"));
             }
             other => panic!("unexpected command: {other:?}"),
         }

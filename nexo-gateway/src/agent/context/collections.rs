@@ -1,105 +1,114 @@
-//! Collection metadata persistence for stored context assets.
+//! Collection metadata persistence for stored prompt assets.
 
 use crate::memory::git::GitStorage;
-use serde::{Deserialize, Serialize};
+use nexo_spec::prompt::PromptCollection;
+use serde::Deserialize;
 
-use super::ContextCollection;
+const COLLECTIONS_PATH: &str = "PROMPTS/collections.json";
 
-const COLLECTIONS_PATH: &str = "PREFILL/collections.json";
+fn deserialize_prompt_collections(content: &str) -> anyhow::Result<Vec<PromptCollection>> {
+    if let Ok(collections) = serde_json::from_str::<Vec<PromptCollection>>(content) {
+        return Ok(collections);
+    }
 
-/// Serialized representation of `PREFILL/collections.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct ContextCollectionsFile {
-    #[serde(default)]
-    pub(super) collections: Vec<ContextCollectionDef>,
+    #[derive(Debug, Deserialize)]
+    struct LegacyPromptCollectionsFile {
+        #[serde(default)]
+        collections: Vec<PromptCollection>,
+    }
+
+    Ok(serde_json::from_str::<LegacyPromptCollectionsFile>(content)?.collections)
 }
 
-/// Serialized representation of a single stored context collection.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct ContextCollectionDef {
-    pub(super) id: String,
-    pub(super) name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) description: Option<String>,
-    #[serde(default)]
-    pub(super) markdown_files: Vec<String>,
+/// Load stored prompt collections, defaulting to an empty list.
+pub(super) fn load_prompt_collections(git: &GitStorage) -> Vec<PromptCollection> {
+    let content = match git.read_file(COLLECTIONS_PATH) {
+        Ok(content) => content,
+        Err(_) => return Vec::new(),
+    };
+
+    deserialize_prompt_collections(&content).unwrap_or_else(|error| {
+        tracing::warn!("Failed to parse prompt collections from '{COLLECTIONS_PATH}': {error}");
+        Vec::new()
+    })
 }
 
-/// Load stored context collection metadata, defaulting to an empty index.
-pub(super) fn load_context_collection_index(git: &GitStorage) -> ContextCollectionsFile {
-    git.read_json::<ContextCollectionsFile>(COLLECTIONS_PATH)
-        .unwrap_or(ContextCollectionsFile {
-            collections: Vec::new(),
-        })
-}
-
-/// Persist the stored context collection index back to git-backed storage.
-fn save_context_collection_index(
-    git: &GitStorage,
-    file: &ContextCollectionsFile,
-    commit_message: &str,
-) -> anyhow::Result<()> {
-    git.write_json_and_sync(COLLECTIONS_PATH, file, commit_message)
-}
-
-/// List all stored context collections.
+/// List all stored prompt collections.
 ///
 /// # Errors
 ///
 /// Returns an error when collection metadata cannot be read from storage.
-pub fn list_context_collections(git: &GitStorage) -> anyhow::Result<Vec<ContextCollection>> {
-    let file = load_context_collection_index(git);
-    Ok(file
-        .collections
-        .into_iter()
-        .map(|collection| ContextCollection {
-            id: collection.id,
-            name: collection.name,
-            description: collection.description,
-            markdown_files: collection.markdown_files,
-        })
-        .collect())
+pub fn list_prompt_collections(git: &GitStorage) -> anyhow::Result<Vec<PromptCollection>> {
+    Ok(load_prompt_collections(git))
 }
 
-/// Create or replace a stored context collection with the same ID.
+/// Create or replace a stored prompt collection with the same ID.
 ///
 /// # Errors
 ///
 /// Returns an error when collection metadata cannot be written or synced.
-pub fn upsert_context_collection(
+pub fn upsert_prompt_collection(
     git: &GitStorage,
-    id: &str,
-    name: &str,
-    description: Option<&str>,
-    files: &[String],
+    collection: &PromptCollection,
 ) -> anyhow::Result<()> {
-    let mut collections_file = load_context_collection_index(git);
-    collections_file
-        .collections
-        .retain(|collection| collection.id != id);
-    collections_file.collections.push(ContextCollectionDef {
-        id: id.to_string(),
-        name: name.to_string(),
-        description: description.map(String::from),
-        markdown_files: files.to_vec(),
-    });
-    save_context_collection_index(git, &collections_file, &format!("Add collection: {id}"))
+    let mut collections = load_prompt_collections(git);
+    collections.retain(|existing| existing.id != collection.id);
+    collections.push(collection.clone());
+    git.write_json_and_sync(
+        COLLECTIONS_PATH,
+        &collections,
+        &format!("Add prompt collection: {}", collection.id),
+    )
 }
 
-/// Delete a stored context collection by ID.
+/// Delete a stored prompt collection by ID.
 ///
 /// # Errors
 ///
 /// Returns an error when collection metadata cannot be written or synced.
-pub fn delete_context_collection(git: &GitStorage, id: &str) -> anyhow::Result<bool> {
-    let mut collections_file = load_context_collection_index(git);
-    let before = collections_file.collections.len();
-    collections_file
-        .collections
-        .retain(|collection| collection.id != id);
-    if collections_file.collections.len() == before {
+pub fn delete_prompt_collection(git: &GitStorage, id: &str) -> anyhow::Result<bool> {
+    let mut collections = load_prompt_collections(git);
+    let before = collections.len();
+    collections.retain(|collection| collection.id != id);
+    if collections.len() == before {
         return Ok(false);
     }
-    save_context_collection_index(git, &collections_file, &format!("Remove collection: {id}"))?;
+    git.write_json_and_sync(
+        COLLECTIONS_PATH,
+        &collections,
+        &format!("Remove prompt collection: {id}"),
+    )?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_collection() -> PromptCollection {
+        PromptCollection {
+            id: "default".into(),
+            name: "Default".into(),
+            description: Some("Core identity".into()),
+            documents: vec!["identity.md".into(), "skills.md".into()],
+        }
+    }
+
+    #[test]
+    fn deserialize_prompt_collections_accepts_flat_array() {
+        let json = serde_json::to_string(&vec![sample_collection()]).unwrap_or_default();
+        let parsed = deserialize_prompt_collections(&json);
+
+        assert!(parsed.is_ok(), "parse failed: {:?}", parsed.err());
+        assert_eq!(parsed.unwrap_or_default(), vec![sample_collection()]);
+    }
+
+    #[test]
+    fn deserialize_prompt_collections_accepts_legacy_wrapped_shape() {
+        let json = r#"{"collections":[{"id":"default","name":"Default","description":"Core identity","documents":["identity.md","skills.md"]}]}"#;
+        let parsed = deserialize_prompt_collections(json);
+
+        assert!(parsed.is_ok(), "parse failed: {:?}", parsed.err());
+        assert_eq!(parsed.unwrap_or_default(), vec![sample_collection()]);
+    }
 }

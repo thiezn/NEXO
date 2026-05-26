@@ -1,4 +1,4 @@
-//! Gateway runtime, server, and agent orchestration for the nexo workspace.
+//! Gateway runtime, server, and run orchestration for the nexo workspace.
 //!
 //! The crate centers on four main areas:
 //! - `agent` for session state, scheduling, and tool execution loops.

@@ -136,7 +136,7 @@ impl GitStorage {
     }
 
     /// Write a JSON-serializable value as a file, commit, and push.
-    pub fn write_json_and_sync<T: serde::Serialize>(
+    pub fn write_json_and_sync<T: serde::Serialize + ?Sized>(
         &self,
         rel_path: &str,
         value: &T,
@@ -144,12 +144,6 @@ impl GitStorage {
     ) -> anyhow::Result<()> {
         let content = serde_json::to_string_pretty(value)?;
         self.write_and_sync(rel_path, &content, commit_msg)
-    }
-
-    /// Read and deserialize a JSON file from the working tree.
-    pub fn read_json<T: serde::de::DeserializeOwned>(&self, rel_path: &str) -> anyhow::Result<T> {
-        let content = self.read_file(rel_path)?;
-        Ok(serde_json::from_str(&content)?)
     }
 }
 

@@ -236,7 +236,7 @@ impl QDoubleStreamBlock {
         (gate * val)?.apply(mlp_out).map_err(Into::into)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn forward(
         &self,
         img: &Tensor,
@@ -469,7 +469,7 @@ impl QuantizedFlux2Transformer {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn forward(
         &self,
         img: &Tensor,

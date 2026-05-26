@@ -1,4 +1,4 @@
-use crate::api::types::{ChatMessage, ToolCall};
+use crate::api::types::{ToolCall, TranscriptMessage};
 
 /// Controls how a model handles reasoning/thinking.
 /// Different model families map their capabilities onto these variants.
@@ -24,12 +24,12 @@ pub enum ReasoningEffort {
 /// Defines how a model family formats conversations into prompt strings.
 pub trait ChatTemplate: Send {
     /// Format conversation messages into a model-ready prompt string.
-    fn format_prompt(&self, messages: &[ChatMessage], reasoning: &ReasoningMode) -> String;
+    fn format_prompt(&self, messages: &[TranscriptMessage], reasoning: &ReasoningMode) -> String;
 
     /// Format conversation with tool definitions embedded.
     fn format_with_tools(
         &self,
-        messages: &[ChatMessage],
+        messages: &[TranscriptMessage],
         tools: &[nexo_spec::tool::ToolSpec],
         reasoning: &ReasoningMode,
     ) -> String;

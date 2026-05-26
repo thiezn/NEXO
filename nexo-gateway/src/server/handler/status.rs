@@ -1,6 +1,6 @@
 //! WebSocket handlers for health, status, and model availability updates.
 
-use crate::agent::{AgentCommand, AgentHandle};
+use crate::agent::{RunCommand, RunHandle};
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
     Frame, HealthResponse, ModelStatusParams, StatusResponse, ToolsCatalogResponse,
@@ -50,7 +50,7 @@ pub(super) async fn handle_model_status(
     params: serde_json::Value,
     peer_id: &str,
     state: &SharedState,
-    agent_handle: &AgentHandle,
+    run_handle: &RunHandle,
 ) -> Frame {
     let status_params: ModelStatusParams = match parse_params(request_id, params, "model.status") {
         Ok(p) => p,
@@ -68,7 +68,7 @@ pub(super) async fn handle_model_status(
         sw.set_loaded_models(peer_id, status_params.loaded_models);
         sw.set_available_models(peer_id, status_params.available_models);
     }
-    if model_became_available && let Err(e) = agent_handle.submit(AgentCommand::DrainQueue).await {
+    if model_became_available && let Err(e) = run_handle.submit(RunCommand::DrainQueue).await {
         tracing::warn!("Failed to submit DrainQueue after ModelStatus: {e}");
     }
 

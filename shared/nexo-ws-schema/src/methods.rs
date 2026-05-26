@@ -1,6 +1,11 @@
+use nexo_spec::message::{MessageRole, TranscriptMessage};
 #[cfg(test)]
 use nexo_spec::tool::ToolExecutionConstraints;
-use nexo_spec::{model::LoadedModelInfo, tool::ToolSpec};
+#[cfg(test)]
+use nexo_spec::transcript::TranscriptEntryKind;
+use nexo_spec::{
+    model::LoadedModelInfo, prompt::PromptCollection, tool::ToolSpec, transcript::TranscriptEntry,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -12,11 +17,14 @@ pub enum Method {
     Health,
     Status,
     Send,
-    Agent,
-    #[serde(rename = "agent.stop")]
-    AgentStop,
-    #[serde(rename = "agent.context.append")]
-    AgentContextAppend,
+    #[serde(rename = "run.start")]
+    RunStart,
+    #[serde(rename = "run.stop")]
+    RunStop,
+    #[serde(rename = "run.instructions.append")]
+    RunInstructionsAppend,
+    #[serde(rename = "run.round")]
+    RunRound,
     SystemPresence,
     #[serde(rename = "tools.catalog")]
     ToolsCatalog,
@@ -47,36 +55,33 @@ pub enum Method {
     /// Node → gateway: report current loaded model and available models.
     #[serde(rename = "model.status")]
     ModelStatus,
-    /// Node → gateway: fetch a prefill payload by SHA.
-    #[serde(rename = "prefill.fetch")]
-    PrefillFetch,
-    /// Client → gateway: create a markdown file.
-    #[serde(rename = "prefill.markdown.create")]
-    PrefillMarkdownCreate,
-    /// Client → gateway: list markdown files.
-    #[serde(rename = "prefill.markdown.list")]
-    PrefillMarkdownList,
-    /// Client → gateway: delete a markdown file.
-    #[serde(rename = "prefill.markdown.delete")]
-    PrefillMarkdownDelete,
-    /// Client → gateway: create a prefill collection.
-    #[serde(rename = "prefill.collection.create")]
-    PrefillCollectionCreate,
-    /// Client → gateway: list prefill collections.
-    #[serde(rename = "prefill.collection.list")]
-    PrefillCollectionList,
-    /// Client → gateway: delete a prefill collection.
-    #[serde(rename = "prefill.collection.delete")]
-    PrefillCollectionDelete,
+    /// Client → gateway: create a prompt document.
+    #[serde(rename = "prompt.document.create")]
+    PromptDocumentCreate,
+    /// Client → gateway: list prompt documents.
+    #[serde(rename = "prompt.document.list")]
+    PromptDocumentList,
+    /// Client → gateway: delete a prompt document.
+    #[serde(rename = "prompt.document.delete")]
+    PromptDocumentDelete,
+    /// Client → gateway: create a prompt collection.
+    #[serde(rename = "prompt.collection.create")]
+    PromptCollectionCreate,
+    /// Client → gateway: list prompt collections.
+    #[serde(rename = "prompt.collection.list")]
+    PromptCollectionList,
+    /// Client → gateway: delete a prompt collection.
+    #[serde(rename = "prompt.collection.delete")]
+    PromptCollectionDelete,
     /// Client → gateway → node: analyze an image using the model's vision capabilities.
     #[serde(rename = "image.analyze")]
     ImageAnalyze,
 }
 
-/// Agent run status.
+/// Run lifecycle status.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum AgentStatus {
+pub enum RunStatus {
     Accepted,
     /// Run is queued, waiting for an LLM node to become available.
     Queued,
@@ -100,23 +105,23 @@ pub struct StatusParams {}
 
 /// Parameters for the `send` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct SendParams {
     pub target: String,
     pub payload: serde_json::Value,
     pub idempotency_key: String,
 }
 
-/// Parameters for the `agent` method.
+/// Parameters for the `run.start` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentParams {
-    pub prompt: String,
+#[serde(rename_all = "lowercase")]
+pub struct RunStartParams {
+    pub input: String,
     pub idempotency_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context: Option<serde_json::Value>,
+    pub instructions: Option<serde_json::Value>,
     /// The model ID to use for inference. If omitted, any available LLM node is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
@@ -126,37 +131,37 @@ pub struct AgentParams {
     pub thinking: Option<bool>,
 }
 
-/// Parameters for the `agent.stop` method.
+/// Parameters for the `run.stop` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentStopParams {
+#[serde(rename_all = "lowercase")]
+pub struct RunStopParams {
     /// The active run to stop.
     pub run_id: String,
 }
 
-/// Response payload for the `agent.stop` method.
+/// Response payload for the `run.stop` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentStopResponse {
+#[serde(rename_all = "lowercase")]
+pub struct RunStopResponse {
     /// Whether the run was still active and has now been stopped.
     pub stopped: bool,
 }
 
-/// Parameters for the `agent.context.append` method.
+/// Parameters for the `run.instructions.append` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentContextAppendParams {
+#[serde(rename_all = "lowercase")]
+pub struct RunInstructionsAppendParams {
     /// The active run that should observe the new context on its next round.
     pub run_id: String,
-    /// Arbitrary structured context to append to the transcript.
-    pub context: serde_json::Value,
+    /// Arbitrary structured instructions to append to the transcript.
+    pub instructions: serde_json::Value,
 }
 
-/// Response payload for the `agent.context.append` method.
+/// Response payload for the `run.instructions.append` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentContextAppendResponse {
-    /// Whether the context was accepted for the active run.
+#[serde(rename_all = "lowercase")]
+pub struct RunInstructionsAppendResponse {
+    /// Whether the instructions were accepted for the active run.
     pub queued: bool,
     /// The persisted message identifier, when context was queued successfully.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -180,7 +185,7 @@ pub struct ToolsCatalogParams {
 
 /// Response payload for `health`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct HealthResponse {
     pub status: String,
     pub uptime_secs: u64,
@@ -188,7 +193,7 @@ pub struct HealthResponse {
 
 /// Response payload for `status`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct StatusResponse {
     pub connected_users: u32,
     pub connected_nodes: u32,
@@ -201,37 +206,25 @@ pub struct SendResponse {
     pub delivered: bool,
 }
 
-/// Response payload for `agent` (initial ack and final result).
+/// Response payload for `run.start` (initial ack and final result).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentResponse {
+#[serde(rename_all = "lowercase")]
+pub struct RunStartResponse {
     pub run_id: String,
     pub session_id: String,
-    pub status: AgentStatus,
+    pub status: RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
 }
 
-/// A single transcript message forwarded in a typed agent round request.
+/// Gateway-to-node payload for a single run round inference.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentRoundMessage {
-    pub role: String,
-    pub content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-}
-
-/// Gateway-to-node payload for a single agent round inference.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentRoundRequest {
+#[serde(rename_all = "lowercase")]
+pub struct RunRoundRequest {
     pub run_id: String,
     pub round_id: String,
     pub session_id: String,
-    pub messages: Vec<AgentRoundMessage>,
+    pub messages: Vec<TranscriptMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolSpecEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -240,28 +233,28 @@ pub struct AgentRoundRequest {
 
 /// A single tool call returned from a node for a round.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentRoundToolCall {
+#[serde(rename_all = "lowercase")]
+pub struct RunRoundToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
 }
 
-/// Node-to-gateway response payload for a single agent round inference.
+/// Node-to-gateway response payload for a single run round inference.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentRoundResponse {
+#[serde(rename_all = "lowercase")]
+pub struct RunRoundResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<AgentRoundToolCall>,
+    pub tool_calls: Vec<RunRoundToolCall>,
 }
 
 /// A single tool entry in the tools catalog response.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ToolEntry {
     #[serde(flatten)]
     pub spec: ToolSpec,
@@ -307,7 +300,7 @@ pub struct ToolsRegisterResponse {
 
 /// Parameters for the `tools.execute` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ToolsExecuteParams {
     pub tool: String,
     pub args: serde_json::Value,
@@ -327,23 +320,23 @@ pub struct ToolsExecuteResponse {
 
 /// Parameters for the `session.create` method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct SessionCreateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// ID of a prefill collection to associate with this session.
+    /// ID of a prompt collection to associate with this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefill_collection_id: Option<String>,
+    pub prompt_collection_id: Option<String>,
 }
 
 /// Response payload for `session.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct SessionCreateResponse {
     pub session_id: String,
-    /// The prefill collection ID associated with this session, if one was provided.
+    /// The prompt collection ID associated with this session, if one was provided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefill_collection_id: Option<String>,
+    pub prompt_collection_id: Option<String>,
 }
 
 // -- session.list --
@@ -354,11 +347,13 @@ pub struct SessionListParams {}
 
 /// A single session entry in a session list response.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct SessionEntry {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_collection_id: Option<String>,
     pub created_at: String,
     pub last_active_at: String,
     pub message_count: u32,
@@ -374,33 +369,21 @@ pub struct SessionListResponse {
 
 /// Parameters for the `session.get` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct SessionGetParams {
     pub session_id: String,
 }
 
-/// A single conversation message.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ConversationMessage {
-    pub id: String,
-    pub role: String,
-    pub content: String,
-    pub created_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-}
-
 /// Response payload for `session.get`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct SessionGetResponse {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    pub messages: Vec<ConversationMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_collection_id: Option<String>,
+    pub messages: Vec<TranscriptEntry>,
     pub created_at: String,
 }
 
@@ -408,7 +391,7 @@ pub struct SessionGetResponse {
 
 /// Parameters for the `session.clear` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct SessionClearParams {
     pub session_id: String,
 }
@@ -423,18 +406,18 @@ pub struct SessionClearResponse {
 
 /// Parameters for the `cron.create` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct CronCreateParams {
     pub name: String,
     pub schedule: String,
-    pub prompt: String,
+    pub input: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
 }
 
 /// Response payload for `cron.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct CronCreateResponse {
     pub job_id: String,
 }
@@ -447,7 +430,7 @@ pub struct CronListParams {}
 
 /// A single cron job entry.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct CronEntry {
     pub job_id: String,
     pub name: String,
@@ -469,7 +452,7 @@ pub struct CronListResponse {
 
 /// Parameters for the `cron.delete` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct CronDeleteParams {
     pub job_id: String,
 }
@@ -484,14 +467,14 @@ pub struct CronDeleteResponse {
 
 /// Parameters for `model.load` (gateway → node).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ModelLoadParams {
     pub model_id: String,
 }
 
 /// Response payload for `model.load`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ModelLoadResponse {
     pub model_id: String,
     pub loaded: bool,
@@ -503,7 +486,7 @@ pub struct ModelLoadResponse {
 
 /// Parameters for `model.unload` (gateway → node).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ModelUnloadParams {
     pub model_id: String,
 }
@@ -518,7 +501,7 @@ pub struct ModelUnloadResponse {
 
 /// Sent by a node to report its model state.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ModelStatusParams {
     /// Models currently loaded with their categories.
     #[serde(default)]
@@ -528,128 +511,98 @@ pub struct ModelStatusParams {
     pub available_models: Vec<String>,
 }
 
-// -- prefill.fetch --
+// -- prompt.document.create --
 
-/// Parameters for `prefill.fetch` (node → gateway).
-/// The node sends the SHA-256 hex of the combined collection content.
+/// Parameters for `prompt.document.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PrefillFetchParams {
-    pub prefill_sha: String,
-}
-
-/// Response payload for `prefill.fetch`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PrefillFetchResponse {
-    pub prefill_sha: String,
+pub struct PromptDocumentCreateParams {
+    /// Stable ID for the prompt document (for example `identity.md`).
+    pub id: String,
     pub content: String,
 }
 
-// -- prefill.markdown.create --
-
-/// Parameters for `prefill.markdown.create`.
+/// Response payload for `prompt.document.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillMarkdownCreateParams {
-    /// Filename for the markdown file (e.g. "identity.md").
-    pub filename: String,
-    pub content: String,
+pub struct PromptDocumentCreateResponse {
+    pub id: String,
 }
 
-/// Response payload for `prefill.markdown.create`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillMarkdownCreateResponse {
-    pub filename: String,
-}
+// -- prompt.document.list --
 
-// -- prefill.markdown.list --
-
-/// Parameters for `prefill.markdown.list` (empty).
+/// Parameters for `prompt.document.list` (empty).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillMarkdownListParams {}
+pub struct PromptDocumentListParams {}
 
-/// A single markdown file entry.
+/// A single prompt document entry.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct MarkdownFileEntry {
-    pub filename: String,
+pub struct PromptDocumentEntry {
+    pub id: String,
 }
 
-/// Response payload for `prefill.markdown.list`.
+/// Response payload for `prompt.document.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillMarkdownListResponse {
-    pub files: Vec<MarkdownFileEntry>,
+pub struct PromptDocumentListResponse {
+    pub documents: Vec<PromptDocumentEntry>,
 }
 
-// -- prefill.markdown.delete --
+// -- prompt.document.delete --
 
-/// Parameters for `prefill.markdown.delete`.
+/// Parameters for `prompt.document.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillMarkdownDeleteParams {
-    pub filename: String,
+pub struct PromptDocumentDeleteParams {
+    pub id: String,
 }
 
-/// Response payload for `prefill.markdown.delete`.
+/// Response payload for `prompt.document.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillMarkdownDeleteResponse {
+pub struct PromptDocumentDeleteResponse {
     pub deleted: bool,
 }
 
-// -- prefill.collection.create --
+// -- prompt.collection.create --
 
-/// Parameters for `prefill.collection.create`.
+/// Parameters for `prompt.collection.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PrefillCollectionCreateParams {
+#[serde(rename_all = "lowercase")]
+pub struct PromptCollectionCreateParams {
     /// Unique ID for the collection.
     pub id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Ordered list of markdown filenames that form this collection.
-    pub markdown_files: Vec<String>,
+    /// Ordered list of prompt document IDs that form this collection.
+    pub documents: Vec<String>,
 }
 
-/// Response payload for `prefill.collection.create`.
+/// Response payload for `prompt.collection.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillCollectionCreateResponse {
+pub struct PromptCollectionCreateResponse {
     pub id: String,
 }
 
-// -- prefill.collection.list --
+// -- prompt.collection.list --
 
-/// Parameters for `prefill.collection.list` (empty).
+/// Parameters for `prompt.collection.list` (empty).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillCollectionListParams {}
+pub struct PromptCollectionListParams {}
 
-/// A single prefill collection entry.
+/// Response payload for `prompt.collection.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct CollectionEntry {
-    pub id: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Ordered list of markdown filenames in this collection.
-    pub markdown_files: Vec<String>,
+pub struct PromptCollectionListResponse {
+    pub collections: Vec<PromptCollection>,
 }
 
-/// Response payload for `prefill.collection.list`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillCollectionListResponse {
-    pub collections: Vec<CollectionEntry>,
-}
+// -- prompt.collection.delete --
 
-// -- prefill.collection.delete --
-
-/// Parameters for `prefill.collection.delete`.
+/// Parameters for `prompt.collection.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillCollectionDeleteParams {
+pub struct PromptCollectionDeleteParams {
     pub id: String,
 }
 
-/// Response payload for `prefill.collection.delete`.
+/// Response payload for `prompt.collection.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrefillCollectionDeleteResponse {
+pub struct PromptCollectionDeleteResponse {
     pub deleted: bool,
 }
 
@@ -657,7 +610,7 @@ pub struct PrefillCollectionDeleteResponse {
 
 /// Parameters for `image.analyze`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ImageAnalyzeParams {
     /// Base64-encoded image data.
     pub image_data: String,
@@ -683,7 +636,7 @@ fn default_image_analyze_temperature() -> f64 {
 
 /// Response payload for `image.analyze`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct ImageAnalyzeResponse {
     pub text: String,
     pub tokens_generated: usize,
@@ -736,27 +689,27 @@ mod tests {
     }
 
     #[test]
-    fn agent_params_roundtrip() {
-        let params = AgentParams {
-            prompt: "summarize this".into(),
+    fn run_start_params_roundtrip() {
+        let params = RunStartParams {
+            input: "summarize this".into(),
             idempotency_key: "idem-1".into(),
             session_id: Some("sess-1".into()),
-            context: Some(serde_json::json!({"files": ["a.rs"]})),
+            instructions: Some(serde_json::json!({"files": ["a.rs"]})),
             model_id: None,
             thinking: None,
         };
         let json = serde_json::to_string(&params).unwrap();
-        let decoded: AgentParams = serde_json::from_str(&json).unwrap();
+        let decoded: RunStartParams = serde_json::from_str(&json).unwrap();
         assert_eq!(params, decoded);
     }
 
     #[test]
-    fn agent_params_without_session_omits_field() {
-        let params = AgentParams {
-            prompt: "hello".into(),
+    fn run_start_params_without_session_omits_field() {
+        let params = RunStartParams {
+            input: "hello".into(),
             idempotency_key: "k1".into(),
             session_id: None,
-            context: None,
+            instructions: None,
             model_id: None,
             thinking: None,
         };
@@ -765,35 +718,35 @@ mod tests {
     }
 
     #[test]
-    fn agent_control_method_serialization() {
+    fn run_control_method_serialization() {
         assert_eq!(
-            serde_json::to_string(&Method::AgentStop).unwrap(),
-            "\"agent.stop\""
+            serde_json::to_string(&Method::RunStop).unwrap(),
+            "\"run.stop\""
         );
         assert_eq!(
-            serde_json::to_string(&Method::AgentContextAppend).unwrap(),
-            "\"agent.context.append\""
+            serde_json::to_string(&Method::RunInstructionsAppend).unwrap(),
+            "\"run.instructions.append\""
         );
     }
 
     #[test]
-    fn agent_stop_params_roundtrip() {
-        let params = AgentStopParams {
+    fn run_stop_params_roundtrip() {
+        let params = RunStopParams {
             run_id: "run-1".into(),
         };
         let json = serde_json::to_string(&params).unwrap();
-        let decoded: AgentStopParams = serde_json::from_str(&json).unwrap();
+        let decoded: RunStopParams = serde_json::from_str(&json).unwrap();
         assert_eq!(params, decoded);
     }
 
     #[test]
-    fn agent_context_append_params_roundtrip() {
-        let params = AgentContextAppendParams {
+    fn run_instructions_append_params_roundtrip() {
+        let params = RunInstructionsAppendParams {
             run_id: "run-1".into(),
-            context: serde_json::json!({"files": ["notes.md"]}),
+            instructions: serde_json::json!({"files": ["notes.md"]}),
         };
         let json = serde_json::to_string(&params).unwrap();
-        let decoded: AgentContextAppendParams = serde_json::from_str(&json).unwrap();
+        let decoded: RunInstructionsAppendParams = serde_json::from_str(&json).unwrap();
         assert_eq!(params, decoded);
     }
 
@@ -922,30 +875,30 @@ mod tests {
     }
 
     #[test]
-    fn agent_status_serialization() {
+    fn run_status_serialization() {
         for (status, expected) in [
-            (AgentStatus::Accepted, "\"accepted\""),
-            (AgentStatus::Queued, "\"queued\""),
-            (AgentStatus::Thinking, "\"thinking\""),
-            (AgentStatus::ToolCall, "\"tool_call\""),
-            (AgentStatus::Streaming, "\"streaming\""),
-            (AgentStatus::Completed, "\"completed\""),
-            (AgentStatus::Failed, "\"failed\""),
-            (AgentStatus::Cancelled, "\"cancelled\""),
+            (RunStatus::Accepted, "\"accepted\""),
+            (RunStatus::Queued, "\"queued\""),
+            (RunStatus::Thinking, "\"thinking\""),
+            (RunStatus::ToolCall, "\"tool_call\""),
+            (RunStatus::Streaming, "\"streaming\""),
+            (RunStatus::Completed, "\"completed\""),
+            (RunStatus::Failed, "\"failed\""),
+            (RunStatus::Cancelled, "\"cancelled\""),
         ] {
             let json = serde_json::to_string(&status).unwrap();
             assert_eq!(json, expected);
-            let decoded: AgentStatus = serde_json::from_str(&json).unwrap();
+            let decoded: RunStatus = serde_json::from_str(&json).unwrap();
             assert_eq!(status, decoded);
         }
     }
 
     #[test]
-    fn agent_response_with_typed_status() {
-        let resp = AgentResponse {
+    fn run_start_response_with_typed_status() {
+        let resp = RunStartResponse {
             run_id: "run-1".into(),
             session_id: "sess-1".into(),
-            status: AgentStatus::Accepted,
+            status: RunStatus::Accepted,
             summary: None,
         };
         let json = serde_json::to_value(&resp).unwrap();
@@ -956,17 +909,15 @@ mod tests {
     }
 
     #[test]
-    fn agent_round_request_roundtrip() {
-        let request = AgentRoundRequest {
+    fn run_round_request_roundtrip() {
+        let request = RunRoundRequest {
             run_id: "run-1".into(),
             round_id: "round-1".into(),
             session_id: "sess-1".into(),
-            messages: vec![AgentRoundMessage {
-                role: "system".into(),
-                content: "You are helpful".into(),
-                tool_call_id: None,
-                tool_name: None,
-            }],
+            messages: vec![TranscriptMessage::new(
+                MessageRole::System,
+                "You are helpful",
+            )],
             tools: vec![ToolSpecEntry {
                 name: "echo.run".into(),
                 description: "Echo input".into(),
@@ -978,16 +929,16 @@ mod tests {
         };
 
         let json = serde_json::to_string(&request).unwrap();
-        let decoded: AgentRoundRequest = serde_json::from_str(&json).unwrap();
+        let decoded: RunRoundRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(request, decoded);
     }
 
     #[test]
-    fn agent_round_response_roundtrip() {
-        let response = AgentRoundResponse {
+    fn run_round_response_roundtrip() {
+        let response = RunRoundResponse {
             content: Some("Final answer".into()),
             rationale: Some("Reasoning summary".into()),
-            tool_calls: vec![AgentRoundToolCall {
+            tool_calls: vec![RunRoundToolCall {
                 id: "call-1".into(),
                 name: "echo.run".into(),
                 arguments: serde_json::json!({"input": "hello"}),
@@ -995,13 +946,13 @@ mod tests {
         };
 
         let json = serde_json::to_string(&response).unwrap();
-        let decoded: AgentRoundResponse = serde_json::from_str(&json).unwrap();
+        let decoded: RunRoundResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(response, decoded);
     }
 
     #[test]
-    fn agent_context_append_response_omits_missing_message_id() {
-        let response = AgentContextAppendResponse {
+    fn run_instructions_append_response_omits_missing_message_id() {
+        let response = RunInstructionsAppendResponse {
             queued: false,
             message_id: None,
         };
@@ -1050,7 +1001,7 @@ mod tests {
     fn session_create_params_roundtrip() {
         let params = SessionCreateParams {
             name: Some("my session".into()),
-            prefill_collection_id: None,
+            prompt_collection_id: None,
         };
         let json = serde_json::to_string(&params).unwrap();
         let decoded: SessionCreateParams = serde_json::from_str(&json).unwrap();
@@ -1062,6 +1013,7 @@ mod tests {
         let entry = SessionEntry {
             session_id: "s1".into(),
             name: None,
+            prompt_collection_id: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             last_active_at: "2026-01-01T01:00:00Z".into(),
             message_count: 5,
@@ -1077,7 +1029,7 @@ mod tests {
         let params = CronCreateParams {
             name: "daily summary".into(),
             schedule: "0 9 * * *".into(),
-            prompt: "summarize yesterday".into(),
+            input: "summarize yesterday".into(),
             session_id: Some("sess-1".into()),
         };
         let json = serde_json::to_string(&params).unwrap();
@@ -1101,57 +1053,51 @@ mod tests {
     }
 
     #[test]
-    fn conversation_message_roundtrip() {
-        let msg = ConversationMessage {
+    fn transcript_entry_roundtrip() {
+        let msg = TranscriptEntry {
             id: "m1".into(),
-            role: "assistant".into(),
-            content: "hello".into(),
+            message: TranscriptMessage::new(MessageRole::Assistant, "hello"),
+            kind: TranscriptEntryKind::AssistantResponse,
             created_at: "2026-01-01T00:00:00Z".into(),
-            tool_call_id: None,
-            tool_name: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
-        let decoded: ConversationMessage = serde_json::from_str(&json).unwrap();
+        let decoded: TranscriptEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, decoded);
     }
 
     #[test]
-    fn prefill_method_serialization() {
+    fn prompt_method_serialization() {
         assert_eq!(
-            serde_json::to_string(&Method::PrefillFetch).unwrap(),
-            "\"prefill.fetch\""
+            serde_json::to_string(&Method::PromptDocumentCreate).unwrap(),
+            "\"prompt.document.create\""
         );
         assert_eq!(
-            serde_json::to_string(&Method::PrefillMarkdownCreate).unwrap(),
-            "\"prefill.markdown.create\""
-        );
-        assert_eq!(
-            serde_json::to_string(&Method::PrefillCollectionCreate).unwrap(),
-            "\"prefill.collection.create\""
+            serde_json::to_string(&Method::PromptCollectionCreate).unwrap(),
+            "\"prompt.collection.create\""
         );
     }
 
     #[test]
-    fn prefill_markdown_create_roundtrip() {
-        let params = PrefillMarkdownCreateParams {
-            filename: "identity.md".into(),
+    fn prompt_document_create_roundtrip() {
+        let params = PromptDocumentCreateParams {
+            id: "identity.md".into(),
             content: "# Identity\nI am helpful.".into(),
         };
         let json = serde_json::to_string(&params).unwrap();
-        let decoded: PrefillMarkdownCreateParams = serde_json::from_str(&json).unwrap();
+        let decoded: PromptDocumentCreateParams = serde_json::from_str(&json).unwrap();
         assert_eq!(params, decoded);
     }
 
     #[test]
-    fn prefill_collection_create_roundtrip() {
-        let params = PrefillCollectionCreateParams {
+    fn prompt_collection_create_roundtrip() {
+        let params = PromptCollectionCreateParams {
             id: "default".into(),
             name: "my collection".into(),
             description: Some("desc".into()),
-            markdown_files: vec!["identity.md".into(), "skills.md".into()],
+            documents: vec!["identity.md".into(), "skills.md".into()],
         };
         let json = serde_json::to_string(&params).unwrap();
-        let decoded: PrefillCollectionCreateParams = serde_json::from_str(&json).unwrap();
+        let decoded: PromptCollectionCreateParams = serde_json::from_str(&json).unwrap();
         assert_eq!(params, decoded);
     }
 }

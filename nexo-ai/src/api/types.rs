@@ -2,62 +2,17 @@
 use candle_core::Tensor;
 use serde::{Deserialize, Serialize};
 
+pub use nexo_spec::message::{MessageRole, TranscriptMessage};
 pub use nexo_spec::model::ModelCategory;
 
 // ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------
 
-/// Role within a chat conversation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatRole {
-    System,
-    User,
-    Assistant,
-    Tool,
-}
-
-/// A single message in a chat conversation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: ChatRole,
-    pub content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-}
-
-impl ChatMessage {
-    pub fn new(role: ChatRole, content: impl Into<String>) -> Self {
-        Self {
-            role,
-            content: content.into(),
-            tool_call_id: None,
-            tool_name: None,
-        }
-    }
-
-    pub fn with_tool_metadata(
-        role: ChatRole,
-        content: impl Into<String>,
-        tool_call_id: Option<String>,
-        tool_name: Option<String>,
-    ) -> Self {
-        Self {
-            role,
-            content: content.into(),
-            tool_call_id,
-            tool_name,
-        }
-    }
-}
-
 /// Request for a chat completion.
 #[derive(Debug, Clone)]
 pub struct ChatRequest {
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<TranscriptMessage>,
     pub max_tokens: usize,
     pub temperature: f64,
     pub top_p: f64,
@@ -80,7 +35,7 @@ pub struct ChatResponse {
 /// Request for tool-augmented generation.
 #[derive(Debug, Clone)]
 pub struct ToolCallRequest {
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<TranscriptMessage>,
     pub tools: Vec<nexo_spec::tool::ToolSpec>,
     pub max_tokens: usize,
     pub temperature: f64,
@@ -271,7 +226,7 @@ pub struct AudioInput {
 /// Unified multimodal request — text + optional images + optional audio.
 #[derive(Debug, Clone)]
 pub struct MultiModalRequest {
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<TranscriptMessage>,
     pub images: Vec<ImageInput>,
     pub audio: Option<AudioInput>,
     pub max_tokens: usize,
@@ -314,30 +269,34 @@ pub struct LayerKvSnapshot {
 mod tests {
     use super::*;
 
-    // -- ChatRole serde --
+    // -- MessageRole serde --
 
     #[test]
-    fn chat_role_serde_roundtrip() {
-        for role in [ChatRole::System, ChatRole::User, ChatRole::Assistant] {
+    fn message_role_serde_roundtrip() {
+        for role in [
+            MessageRole::System,
+            MessageRole::User,
+            MessageRole::Assistant,
+        ] {
             let json = serde_json::to_string(&role).unwrap();
-            let parsed: ChatRole = serde_json::from_str(&json).unwrap();
+            let parsed: MessageRole = serde_json::from_str(&json).unwrap();
             assert_eq!(role, parsed);
         }
     }
 
-    // -- ChatMessage serde --
+    // -- TranscriptMessage serde --
 
     #[test]
-    fn chat_message_serde_roundtrip() {
-        let msg = ChatMessage::with_tool_metadata(
-            ChatRole::Tool,
+    fn transcript_message_serde_roundtrip() {
+        let msg = TranscriptMessage::with_tool_metadata(
+            MessageRole::Tool,
             "hello",
             Some("call-1".into()),
             Some("io.bash".into()),
         );
         let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ChatMessage = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.role, ChatRole::Tool);
+        let parsed: TranscriptMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.role, MessageRole::Tool);
         assert_eq!(parsed.content, "hello");
         assert_eq!(parsed.tool_call_id.as_deref(), Some("call-1"));
         assert_eq!(parsed.tool_name.as_deref(), Some("io.bash"));
@@ -447,7 +406,10 @@ mod tests {
     #[test]
     fn chat_request_can_be_constructed() {
         let req = ChatRequest {
-            messages: vec![ChatMessage::new(ChatRole::System, "You are helpful.")],
+            messages: vec![TranscriptMessage::new(
+                MessageRole::System,
+                "You are helpful.",
+            )],
             max_tokens: 100,
             temperature: 0.7,
             top_p: 0.9,

@@ -118,7 +118,7 @@ fn render_summary(model: &Model, frame: &mut Frame<'_>, area: Rect, theme: Theme
         key_value_line(theme, "Clients", &clients, theme.success),
         key_value_line(theme, "Nodes", &nodes, theme.info),
         key_value_line(theme, "Capabilities", &capabilities, theme.accent),
-        key_value_line(theme, "Agent Run", &run_status, stream_style(theme, model)),
+        key_value_line(theme, "Run", &run_status, stream_style(theme, model)),
         key_value_line(theme, "Last Error", error_text, error_style(theme, model)),
     ];
 
@@ -318,7 +318,7 @@ fn activity_lines(model: &Model, theme: Theme) -> Vec<Line<'static>> {
 
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No activity yet. Run /status, /agent, or /help to get started.",
+            "No activity yet. Run /status, /run, or /help to get started.",
             theme.placeholder,
         )));
     }

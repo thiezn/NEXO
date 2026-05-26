@@ -66,7 +66,7 @@ mod tests {
             .execute(pool)
             .await
             .ok();
-        sqlx::query("INSERT INTO agent_runs (id, session_id, idempotency_key) VALUES (?, 's1', ?)")
+        sqlx::query("INSERT INTO runs (id, session_id, idempotency_key) VALUES (?, 's1', ?)")
             .bind(run_id)
             .bind(format!("idem-{run_id}"))
             .execute(pool)

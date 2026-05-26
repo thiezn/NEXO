@@ -10,32 +10,34 @@ pub mod types;
 pub use connect::{ConnectParams, HelloOk, Policy};
 pub use error::{ErrorPayload, WsError};
 pub use events::{
-    AgentEventPayload, CronPayload, EventKind, HeartbeatPayload, MessagePayload, PresencePayload,
+    CronPayload, EventKind, HeartbeatPayload, MessagePayload, PresencePayload, RunEventPayload,
     ShutdownPayload, TickPayload,
 };
 pub use frame::Frame;
 pub use methods::{
-    AgentContextAppendParams, AgentContextAppendResponse, AgentParams, AgentResponse,
-    AgentRoundMessage, AgentRoundRequest, AgentRoundResponse, AgentRoundToolCall, AgentStatus,
-    AgentStopParams, AgentStopResponse, CollectionEntry, ConversationMessage,
+    PromptCollectionCreateParams, PromptCollectionCreateResponse,
+    PromptCollectionDeleteParams, PromptCollectionDeleteResponse, PromptCollectionListParams,
+    PromptCollectionListResponse, PromptDocumentCreateParams, PromptDocumentCreateResponse,
+    PromptDocumentDeleteParams, PromptDocumentDeleteResponse, PromptDocumentEntry,
+    PromptDocumentListParams, PromptDocumentListResponse, RunInstructionsAppendParams,
+    RunInstructionsAppendResponse, RunRoundRequest, RunRoundResponse, RunRoundToolCall,
+    RunStartParams, RunStartResponse, RunStatus, RunStopParams, RunStopResponse,
     CronCreateParams, CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry,
     CronListParams, CronListResponse, HealthParams, HealthResponse, ImageAnalyzeParams,
-    ImageAnalyzeResponse, MarkdownFileEntry, Method, ModelLoadParams, ModelLoadResponse,
-    ModelStatusParams, ModelUnloadParams, ModelUnloadResponse, PrefillCollectionCreateParams,
-    PrefillCollectionCreateResponse, PrefillCollectionDeleteParams,
-    PrefillCollectionDeleteResponse, PrefillCollectionListParams, PrefillCollectionListResponse,
-    PrefillFetchParams, PrefillFetchResponse, PrefillMarkdownCreateParams,
-    PrefillMarkdownCreateResponse, PrefillMarkdownDeleteParams, PrefillMarkdownDeleteResponse,
-    PrefillMarkdownListParams, PrefillMarkdownListResponse, SendParams, SendResponse,
+    ImageAnalyzeResponse, Method, ModelLoadParams, ModelLoadResponse, ModelStatusParams,
+    ModelUnloadParams, ModelUnloadResponse, SendParams, SendResponse,
     SessionClearParams, SessionClearResponse, SessionCreateParams, SessionCreateResponse,
     SessionEntry, SessionGetParams, SessionGetResponse, SessionListParams, SessionListResponse,
     StatusParams, StatusResponse, SystemPresenceParams, ToolEntry, ToolSpecEntry,
     ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams, ToolsExecuteResponse,
     ToolsRegisterParams, ToolsRegisterResponse,
 };
+pub use nexo_spec::message::{MessageRole, TranscriptMessage};
 pub use nexo_spec::model::{LoadedModelInfo, ModelCategory};
+pub use nexo_spec::prompt::{PromptCollection, PromptDocument, SystemPrompt};
+pub use nexo_spec::transcript::{TranscriptEntry, TranscriptEntryKind};
 pub use schema::{SchemaSection, generate_schema, schema_json};
-pub use types::{ClientInfo, DeviceInfo, Platform, Role, Scope};
+pub use types::{ClientInfo, ConnectionRole, DeviceInfo, Platform, Scope};
 
 /// The protocol version this crate implements.
 pub const PROTOCOL_VERSION: u32 = 3;

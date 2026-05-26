@@ -18,7 +18,8 @@
 - Maintains connections to clients and nodes
 - Exposes a typed WS API (requests, responses, server‑push events).
 - Validates inbound frames against JSON Schema.
-- Emits events like `agent`, `message`, `presence`, `heartbeat`, `cron`, `tick`, `shutdown`.
+- Runs the Agent loop and cron scheduler; coordinates tool execution and model inference.
+- Emits events like `run`, `message`, `presence`, `heartbeat`, `cron`, `tick`, `shutdown`.
 
 ### Clients (macOS / iOS app / CLI)
 
@@ -27,8 +28,8 @@
   `role: "user"` connections when routing directed messages and associating sessions.
   Multiple connected peers can share the same `client.id`, in which case all of them
   receive directed `message` events. `device.id` identifies the concrete device.
-- Send requests (`health`, `status`, `send`, `agent`, `system-presence`).
-- Subscribe to events (`tick`, `agent`, `message`, `presence`, `shutdown`).
+- Send requests (`health`, `status`, `send`, `run.start`, `run.stop`, `run.instructions.append`, `system-presence`).
+- Subscribe to events (`tick`, `run`, `message`, `presence`, `shutdown`).
 
 ### Nodes (macOS / iOS / headless)
 
@@ -36,9 +37,9 @@
 - Provide a device identity in `connect`; pairing is **device‑based** (role `node`)
 - After handshake, register full tool specs via `tools.register`.
 - Listen for `tools.execute` requests forwarded by the gateway.
-- Handle `agent` inference requests from the gateway loop runner.
+- Handle `run.round` inference requests from the gateway loop runner.
 - Respond to `model.load` / `model.unload` commands; push `model.status` updates.
-- Expose commands like `epub_extractor.*`, `echo.*`, `ping`.
+- Expose tools like `epub_extractor.*`, `echo.*`, `ping`.
 - Automatically reconnect and re-register on disconnect.
 - On macOS, nexo-node also starts and monitors local inference servers (llama-server, etc.). See [Model Management](/nexo/model_management.md) §6.
 
@@ -57,10 +58,10 @@ sequenceDiagram
     Gateway-->>Client: event:presence
     Gateway-->>Client: event:tick
 
-    Client->>Gateway: request:agent
-    Gateway-->>Client: response:agent<br>ack {runId, status:"accepted"}
-    Gateway-->>Client: event:agent<br>(streaming)
-    Gateway-->>Client: response:agent<br>final {runId, status, summary}
+    Client->>Gateway: request:run.start
+    Gateway-->>Client: response:run.start<br>ack {runId, sessionId, status:"accepted"}
+    Gateway-->>Client: event:run<br>(streaming)
+    Gateway-->>Client: event:run<br>{status:"completed"}
 ```
 
 ## Node registration + tool execution
@@ -101,38 +102,38 @@ sequenceDiagram
     Gateway-->>Bob: event:message {from:"alice", target:"bob", payload:{...}}
   ```
 
-## Brain (agent loop)
+## Run loop
 
-The gateway spawns an **AgentHandle** at startup — a background task that processes
-agent commands sequentially. When a client sends an `agent` request:
+The gateway spawns a **RunHandle** at startup — a background task that processes
+run commands sequentially. When a client sends a `run.start` request:
 
-1. The handler creates (or resumes) a session and an agent run in SQLite
-2. It submits an `AgentCommand::RunAgent` to the brain via an mpsc channel
-3. The brain runs the loop: context assembly → inference → tool calls → repeat
+1. The handler creates (or resumes) a session and a run row in SQLite
+2. It submits a `RunCommand::StartRun` to the run task via an mpsc channel
+3. The run task executes the loop: transcript assembly → inference → tool calls → repeat
 4. Lifecycle events (`thinking`, `tool_call`, `streaming`, `completed`) are broadcast
    to all connected clients via the event channel
 
-Details: [Agent Loop](/nexo/agent_loop.md)
+Details: [Run Loop](/nexo/agent_loop.md)
 
 ### Capability locking
 
-When the brain invokes a node capability (inference or tool execution), it acquires
+When the run loop invokes a node capability (inference or tool execution), it acquires
 an advisory lock in the `capability_locks` SQLite table. This prevents concurrent
-agent runs from using the same capability. Locks expire after 5 minutes for crash
+run executions from using the same capability. Locks expire after 5 minutes for crash
 recovery.
 
 ### Cron scheduler
 
-A background scheduler task runs alongside the brain, checking every 60 seconds for
-due cron jobs. When a job fires, it emits a `cron` event and submits an agent command
-to the brain.
+A background scheduler task runs alongside the run loop, checking every 60 seconds for
+due cron jobs. When a job fires, it emits a `cron` event and submits a run command
+to the run task.
 
 ## Sessions
 
 A client can have multiple sessions and maintains a `sessionId` locally. Sessions are
-created explicitly via `session.create` or implicitly when an `agent` request is sent
+created explicitly via `session.create` or implicitly when a `run.start` request is sent
 without a `sessionId`. After a client restart, it can query `session.list` to resume
-previous conversations.
+previous transcript sessions.
 
 ## Wire protocol (summary)
 
@@ -142,7 +143,7 @@ previous conversations.
 - After handshake:
   - Requests: `{type:"request", id, method, params}` → `{type:"response", id, ok, payload|error}`
   - Events: `{type:"event", event, payload, seq?, stateVersion?}`
-- Idempotency keys are required for side‑effecting methods (`send`, `agent`) to
+- Idempotency keys are required for side‑effecting methods (`send`, `run.start`) to
   safely retry; the server keeps a short‑lived dedupe cache.
 - Nodes must include `role: "node"` plus capabilities/commands in `connect`.
 

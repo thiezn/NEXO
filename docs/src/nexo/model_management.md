@@ -1,6 +1,6 @@
 # Model Management
 
-This document describes how nexo-gateway and nexo-node cooperate to manage local LLM inference sessions: loading and unloading models, caching reusable prompt prefills, and handling requests that arrive when no inference node is available.
+This document describes how nexo-gateway and nexo-node cooperate to manage local LLM inference sessions: loading and unloading models, assembling reusable prompt collections, and handling requests that arrive when no inference node is available.
 
 ---
 
@@ -53,7 +53,7 @@ available_models = ["gemma4-27b", "flux-schnell", "whisper-large-v3-turbo"]
 
 ### Model load / unload
 
-When an agent run requests a specific `model_id`, the gateway's loop runner calls `ensure_model_loaded`:
+When a run requests a specific `model_id`, the gateway's loop runner calls `ensure_model_loaded`:
 
 1. **Already in VRAM** — if `loaded_models[node]` already equals `model_id`, the run is routed immediately.
 2. **On disk but not loaded** — the gateway sends `Method::ModelLoad` to the capable node and waits up to 300 seconds.
@@ -74,110 +74,101 @@ The node responds to each request and then pushes a `Method::ModelStatus` frame 
 
 ---
 
-## 3. Composable Prefills
+## 3. Prompt Collections
 
-A *prefill* is a system-level prompt prepended to every inference request. The prefill system is composable: individual **markdown files** are stored on disk and grouped into ordered **collections**. Collections are resolved at request time — their combined content is hashed, and only the hash is sent to the node, which caches content by hash.
+A prompt collection is a reusable system-level prompt assembled from ordered markdown documents. The gateway resolves the selected collection locally for each run and prepends the combined content to the model transcript before adding tool descriptions.
 
 ### Storage layout
 
 ```
-~/.nexo/storage/
-  relational/
-    gateway.db          # SQLite database
-  markdown/
-    <uuid>.md           # Raw markdown file content
+~/.nexo/nexo-storage/
+  PROMPTS/
+    collections.json    # Prompt collection definitions
+    identity.md         # Prompt document
+    skills.md           # Prompt document
 ```
 
-SQLite holds metadata only: `id`, `category`, `description`, and `filename` per markdown file, plus an ordered list of file IDs per collection.
+Git-backed storage holds both prompt documents and collection metadata. `PROMPTS/collections.json` stores collection IDs, names, optional descriptions, and ordered document IDs.
 
-### Authoring markdown files
+### Authoring prompt documents
 
 ```json
-{ "method": "prefill.markdown.create",
-  "params": { "category": "identity", "description": "Core persona", "content": "# Identity\nYou are a helpful Rust assistant." } }
+{ "method": "prompt.document.create",
+  "params": { "id": "identity.md", "content": "# Identity\nYou are a helpful Rust assistant." } }
 
-→ { "id": "01jx…" }
+→ { "id": "identity.md" }
 ```
 
 ### Building a collection
 
 ```json
-{ "method": "prefill.collection.create",
-  "params": { "name": "default", "markdownIds": ["01jx…", "01jy…"] } }
+{ "method": "prompt.collection.create",
+  "params": {
+    "id": "default",
+    "name": "Default assistant",
+    "documents": ["identity.md", "skills.md"]
+  } }
 
-→ { "id": "01jz…" }
+→ { "id": "default" }
 ```
 
 ### Attaching a collection to a session
 
 ```json
 { "method": "session.create",
-  "params": { "name": "My assistant", "prefillCollectionId": "01jz…" } }
+  "params": { "name": "My assistant", "promptCollectionId": "default" } }
 
-→ { "sessionId": "…", "prefillCollectionId": "01jz…" }
+→ { "sessionId": "…", "promptCollectionId": "default" }
 ```
 
-Sessions remember which collection to use; all agent runs on that session automatically receive the prefill.
+Sessions remember which collection to use; all runs on that session automatically receive the selected prompt collection.
 
-### Prefill flow per agent run
+### Prompt flow per run
 
 ```
 Client                  Gateway                       Node
   │                        │                            │
-  │── agent ──────────────►│                            │
-  │  { prompt, sessionId } │                            │
+  │── run.start ──────────►│                            │
+  │  { input, sessionId }  │                            │
   │                        │ resolve collection         │
-  │                        │  read markdown files       │
+  │                        │  read prompt documents     │
   │                        │  join with "\n\n"          │
-  │                        │  sha = SHA-256(combined)   │
-  │                        │  cache sha → content       │
+  │                        │  build system message      │
   │                        │                            │
-  │                        │── agent ──────────────────►│
-  │                        │  { messages, prefillSha }  │
-  │                        │                            │ sha in cache?
-  │                        │                            │  YES → use cached content
-  │                        │                            │  NO  →
-  │                        │◄── prefill.fetch ──────────│
-  │                        │  { prefillSha }            │
-  │                        │── response ───────────────►│
-  │                        │  { content }               │
-  │                        │                            │ cache sha → content
-  │                        │                            │ prepend as system message
+  │                        │── run.round ──────────────►│
+  │                        │  { messages, tools }       │
   │                        │                            │ run inference
-  │                        │◄── agent response ─────────│
-  │◄── agent event ────────│                            │
+  │                        │◄── response ───────────────│
+  │◄── run event ──────────│                            │
 ```
 
-**SHA caching** means the node only fetches content once per unique collection state. On subsequent requests with the same collection and unchanged files, the node serves from its in-memory cache with no round-trip. The gateway also only reads markdown files once per agent run — the SHA is computed before the iteration loop and reused across all tool-call iterations.
-
-**Cache invalidation**: the gateway's SHA→content cache is cleared whenever a markdown file or collection is deleted, ensuring nodes will re-fetch fresh content on the next request.
+The gateway resolves prompt collections directly from git-backed storage. There is no separate prompt-fetch round-trip and no SHA-based prompt cache in the node.
 
 ### Available methods
 
 | Method | Description |
 |--------|-------------|
-| `prefill.markdown.create` | Store a new markdown file on disk |
-| `prefill.markdown.list` | List all markdown files with metadata |
-| `prefill.markdown.delete` | Delete a markdown file and its disk content |
-| `prefill.collection.create` | Create an ordered collection of markdown file IDs |
-| `prefill.collection.list` | List all collections with their ordered IDs |
-| `prefill.collection.delete` | Delete a collection (items cascade) |
-| `prefill.fetch` | (Node → Gateway) Fetch content by SHA-256 hash |
+| `prompt.document.create` | Store a prompt document in git-backed storage |
+| `prompt.document.list` | List all prompt document IDs |
+| `prompt.document.delete` | Delete a prompt document |
+| `prompt.collection.create` | Create an ordered prompt collection |
+| `prompt.collection.list` | List all prompt collections |
+| `prompt.collection.delete` | Delete a prompt collection |
 
 ---
 
 ## 4. Request Queuing
 
-When an agent run arrives but no suitable LLM node is available, the gateway queues the request instead of failing it.
+When a run arrives but no suitable LLM node is available, the gateway queues the request instead of failing it.
 
 ### What happens
 
-1. The run's `status` is set to `queued` in the `agent_runs` table.
-2. The originating peer receives a `status: queued` event:
+1. The run's `status` is set to `queued` in the `runs` table.
+2. The originating peer receives a `status: queued` run event:
 
 ```json
 {
-  "event": "agent",
+  "event": "run",
   "payload": {
     "runId": "...",
     "sessionId": "...",
@@ -193,9 +184,9 @@ Whenever an LLM-capable node connects (or sends a `model.status` push that chang
 
 1. Fetch all `queued` runs ordered by `queued_at ASC`.
 2. Atomically claim each run (`UPDATE … WHERE status = 'queued'`).
-3. Call `agent::r#loop::resume_run` for each claimed run in order.
+3. Call `run::r#loop::resume_run` for each claimed run in order.
 
-Double-processing is prevented because the `agent_task` is a single sequential async task — all `AgentCommand` variants are processed one at a time.
+Double-processing is prevented because the gateway's background run task is a single sequential async task — submitted run commands are processed one at a time.
 
 ### Queued run columns
 
@@ -207,7 +198,7 @@ Queued runs are resumed from normalized state rather than replaying a copied req
 | `model_id` | Requested model (may be `NULL`) |
 | `thinking` | Whether the run should preserve thinking-mode behavior |
 
-The request transcript itself is stored in `transcript_entries`, each inference step is recorded in `agent_rounds`, tool executions are tracked in `tool_traces`, and terminal summaries are stored in `run_summaries`.
+The request transcript itself is stored in `transcript_entries`, each inference step is recorded in `run_rounds`, tool executions are tracked in `tool_traces`, and terminal summaries are stored in `run_summaries`.
 
 ---
 
@@ -297,7 +288,7 @@ Gemma 4 is the primary model family for chat, tool calling, and image analysis.
 
 ### Thinking mode
 
-When `thinking: true` is set in the agent request:
+When `thinking: true` is set in the run request:
 
 1. `<|think|>` is prepended to the system prompt.
 2. The model may emit `<|channel>thought\n...<channel|>` blocks in its response.

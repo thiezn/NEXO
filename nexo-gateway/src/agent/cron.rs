@@ -7,17 +7,17 @@ pub async fn create_job(
     pool: &SqlitePool,
     name: &str,
     schedule: &str,
-    prompt: &str,
+    input: &str,
     session_id: Option<&str>,
 ) -> Result<String, sqlx::Error> {
     let id = Frame::new_id();
     sqlx::query(
-        "INSERT INTO cron_jobs (id, name, schedule, prompt, session_id) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO cron_jobs (id, name, schedule, input, session_id) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(name)
     .bind(schedule)
-    .bind(prompt)
+    .bind(input)
     .bind(session_id)
     .execute(pool)
     .await?;
@@ -60,7 +60,7 @@ pub async fn delete_job(pool: &SqlitePool, job_id: &str) -> Result<bool, sqlx::E
 /// Background scheduler task. Checks every 60s for due jobs and fires them.
 pub async fn run_scheduler(
     pool: SqlitePool,
-    agent_handle: super::AgentHandle,
+    run_handle: super::RunHandle,
     event_tx: broadcast::Sender<Frame>,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
@@ -71,7 +71,7 @@ pub async fn run_scheduler(
         let _ = super::locks::reap_expired(&pool).await;
 
         let due_jobs: Result<Vec<(String, String, String, Option<String>)>, _> = sqlx::query_as(
-            "SELECT id, name, prompt, session_id FROM cron_jobs
+            "SELECT id, name, input, session_id FROM cron_jobs
              WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= datetime('now')",
         )
         .fetch_all(&pool)
@@ -85,7 +85,7 @@ pub async fn run_scheduler(
             }
         };
 
-        for (job_id, name, prompt, session_id) in jobs {
+        for (job_id, name, input, session_id) in jobs {
             tracing::info!("Cron job firing: {name} ({job_id})");
 
             // Emit cron event
@@ -134,18 +134,18 @@ pub async fn run_scheduler(
                 continue;
             }
 
-            let cmd = super::AgentCommand::RunAgent {
+            let cmd = super::RunCommand::StartRun {
                 run_id,
                 session_id: run_session_id,
-                prompt,
-                context: None,
+                input,
+                instructions: None,
                 peer_id: "cron".into(),
                 model_id: None,
-                prefill_collection_id: None,
+                prompt_collection_id: None,
                 thinking: false,
             };
-            if let Err(e) = agent_handle.submit(cmd).await {
-                tracing::warn!("Failed to submit cron agent command: {e}");
+            if let Err(e) = run_handle.submit(cmd).await {
+                tracing::warn!("Failed to submit cron run command: {e}");
             }
 
             update_timestamps().await;

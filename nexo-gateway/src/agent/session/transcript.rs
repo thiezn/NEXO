@@ -1,12 +1,13 @@
 //! Transcript persistence helpers for sessions and runs.
 
+use nexo_spec::transcript::TranscriptEntryKind;
 use sqlx::SqlitePool;
 
 use crate::agent::session;
 use nexo_ws_schema::Frame;
 
 /// Insert a transcript entry and update the session's last-active timestamp.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn insert_transcript_entry(
     pool: &SqlitePool,
     session_id: &str,
@@ -14,7 +15,7 @@ pub async fn insert_transcript_entry(
     round_id: Option<&str>,
     role: &str,
     content: &str,
-    entry_kind: &str,
+    entry_kind: TranscriptEntryKind,
     tool_call_id: Option<&str>,
     tool_name: Option<&str>,
 ) -> Result<String, sqlx::Error> {
@@ -30,7 +31,7 @@ pub async fn insert_transcript_entry(
     .bind(round_id)
     .bind(role)
     .bind(content)
-    .bind(entry_kind)
+    .bind(entry_kind.as_str())
     .bind(tool_call_id)
     .bind(tool_name)
     .execute(pool)
@@ -44,7 +45,7 @@ pub async fn insert_transcript_entry(
     Ok(id)
 }
 
-/// Insert a conversation message and bump the session activity timestamp.
+/// Insert a transcript message and bump the session activity timestamp.
 #[cfg(test)]
 pub async fn insert_message(
     pool: &SqlitePool,
@@ -55,6 +56,14 @@ pub async fn insert_message(
     tool_call_id: Option<&str>,
     tool_name: Option<&str>,
 ) -> Result<String, sqlx::Error> {
+    let entry_kind = match role {
+        "user" => TranscriptEntryKind::UserInput,
+        "assistant" => TranscriptEntryKind::AssistantResponse,
+        "system" => TranscriptEntryKind::Instruction,
+        "tool" => TranscriptEntryKind::ToolResult,
+        _ => TranscriptEntryKind::AssistantResponse,
+    };
+
     insert_transcript_entry(
         pool,
         session_id,
@@ -62,7 +71,7 @@ pub async fn insert_message(
         None,
         role,
         content,
-        "message",
+        entry_kind,
         tool_call_id,
         tool_name,
     )
@@ -76,7 +85,7 @@ pub async fn append_run_context(
     context: &serde_json::Value,
 ) -> Result<Option<String>, sqlx::Error> {
     let session_row: Option<(String,)> =
-        sqlx::query_as("SELECT session_id FROM agent_runs WHERE id = ? AND finished_at IS NULL")
+        sqlx::query_as("SELECT session_id FROM runs WHERE id = ? AND finished_at IS NULL")
             .bind(run_id)
             .fetch_optional(pool)
             .await?;
@@ -93,7 +102,7 @@ pub async fn append_run_context(
         None,
         "system",
         &content,
-        "context_append",
+        TranscriptEntryKind::Instruction,
         None,
         None,
     )

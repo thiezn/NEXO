@@ -103,8 +103,11 @@ async fn get_session_returns_messages(pool: SqlitePool) {
     assert_eq!(resp.session_id, sid);
     assert_eq!(resp.name.as_deref(), Some("chat"));
     assert_eq!(resp.messages.len(), 2);
-    assert_eq!(resp.messages[0].role, "user");
-    assert_eq!(resp.messages[1].role, "assistant");
+    assert_eq!(resp.messages[0].message.role, nexo_ws_schema::MessageRole::User);
+    assert_eq!(
+        resp.messages[1].message.role,
+        nexo_ws_schema::MessageRole::Assistant,
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -144,7 +147,7 @@ async fn clear_session_deletes_everything(pool: SqlitePool) {
     assert_eq!(msg_count, 0);
 
     let (run_count,): (i32,) =
-        sqlx::query_as("SELECT COUNT(*) FROM agent_runs WHERE session_id = ?")
+        sqlx::query_as("SELECT COUNT(*) FROM runs WHERE session_id = ?")
             .bind(&sid)
             .fetch_one(&pool)
             .await
@@ -232,7 +235,7 @@ async fn clear_session_preserves_other_sessions(pool: SqlitePool) {
     assert!(kept_session.is_some());
 
     let (remaining_runs,): (i32,) =
-        sqlx::query_as("SELECT COUNT(*) FROM agent_runs WHERE session_id = ?")
+        sqlx::query_as("SELECT COUNT(*) FROM runs WHERE session_id = ?")
             .bind(&other_session_id)
             .fetch_one(&pool)
             .await
@@ -291,7 +294,7 @@ async fn create_and_finish_run(pool: SqlitePool) {
         .unwrap();
 
     let (status, thinking): (String, i64) =
-        sqlx::query_as("SELECT status, thinking FROM agent_runs WHERE id = 'run-1'")
+        sqlx::query_as("SELECT status, thinking FROM runs WHERE id = 'run-1'")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -301,14 +304,14 @@ async fn create_and_finish_run(pool: SqlitePool) {
     finish_run(
         &pool,
         "run-1",
-        nexo_ws_schema::AgentStatus::Completed,
+        nexo_ws_schema::RunStatus::Completed,
         Some("All done"),
     )
     .await
     .unwrap();
 
     let (status, finished): (String, Option<String>) =
-        sqlx::query_as("SELECT status, finished_at FROM agent_runs WHERE id = 'run-1'")
+        sqlx::query_as("SELECT status, finished_at FROM runs WHERE id = 'run-1'")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -421,7 +424,7 @@ async fn round_trace_and_summary_records_persist(pool: SqlitePool) {
         .unwrap();
 
     let (round_status, rationale, selected_peer_id): (String, Option<String>, Option<String>) =
-        sqlx::query_as("SELECT status, rationale, selected_peer_id FROM agent_rounds WHERE id = ?")
+        sqlx::query_as("SELECT status, rationale, selected_peer_id FROM run_rounds WHERE id = ?")
             .bind(&round_id)
             .fetch_one(&pool)
             .await

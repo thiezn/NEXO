@@ -326,7 +326,7 @@ where
     }
 }
 
-fn chat_messages_to_openai(messages: &[ChatMessage]) -> Vec<OpenAiMessage> {
+fn chat_messages_to_openai(messages: &[TranscriptMessage]) -> Vec<OpenAiMessage> {
     messages
         .iter()
         .enumerate()
@@ -334,10 +334,11 @@ fn chat_messages_to_openai(messages: &[ChatMessage]) -> Vec<OpenAiMessage> {
             let tool_calls = assistant_tool_calls_for_history(messages, index, message);
             OpenAiMessage {
                 role: match message.role {
-                    ChatRole::System => "system".to_string(),
-                    ChatRole::User => "user".to_string(),
-                    ChatRole::Assistant => "assistant".to_string(),
-                    ChatRole::Tool => "tool".to_string(),
+                    MessageRole::System => "system".to_string(),
+                    MessageRole::Developer => "developer".to_string(),
+                    MessageRole::User => "user".to_string(),
+                    MessageRole::Assistant => "assistant".to_string(),
+                    MessageRole::Tool => "tool".to_string(),
                 },
                 content: assistant_content_for_history(message, tool_calls.as_deref()),
                 tool_call_id: message.tool_call_id.clone(),
@@ -349,7 +350,7 @@ fn chat_messages_to_openai(messages: &[ChatMessage]) -> Vec<OpenAiMessage> {
 }
 
 fn assistant_content_for_history(
-    message: &ChatMessage,
+    message: &TranscriptMessage,
     tool_calls: Option<&[OpenAiRequestToolCall]>,
 ) -> Option<OpenAiContent> {
     if tool_calls.is_some() {
@@ -364,11 +365,11 @@ fn assistant_content_for_history(
 }
 
 fn assistant_tool_calls_for_history(
-    messages: &[ChatMessage],
+    messages: &[TranscriptMessage],
     index: usize,
-    message: &ChatMessage,
+    message: &TranscriptMessage,
 ) -> Option<Vec<OpenAiRequestToolCall>> {
-    if message.role != ChatRole::Assistant {
+    if message.role != MessageRole::Assistant {
         return None;
     }
 
@@ -379,7 +380,7 @@ fn assistant_tool_calls_for_history(
 
     let following_tool_messages: Vec<_> = messages[index + 1..]
         .iter()
-        .take_while(|next| next.role == ChatRole::Tool)
+        .take_while(|next| next.role == MessageRole::Tool)
         .collect();
 
     Some(
@@ -479,7 +480,10 @@ fn build_image_request(model_id: &str, request: &ImageAnalysisRequest) -> OpenAi
         model_id,
         vec![
             OpenAiContentPart::ImageUrl {
-                image_url: ImageUrlDetail { url: data_uri },
+                image_url: ImageUrlDetail {
+                    url: data_uri,
+                    detail: None,
+                },
             },
             OpenAiContentPart::Text {
                 text: request.prompt.clone(),
@@ -524,7 +528,10 @@ fn build_multimodal_request(model_id: &str, request: &MultiModalRequest) -> Open
             B64.encode(&image.data)
         );
         media_parts.push(OpenAiContentPart::ImageUrl {
-            image_url: ImageUrlDetail { url: data_uri },
+            image_url: ImageUrlDetail {
+                url: data_uri,
+                detail: None,
+            },
         });
     }
 
@@ -604,8 +611,8 @@ mod tests {
     #[test]
     fn build_tool_request_serializes_native_tools() {
         let request = ToolCallRequest {
-            messages: vec![ChatMessage {
-                role: ChatRole::User,
+            messages: vec![TranscriptMessage {
+                role: MessageRole::User,
                 content: "What is the weather in Amsterdam?".into(),
                 tool_call_id: None,
                 tool_name: None,
@@ -648,8 +655,8 @@ mod tests {
 
     #[test]
     fn chat_messages_to_openai_preserves_tool_metadata() {
-        let wire = chat_messages_to_openai(&[ChatMessage::with_tool_metadata(
-            ChatRole::Tool,
+        let wire = chat_messages_to_openai(&[TranscriptMessage::with_tool_metadata(
+            MessageRole::Tool,
             "stdout: hello",
             Some("call-1".into()),
             Some("io.bash".into()),
@@ -665,21 +672,21 @@ mod tests {
     #[test]
     fn chat_messages_to_openai_reconstructs_assistant_tool_calls() {
         let wire = chat_messages_to_openai(&[
-            ChatMessage::new(
-                ChatRole::Assistant,
+            TranscriptMessage::new(
+                MessageRole::Assistant,
                 concat!(
                     "<|tool_call>call:io.bash{command:<|\"|>ls -ltrah<|\"|>}<tool_call|>",
                     "<|tool_call>call:files.count{kind:<|\"|>dir<|\"|>}<tool_call|>"
                 ),
             ),
-            ChatMessage::with_tool_metadata(
-                ChatRole::Tool,
+            TranscriptMessage::with_tool_metadata(
+                MessageRole::Tool,
                 "stdout: first",
                 Some("call-1".into()),
                 Some("io.bash".into()),
             ),
-            ChatMessage::with_tool_metadata(
-                ChatRole::Tool,
+            TranscriptMessage::with_tool_metadata(
+                MessageRole::Tool,
                 "stdout: second",
                 Some("call-2".into()),
                 Some("files.count".into()),
@@ -707,8 +714,8 @@ mod tests {
 
     #[test]
     fn chat_messages_to_openai_preserves_visible_assistant_text() {
-        let wire = chat_messages_to_openai(&[ChatMessage::new(
-            ChatRole::Assistant,
+        let wire = chat_messages_to_openai(&[TranscriptMessage::new(
+            MessageRole::Assistant,
             "I will inspect that.<|tool_call>call:io.bash{command:<|\"|>ls<|\"|>}<tool_call|>",
         )]);
 

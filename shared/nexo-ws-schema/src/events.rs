@@ -1,5 +1,5 @@
-use crate::methods::AgentStatus;
-use crate::types::Role;
+use crate::methods::RunStatus;
+use crate::types::ConnectionRole;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 pub enum EventKind {
     Tick,
-    Agent,
+    Run,
     Message,
     Presence,
     Shutdown,
@@ -23,13 +23,13 @@ pub struct TickPayload {
     pub seq: u64,
 }
 
-/// Payload for `agent` streaming events.
+/// Payload for `run` streaming events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentEventPayload {
+#[serde(rename_all = "lowercase")]
+pub struct RunEventPayload {
     pub run_id: String,
     pub session_id: String,
-    pub status: AgentStatus,
+    pub status: RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -45,16 +45,16 @@ pub struct AgentEventPayload {
 
 /// Payload for `presence` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct PresencePayload {
     pub client_id: String,
-    pub role: Role,
+    pub role: ConnectionRole,
     pub status: String,
 }
 
 /// Payload for `message` events delivered by the gateway.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct MessagePayload {
     pub message_id: String,
     pub from: String,
@@ -74,7 +74,7 @@ pub struct HeartbeatPayload {}
 
 /// Payload for `cron` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub struct CronPayload {
     pub job_id: String,
     pub name: String,
@@ -103,7 +103,7 @@ mod tests {
     fn event_kind_roundtrip() {
         for kind in [
             EventKind::Tick,
-            EventKind::Agent,
+            EventKind::Run,
             EventKind::Message,
             EventKind::Presence,
             EventKind::Shutdown,
@@ -130,7 +130,7 @@ mod tests {
     fn presence_payload_roundtrip() {
         let payload = PresencePayload {
             client_id: "cli-1".into(),
-            role: Role::User,
+            role: ConnectionRole::User,
             status: "online".into(),
         };
         let json = serde_json::to_string(&payload).unwrap();
@@ -152,11 +152,11 @@ mod tests {
     }
 
     #[test]
-    fn agent_event_payload_optional_content() {
-        let payload = AgentEventPayload {
+    fn run_event_payload_optional_content() {
+        let payload = RunEventPayload {
             run_id: "run-1".into(),
             session_id: "sess-1".into(),
-            status: AgentStatus::Streaming,
+            status: RunStatus::Streaming,
             content: None,
             tool_name: None,
             tool_call_id: None,
@@ -172,11 +172,11 @@ mod tests {
     }
 
     #[test]
-    fn agent_event_payload_with_tool_fields() {
-        let payload = AgentEventPayload {
+    fn run_event_payload_with_tool_fields() {
+        let payload = RunEventPayload {
             run_id: "run-1".into(),
             session_id: "sess-1".into(),
-            status: AgentStatus::ToolCall,
+            status: RunStatus::ToolCall,
             content: None,
             tool_name: Some("echo.run".into()),
             tool_call_id: Some("tc-1".into()),
@@ -190,11 +190,11 @@ mod tests {
     }
 
     #[test]
-    fn agent_event_payload_roundtrip() {
-        let payload = AgentEventPayload {
+    fn run_event_payload_roundtrip() {
+        let payload = RunEventPayload {
             run_id: "run-1".into(),
             session_id: "sess-1".into(),
-            status: AgentStatus::Completed,
+            status: RunStatus::Completed,
             content: Some("done".into()),
             tool_name: None,
             tool_call_id: None,
@@ -202,7 +202,7 @@ mod tests {
             thinking_content: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
-        let decoded: AgentEventPayload = serde_json::from_str(&json).unwrap();
+        let decoded: RunEventPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(payload, decoded);
     }
 }

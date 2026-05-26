@@ -1,6 +1,6 @@
 use nexo_ws_schema::{
-    AgentEventPayload, AgentResponse, AgentStatus, CronPayload, EventKind, Frame, HealthResponse,
-    ImageAnalyzeResponse, MessagePayload, Method, PresencePayload, SendResponse,
+    CronPayload, EventKind, Frame, HealthResponse, ImageAnalyzeResponse, MessagePayload, Method,
+    PresencePayload, RunEventPayload, RunStartResponse, RunStatus, SendResponse,
     SessionCreateResponse, ShutdownPayload, StatusResponse,
 };
 
@@ -126,7 +126,7 @@ fn handle_tick(model: &mut Model) -> Vec<Effect> {
             Method::SessionCreate,
             nexo_ws_schema::SessionCreateParams {
                 name: Some(session_name),
-                prefill_collection_id: None,
+                prompt_collection_id: None,
             },
         ) {
             Ok(effect) => effects.push(effect),
@@ -205,9 +205,9 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
         AppCommand::Send(params) => {
             single_request(model, PendingRequest::Send, Method::Send, params)
         }
-        AppCommand::Agent(params) => {
+        AppCommand::RunStart(params) => {
             model.active_stream = None;
-            single_request(model, PendingRequest::Agent, Method::Agent, params)
+            single_request(model, PendingRequest::RunStart, Method::RunStart, params)
         }
         AppCommand::SessionCreate(params) => single_request(
             model,
@@ -263,40 +263,40 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             Method::CronDelete,
             params,
         ),
-        AppCommand::PrefillMarkdownCreate(params) => single_request(
+        AppCommand::PromptDocumentCreate(params) => single_request(
             model,
-            PendingRequest::PrefillMarkdownCreate,
-            Method::PrefillMarkdownCreate,
+            PendingRequest::PromptDocumentCreate,
+            Method::PromptDocumentCreate,
             params,
         ),
-        AppCommand::PrefillMarkdownList => single_request(
+        AppCommand::PromptDocumentList => single_request(
             model,
-            PendingRequest::PrefillMarkdownList,
-            Method::PrefillMarkdownList,
+            PendingRequest::PromptDocumentList,
+            Method::PromptDocumentList,
             serde_json::json!({}),
         ),
-        AppCommand::PrefillMarkdownDelete(params) => single_request(
+        AppCommand::PromptDocumentDelete(params) => single_request(
             model,
-            PendingRequest::PrefillMarkdownDelete,
-            Method::PrefillMarkdownDelete,
+            PendingRequest::PromptDocumentDelete,
+            Method::PromptDocumentDelete,
             params,
         ),
-        AppCommand::PrefillCollectionCreate(params) => single_request(
+        AppCommand::PromptCollectionCreate(params) => single_request(
             model,
-            PendingRequest::PrefillCollectionCreate,
-            Method::PrefillCollectionCreate,
+            PendingRequest::PromptCollectionCreate,
+            Method::PromptCollectionCreate,
             params,
         ),
-        AppCommand::PrefillCollectionList => single_request(
+        AppCommand::PromptCollectionList => single_request(
             model,
-            PendingRequest::PrefillCollectionList,
-            Method::PrefillCollectionList,
+            PendingRequest::PromptCollectionList,
+            Method::PromptCollectionList,
             serde_json::json!({}),
         ),
-        AppCommand::PrefillCollectionDelete(params) => single_request(
+        AppCommand::PromptCollectionDelete(params) => single_request(
             model,
-            PendingRequest::PrefillCollectionDelete,
-            Method::PrefillCollectionDelete,
+            PendingRequest::PromptCollectionDelete,
+            Method::PromptCollectionDelete,
             params,
         ),
         AppCommand::SystemPresence(params) => single_request(
@@ -432,15 +432,11 @@ fn handle_success_response(
                 format!("delivered={}", response.delivered),
             );
         }
-        PendingRequest::Agent => {
-            let response: AgentResponse = match serde_json::from_value(payload) {
+        PendingRequest::RunStart => {
+            let response: RunStartResponse = match serde_json::from_value(payload) {
                 Ok(response) => response,
                 Err(error) => {
-                    model.push_log(
-                        LogKind::Error,
-                        "agent",
-                        format!("Invalid response: {error}"),
-                    );
+                    model.push_log(LogKind::Error, "run", format!("Invalid response: {error}"));
                     return Vec::new();
                 }
             };
@@ -455,7 +451,7 @@ fn handle_success_response(
             });
             model.push_log(
                 LogKind::Info,
-                "agent",
+                "run",
                 format!(
                     "run={} session={} status={:?}",
                     response.run_id, response.session_id, response.status
@@ -512,7 +508,7 @@ fn handle_success_response(
 
 fn handle_event(model: &mut Model, event: EventKind, payload: serde_json::Value) -> Vec<Effect> {
     match event {
-        EventKind::Agent => handle_agent_event(model, payload),
+        EventKind::Run => handle_run_event(model, payload),
         EventKind::Message => {
             match serde_json::from_value::<MessagePayload>(payload) {
                 Ok(message) => {
@@ -584,13 +580,13 @@ fn handle_event(model: &mut Model, event: EventKind, payload: serde_json::Value)
     }
 }
 
-fn handle_agent_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effect> {
-    let event: AgentEventPayload = match serde_json::from_value(payload) {
+fn handle_run_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effect> {
+    let event: RunEventPayload = match serde_json::from_value(payload) {
         Ok(event) => event,
         Err(error) => {
             model.push_log(
                 LogKind::Error,
-                "agent",
+                "run",
                 format!("Invalid event payload: {error}"),
             );
             return Vec::new();
@@ -619,20 +615,20 @@ fn handle_agent_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effe
     stream.status = event.status;
     stream.tool_name = event.tool_name.clone();
     stream.error = event.error.clone();
-    if matches!(event.status, AgentStatus::Streaming | AgentStatus::Accepted)
+    if matches!(event.status, RunStatus::Streaming | RunStatus::Accepted)
         && let Some(content) = &event.content
     {
         stream.content = content.clone();
     }
 
     match event.status {
-        AgentStatus::Queued => model.push_log(
+        RunStatus::Queued => model.push_log(
             LogKind::Info,
             "agent",
             "Run queued, waiting for an inference node",
         ),
-        AgentStatus::Thinking => {}
-        AgentStatus::ToolCall => {
+        RunStatus::Thinking => {}
+        RunStatus::ToolCall => {
             let tool_name = event.tool_name.unwrap_or_else(|| "unknown".to_string());
             if let Some(content) = event.content {
                 model.push_log(
@@ -644,14 +640,14 @@ fn handle_agent_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effe
                 model.push_log(LogKind::Info, "agent tool", tool_name);
             }
         }
-        AgentStatus::Streaming | AgentStatus::Accepted => {}
-        AgentStatus::Completed => {
+        RunStatus::Streaming | RunStatus::Accepted => {}
+        RunStatus::Completed => {
             if let Some(stream) = model.active_stream.take() {
                 model.current_session_id = Some(stream.session_id);
                 model.push_log(LogKind::Success, "assistant", stream.content);
             }
         }
-        AgentStatus::Failed => {
+        RunStatus::Failed => {
             if let Some(stream) = model.active_stream.take() {
                 model.push_log(
                     LogKind::Error,
@@ -659,11 +655,11 @@ fn handle_agent_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effe
                     stream
                         .error
                         .or(event.content)
-                        .unwrap_or_else(|| "Agent run failed".to_string()),
+                        .unwrap_or_else(|| "Run failed".to_string()),
                 );
             }
         }
-        AgentStatus::Cancelled => {
+        RunStatus::Cancelled => {
             model.active_stream = None;
             model.push_log(LogKind::Warning, "agent", "Run cancelled");
         }

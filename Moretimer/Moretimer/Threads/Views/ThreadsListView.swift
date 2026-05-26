@@ -57,7 +57,7 @@ struct ThreadsListView: View {
                 EmptyStateView(
                     "No Threads",
                     systemImage: AppIcon.threads,
-                    description: "Start a conversation with your AI agent.",
+                    description: "Start a conversation with your assistant.",
                     actionLabel: "New Thread"
                 ) {
                     createThread(category: .general)

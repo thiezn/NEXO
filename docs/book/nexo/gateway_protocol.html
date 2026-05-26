@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b491b92b.js";
+            window.path_to_searchindex_js = "../searchindex-240f1b22.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-aa7fd050.js"></script>
@@ -250,6 +250,8 @@ handshake time.</p>
 <li><strong>Event</strong>: <code>{type:"event", event, payload, seq?, stateVersion?}</code></li>
 </ul>
 <p>Side-effecting methods require <strong>idempotency keys</strong> (see schema).</p>
+<p>There is no peer-to-peer transport between clients. Any client-to-client traffic is
+routed through the gateway over the same WebSocket protocol.</p>
 <h2 id="roles--scopes"><a class="header" href="#roles--scopes">Roles + scopes</a></h2>
 <h3 id="roles"><a class="header" href="#roles">Roles</a></h3>
 <ul>
@@ -275,9 +277,56 @@ handshake time.</p>
 <li>users may call <code>tools.catalog</code> (<code>user.read</code>) to fetch the runtime tool catalog for an
 agent. The response includes grouped tools and provenance metadata:
 <ul>
-<li><code>source</code>: <code>core</code>, <code>ai</code>, <code>node</code> or <code>plugin</code></li>
+<li><code>source</code>: <code>gateway</code> or <code>node</code></li>
 </ul>
 </li>
+</ul>
+<h3 id="user-routing-identity"><a class="header" href="#user-routing-identity">User routing identity</a></h3>
+<p>For <code>role: "user"</code> connections, the gateway currently uses <code>client.id</code> as the routing
+identity for directed client messaging and session ownership. If multiple user peers are
+connected with the same <code>client.id</code>, all matching peers receive directed <code>message</code> events.
+<code>device.id</code> still identifies the concrete device connection.</p>
+<h2 id="client-messaging-send"><a class="header" href="#client-messaging-send">Client messaging (<code>send</code>)</a></h2>
+<p>Clients send directed messages to other connected clients via the gateway. The request is
+acknowledged immediately, and the recipient receives a <code>message</code> event. Delivery is
+<code>true</code> when at least one connected recipient peer matched the target identity.</p>
+<p>Client → Gateway:</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "send",
+  "params": {
+    "target": "bob",
+    "payload": { "text": "hello" },
+    "idempotencyKey": "key-789"
+  }
+}
+</code></pre>
+<p>Gateway → Client (ack):</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": { "delivered": true }
+}
+</code></pre>
+<p>Gateway → Target client:</p>
+<pre><code class="language-json">{
+  "type": "event",
+  "event": "message",
+  "payload": {
+    "messageId": "…",
+    "from": "alice",
+    "target": "bob",
+    "payload": { "text": "hello" }
+  }
+}
+</code></pre>
+<p>Notes:</p>
+<ul>
+<li><code>target</code> matches the recipient user routing identity (<code>client.id</code> for <code>role: "user"</code>)</li>
+<li>the gateway does not create a client-to-client return channel; replies are separate <code>send</code> requests</li>
+<li>a successful response with <code>delivered: false</code> means no connected recipient matched the target</li>
 </ul>
 <h2 id="node-tool-registration-toolsregister"><a class="header" href="#node-tool-registration-toolsregister">Node tool registration (<code>tools.register</code>)</a></h2>
 <p>After connecting, nodes send a <code>tools.register</code> request to provide the gateway with
@@ -350,20 +399,21 @@ back to the caller. Execution has a 30-second timeout.</p>
 <li><code>tool_unavailable</code>: the node hosting the tool is disconnected</li>
 <li><code>timeout</code>: the node did not respond within 30 seconds</li>
 </ul>
-<h2 id="agent-agent"><a class="header" href="#agent-agent">Agent (<code>agent</code>)</a></h2>
-<p>Start an agent run. The gateway creates (or resumes) a session, acknowledges
-immediately with <code>status: "accepted"</code>, then streams <code>agent</code> events as the brain
-processes the request.</p>
+<h2 id="runs"><a class="header" href="#runs">Runs</a></h2>
+<p>The public run lifecycle is split across <code>run.start</code>, <code>run.instructions.append</code>,
+and <code>run.stop</code>. The gateway creates (or resumes) a session, acknowledges
+immediately with <code>status: "accepted"</code>, then streams <code>run</code> events as the background
+run task processes the request.</p>
 <p>Client → Gateway:</p>
 <pre><code class="language-json">{
   "type": "request",
   "id": "…",
-  "method": "agent",
+  "method": "run.start",
   "params": {
-    "prompt": "Summarize today's news",
+    "input": "Summarize today's news",
     "idempotencyKey": "key-456",
     "sessionId": "optional-session-id",
-    "context": { "files": ["notes.md"] },
+    "instructions": { "files": ["notes.md"] },
     "thinking": true,
     "modelId": "gemma4-27b"
   }
@@ -382,28 +432,28 @@ processes the request.</p>
 }
 </code></pre>
 <p>Gateway → Client (streaming events):</p>
-<pre><code class="language-json">{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run" } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
+<pre><code class="language-json">{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run", "toolCallId": "call-1" } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
 </code></pre>
-<h3 id="agent-params"><a class="header" href="#agent-params">Agent params</a></h3>
+<h3 id="runstart-params"><a class="header" href="#runstart-params"><code>run.start</code> params</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>prompt</code></td><td>string</td><td>yes</td><td>The user message</td></tr>
+<tr><td><code>input</code></td><td>string</td><td>yes</td><td>The user message</td></tr>
 <tr><td><code>idempotencyKey</code></td><td>string</td><td>yes</td><td>Deduplication key</td></tr>
 <tr><td><code>sessionId</code></td><td>string</td><td>no</td><td>Resume existing session</td></tr>
-<tr><td><code>context</code></td><td>object</td><td>no</td><td>Additional context blob</td></tr>
+<tr><td><code>instructions</code></td><td>object</td><td>no</td><td>Additional structured instructions persisted into the transcript</td></tr>
 <tr><td><code>thinking</code></td><td>bool</td><td>no</td><td>Enable extended thinking mode (default: false)</td></tr>
 <tr><td><code>modelId</code></td><td>string</td><td>no</td><td>Request a specific model</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="agent-event-payload"><a class="header" href="#agent-event-payload">Agent event payload</a></h3>
+<h3 id="run-event-payload"><a class="header" href="#run-event-payload"><code>run</code> event payload</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -416,20 +466,50 @@ processes the request.</p>
 <tr><td><code>content</code></td><td>string?</td><td>Visible reply text (on <code>streaming</code>)</td></tr>
 <tr><td><code>thinkingContent</code></td><td>string?</td><td>Ephemeral thinking text (on <code>streaming</code>, when thinking enabled)</td></tr>
 <tr><td><code>toolName</code></td><td>string?</td><td>Tool being called (on <code>tool_call</code>)</td></tr>
+<tr><td><code>toolCallId</code></td><td>string?</td><td>Tool call identifier (on tool events)</td></tr>
 <tr><td><code>error</code></td><td>string?</td><td>Error message (on <code>failed</code>)</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="agent-status-values"><a class="header" href="#agent-status-values">Agent status values</a></h3>
+<h3 id="run-status-values"><a class="header" href="#run-status-values"><code>run</code> status values</a></h3>
 <p><code>accepted</code> → <code>thinking</code> → <code>streaming</code> → <code>completed</code>
 <code>accepted</code> → <code>thinking</code> → <code>tool_call</code> → <code>thinking</code> → … → <code>completed</code>
 Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-initiated).</p>
+<h3 id="runinstructionsappend"><a class="header" href="#runinstructionsappend"><code>run.instructions.append</code></a></h3>
+<p>Append structured instructions to an active run. The gateway persists the payload as an
+<code>instruction</code> transcript entry and the next round will observe it.</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "run.instructions.append",
+  "params": {
+    "runId": "run-uuid-v7",
+    "instructions": { "notes": ["daily.md"] }
+  }
+}
+</code></pre>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": {
+    "queued": true,
+    "messageId": "msg-uuid-v7"
+  }
+}
+</code></pre>
+<h3 id="runstop"><a class="header" href="#runstop"><code>run.stop</code></a></h3>
+<p>Stop an active run.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "run.stop", "params": { "runId": "run-uuid-v7" } }
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "stopped": true } }
+</code></pre>
 <h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
 <h3 id="sessioncreate"><a class="header" href="#sessioncreate"><code>session.create</code></a></h3>
-<p>Create a new conversation session.</p>
-<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat" } }
+<p>Create a new transcript session.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat", "promptCollectionId": "default" } }
 </code></pre>
-<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…" } }
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…", "promptCollectionId": "default" } }
 </code></pre>
 <h3 id="sessionlist"><a class="header" href="#sessionlist"><code>session.list</code></a></h3>
 <p>List all sessions for the current user.</p>
@@ -439,22 +519,22 @@ Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-i
   "type": "response", "id": "…", "ok": true,
   "payload": {
     "sessions": [
-      { "sessionId": "…", "name": "My chat", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
+      { "sessionId": "…", "name": "My chat", "promptCollectionId": "default", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
     ]
   }
 }
 </code></pre>
 <h3 id="sessionget"><a class="header" href="#sessionget"><code>session.get</code></a></h3>
-<p>Retrieve a session with its full message history.</p>
+<p>Retrieve a session with its full transcript history.</p>
 <pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.get", "params": { "sessionId": "…" } }
 </code></pre>
 <pre><code class="language-json">{
   "type": "response", "id": "…", "ok": true,
   "payload": {
-    "sessionId": "…", "name": "My chat", "createdAt": "…",
+    "sessionId": "…", "name": "My chat", "promptCollectionId": "default", "createdAt": "…",
     "messages": [
-      { "id": "…", "role": "user", "content": "hello", "createdAt": "…" },
-      { "id": "…", "role": "assistant", "content": "hi back", "createdAt": "…" }
+      { "id": "…", "role": "user", "content": "hello", "kind": "user_input", "createdAt": "…" },
+      { "id": "…", "role": "assistant", "content": "hi back", "kind": "assistant_response", "createdAt": "…" }
     ]
   }
 }
@@ -467,10 +547,10 @@ Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-i
 </code></pre>
 <h2 id="cron-jobs"><a class="header" href="#cron-jobs">Cron jobs</a></h2>
 <h3 id="croncreate"><a class="header" href="#croncreate"><code>cron.create</code></a></h3>
-<p>Create a scheduled agent task.</p>
+<p>Create a scheduled run task.</p>
 <pre><code class="language-json">{
   "type": "request", "id": "…", "method": "cron.create",
-  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "prompt": "Summarize yesterday" }
+  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "input": "Summarize yesterday" }
 }
 </code></pre>
 <pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "jobId": "…" } }

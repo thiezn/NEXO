@@ -23,7 +23,8 @@ use serial_test::serial;
 
 use nexo_ai::api::model_traits::ModelInfo;
 use nexo_ai::api::types::{
-    ChatMessage, ChatRequest, ChatRole, ImageAnalysisRequest, ModelCategory, ToolCallRequest,
+    ChatRequest, ImageAnalysisRequest, MessageRole, ModelCategory, ToolCallRequest,
+    TranscriptMessage,
 };
 use nexo_ai::inference::models::gemma4::openai::{Gemma4OpenAiFamily, default_request_model_id};
 use nexo_ai::inference::remote::openai::client::OpenAiClient;
@@ -286,8 +287,8 @@ async fn test_chat_inference() {
             .as_chat()
             .context("expected MLX model to expose chat")?
             .chat(&ChatRequest {
-                messages: vec![ChatMessage::new(
-                    ChatRole::User,
+                messages: vec![TranscriptMessage::new(
+                    MessageRole::User,
                     "What is 2+2? Answer with just the number.",
                 )],
                 max_tokens: 32,
@@ -327,8 +328,8 @@ async fn test_tool_calling() {
             .as_tool()
             .context("expected MLX model to expose tool calling")?
             .call_tools(&ToolCallRequest {
-                messages: vec![ChatMessage::new(
-                    ChatRole::User,
+                messages: vec![TranscriptMessage::new(
+                    MessageRole::User,
                     "What is the weather in Amsterdam? Use the weather tool.",
                 )],
                 tools: vec![nexo_spec::tool::ToolSpec {

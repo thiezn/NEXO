@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b491b92b.js";
+            window.path_to_searchindex_js = "searchindex-240f1b22.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-aa7fd050.js"></script>
@@ -189,6 +189,8 @@ Gateway over <strong>WebSocket</strong> on the configured bind host (default
 <code>127.0.0.1:6969</code>).</li>
 <li><strong>Nodes</strong> (macOS/iOS/headless) also connect over <strong>WebSocket</strong>, but
 declare <code>role: node</code> with explicit capabilities/commands.</li>
+<li>There is no peer-to-peer client transport. Client-to-client messaging is
+routed through the gateway.</li>
 </ul>
 <h2 id="components-and-flows"><a class="header" href="#components-and-flows">Components and flows</a></h2>
 <h3 id="gateway-daemon"><a class="header" href="#gateway-daemon">Gateway (daemon)</a></h3>
@@ -196,14 +198,17 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
 <li>Maintains connections to clients and nodes</li>
 <li>Exposes a typed WS API (requests, responses, server‑push events).</li>
 <li>Validates inbound frames against JSON Schema.</li>
-<li>Emits events like <code>agent</code>, <code>chat</code>, <code>presence</code>, <code>health</code>, <code>heartbeat</code>, <code>cron</code>.</li>
+<li>Emits events like <code>run</code>, <code>message</code>, <code>presence</code>, <code>heartbeat</code>, <code>cron</code>, <code>tick</code>, <code>shutdown</code>.</li>
 </ul>
 <h3 id="clients-macos--ios-app--cli"><a class="header" href="#clients-macos--ios-app--cli">Clients (macOS / iOS app / CLI)</a></h3>
 <ul>
 <li>One WS connection per client.</li>
-<li>Provide a user identity in <code>connect</code> and client identity; pairing is <strong>user‑based</strong> (<code>role: "user"</code>), client identity is informational (e.g. <code>cli</code>, <code>iOS</code>, <code>macOS</code>). The <code>role</code> field is the sole discriminator between users and nodes.</li>
-<li>Send requests (<code>health</code>, <code>status</code>, <code>send</code>, <code>agent</code>, <code>system-presence</code>).</li>
-<li>Subscribe to events (<code>tick</code>, <code>agent</code>, <code>presence</code>, <code>shutdown</code>).</li>
+<li>Provide a user routing identity in <code>connect</code>; today the gateway uses <code>client.id</code> for
+<code>role: "user"</code> connections when routing directed messages and associating sessions.
+Multiple connected peers can share the same <code>client.id</code>, in which case all of them
+receive directed <code>message</code> events. <code>device.id</code> identifies the concrete device.</li>
+<li>Send requests (<code>health</code>, <code>status</code>, <code>send</code>, <code>run.start</code>, <code>run.stop</code>, <code>run.instructions.append</code>, <code>system-presence</code>).</li>
+<li>Subscribe to events (<code>tick</code>, <code>run</code>, <code>message</code>, <code>presence</code>, <code>shutdown</code>).</li>
 </ul>
 <h3 id="nodes-macos--ios--headless"><a class="header" href="#nodes-macos--ios--headless">Nodes (macOS / iOS / headless)</a></h3>
 <ul>
@@ -211,7 +216,7 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
 <li>Provide a device identity in <code>connect</code>; pairing is <strong>device‑based</strong> (role <code>node</code>)</li>
 <li>After handshake, register full tool specs via <code>tools.register</code>.</li>
 <li>Listen for <code>tools.execute</code> requests forwarded by the gateway.</li>
-<li>Handle <code>agent</code> inference requests from the gateway loop runner.</li>
+<li>Handle <code>run.round</code> inference requests from the gateway loop runner.</li>
 <li>Respond to <code>model.load</code> / <code>model.unload</code> commands; push <code>model.status</code> updates.</li>
 <li>Expose commands like <code>epub_extractor.*</code>, <code>echo.*</code>, <code>ping</code>.</li>
 <li>Automatically reconnect and re-register on disconnect.</li>
@@ -230,10 +235,10 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
     Gateway--&gt;&gt;Client: event:presence
     Gateway--&gt;&gt;Client: event:tick
 
-    Client-&gt;&gt;Gateway: request:agent
-    Gateway--&gt;&gt;Client: response:agent&lt;br&gt;ack {runId, status:"accepted"}
-    Gateway--&gt;&gt;Client: event:agent&lt;br&gt;(streaming)
-    Gateway--&gt;&gt;Client: response:agent&lt;br&gt;final {runId, status, summary}
+    Client-&gt;&gt;Gateway: request:run.start
+    Gateway--&gt;&gt;Client: response:run.start&lt;br&gt;ack {runId, sessionId, status:"accepted"}
+    Gateway--&gt;&gt;Client: event:run&lt;br&gt;(streaming)
+    Gateway--&gt;&gt;Client: event:run&lt;br&gt;{status:"completed"}
 </pre>
 
 <h2 id="node-registration--tool-execution"><a class="header" href="#node-registration--tool-execution">Node registration + tool execution</a></h2>
@@ -259,39 +264,42 @@ declare <code>role: node</code> with explicit capabilities/commands.</li>
     Note over Node,Gateway: On disconnect: gateway deregisters&lt;br&gt;all tools from this node
 </pre>
 
-<h2 id="brain-agent-loop"><a class="header" href="#brain-agent-loop">Brain (agent loop)</a></h2>
-<p>The gateway spawns an <strong>AgentHandle</strong> at startup — a background task that processes
-agent commands sequentially. When a client sends an <code>agent</code> request:</p>
+<h2 id="client-to-client-messaging"><a class="header" href="#client-to-client-messaging">Client-to-client messaging</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant Alice as Client A
+    participant Gateway
+    participant Bob as Client B
+
+    Alice-&gt;&gt;Gateway: request:send {target:"bob", payload:{...}}
+    Gateway--&gt;&gt;Alice: response {delivered:true}
+    Gateway--&gt;&gt;Bob: event:message {from:"alice", target:"bob", payload:{...}}
+</pre>
+
+<h2 id="run-loop"><a class="header" href="#run-loop">Run loop</a></h2>
+<p>The gateway spawns a <strong>RunHandle</strong> at startup — a background task that processes
+run commands sequentially. When a client sends a <code>run.start</code> request:</p>
 <ol>
-<li>The handler creates (or resumes) a session and an agent run in SQLite</li>
-<li>It submits an <code>AgentCommand::RunAgent</code> to the brain via an mpsc channel</li>
-<li>The brain runs the loop: context assembly → inference → tool calls → repeat</li>
+<li>The handler creates (or resumes) a session and a run row in SQLite</li>
+<li>It submits a <code>RunCommand::StartRun</code> to the run task via an mpsc channel</li>
+<li>The run task executes the loop: transcript assembly → inference → tool calls → repeat</li>
 <li>Lifecycle events (<code>thinking</code>, <code>tool_call</code>, <code>streaming</code>, <code>completed</code>) are broadcast
 to all connected clients via the event channel</li>
 </ol>
-<pre class="mermaid">flowchart LR
-    Client --&gt;|request:agent| Handler
-    Handler --&gt;|AgentCommand| Brain
-    Brain --&gt;|inference request| Node
-    Node --&gt;|response| Brain
-    Brain --&gt;|event:agent| Client
-    Brain --&gt;|tools.execute| Node
-</pre>
-
+<p>Details: <a href="/nexo/agent_loop.html">Run Loop</a></p>
 <h3 id="capability-locking"><a class="header" href="#capability-locking">Capability locking</a></h3>
-<p>When the brain invokes a node capability (inference or tool execution), it acquires
+<p>When the run loop invokes a node capability (inference or tool execution), it acquires
 an advisory lock in the <code>capability_locks</code> SQLite table. This prevents concurrent
-agent runs from using the same capability. Locks expire after 5 minutes for crash
+run executions from using the same capability. Locks expire after 5 minutes for crash
 recovery.</p>
 <h3 id="cron-scheduler"><a class="header" href="#cron-scheduler">Cron scheduler</a></h3>
-<p>A background scheduler task runs alongside the brain, checking every 60 seconds for
-due cron jobs. When a job fires, it emits a <code>cron</code> event and submits an agent command
-to the brain.</p>
+<p>A background scheduler task runs alongside the run loop, checking every 60 seconds for
+due cron jobs. When a job fires, it emits a <code>cron</code> event and submits a run command
+to the run task.</p>
 <h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
 <p>A client can have multiple sessions and maintains a <code>sessionId</code> locally. Sessions are
-created explicitly via <code>session.create</code> or implicitly when an <code>agent</code> request is sent
+created explicitly via <code>session.create</code> or implicitly when a <code>run.start</code> request is sent
 without a <code>sessionId</code>. After a client restart, it can query <code>session.list</code> to resume
-previous conversations.</p>
+previous transcript sessions.</p>
 <h2 id="wire-protocol-summary"><a class="header" href="#wire-protocol-summary">Wire protocol (summary)</a></h2>
 <ul>
 <li>
@@ -308,7 +316,7 @@ previous conversations.</p>
 </ul>
 </li>
 <li>
-<p>Idempotency keys are required for side‑effecting methods (<code>send</code>, <code>agent</code>) to
+<p>Idempotency keys are required for side‑effecting methods (<code>send</code>, <code>run.start</code>) to
 safely retry; the server keeps a short‑lived dedupe cache.</p>
 </li>
 <li>
@@ -399,6 +407,8 @@ handshake time.</p>
 <li><strong>Event</strong>: <code>{type:"event", event, payload, seq?, stateVersion?}</code></li>
 </ul>
 <p>Side-effecting methods require <strong>idempotency keys</strong> (see schema).</p>
+<p>There is no peer-to-peer transport between clients. Any client-to-client traffic is
+routed through the gateway over the same WebSocket protocol.</p>
 <h2 id="roles--scopes"><a class="header" href="#roles--scopes">Roles + scopes</a></h2>
 <h3 id="roles"><a class="header" href="#roles">Roles</a></h3>
 <ul>
@@ -424,9 +434,56 @@ handshake time.</p>
 <li>users may call <code>tools.catalog</code> (<code>user.read</code>) to fetch the runtime tool catalog for an
 agent. The response includes grouped tools and provenance metadata:
 <ul>
-<li><code>source</code>: <code>core</code>, <code>ai</code>, <code>node</code> or <code>plugin</code></li>
+<li><code>source</code>: <code>gateway</code> or <code>node</code></li>
 </ul>
 </li>
+</ul>
+<h3 id="user-routing-identity"><a class="header" href="#user-routing-identity">User routing identity</a></h3>
+<p>For <code>role: "user"</code> connections, the gateway currently uses <code>client.id</code> as the routing
+identity for directed client messaging and session ownership. If multiple user peers are
+connected with the same <code>client.id</code>, all matching peers receive directed <code>message</code> events.
+<code>device.id</code> still identifies the concrete device connection.</p>
+<h2 id="client-messaging-send"><a class="header" href="#client-messaging-send">Client messaging (<code>send</code>)</a></h2>
+<p>Clients send directed messages to other connected clients via the gateway. The request is
+acknowledged immediately, and the recipient receives a <code>message</code> event. Delivery is
+<code>true</code> when at least one connected recipient peer matched the target identity.</p>
+<p>Client → Gateway:</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "send",
+  "params": {
+    "target": "bob",
+    "payload": { "text": "hello" },
+    "idempotencyKey": "key-789"
+  }
+}
+</code></pre>
+<p>Gateway → Client (ack):</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": { "delivered": true }
+}
+</code></pre>
+<p>Gateway → Target client:</p>
+<pre><code class="language-json">{
+  "type": "event",
+  "event": "message",
+  "payload": {
+    "messageId": "…",
+    "from": "alice",
+    "target": "bob",
+    "payload": { "text": "hello" }
+  }
+}
+</code></pre>
+<p>Notes:</p>
+<ul>
+<li><code>target</code> matches the recipient user routing identity (<code>client.id</code> for <code>role: "user"</code>)</li>
+<li>the gateway does not create a client-to-client return channel; replies are separate <code>send</code> requests</li>
+<li>a successful response with <code>delivered: false</code> means no connected recipient matched the target</li>
 </ul>
 <h2 id="node-tool-registration-toolsregister"><a class="header" href="#node-tool-registration-toolsregister">Node tool registration (<code>tools.register</code>)</a></h2>
 <p>After connecting, nodes send a <code>tools.register</code> request to provide the gateway with
@@ -499,20 +556,21 @@ back to the caller. Execution has a 30-second timeout.</p>
 <li><code>tool_unavailable</code>: the node hosting the tool is disconnected</li>
 <li><code>timeout</code>: the node did not respond within 30 seconds</li>
 </ul>
-<h2 id="agent-agent"><a class="header" href="#agent-agent">Agent (<code>agent</code>)</a></h2>
-<p>Start an agent run. The gateway creates (or resumes) a session, acknowledges
-immediately with <code>status: "accepted"</code>, then streams <code>agent</code> events as the brain
-processes the request.</p>
+<h2 id="runs"><a class="header" href="#runs">Runs</a></h2>
+<p>The public run lifecycle is split across <code>run.start</code>, <code>run.instructions.append</code>,
+and <code>run.stop</code>. The gateway creates (or resumes) a session, acknowledges
+immediately with <code>status: "accepted"</code>, then streams <code>run</code> events as the background
+run task processes the request.</p>
 <p>Client → Gateway:</p>
 <pre><code class="language-json">{
   "type": "request",
   "id": "…",
-  "method": "agent",
+  "method": "run.start",
   "params": {
-    "prompt": "Summarize today's news",
+    "input": "Summarize today's news",
     "idempotencyKey": "key-456",
     "sessionId": "optional-session-id",
-    "context": { "files": ["notes.md"] },
+    "instructions": { "files": ["notes.md"] },
     "thinking": true,
     "modelId": "gemma4-27b"
   }
@@ -531,28 +589,28 @@ processes the request.</p>
 }
 </code></pre>
 <p>Gateway → Client (streaming events):</p>
-<pre><code class="language-json">{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run" } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
-{ "type": "event", "event": "agent", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
+<pre><code class="language-json">{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "thinking" } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "tool_call", "toolName": "echo.run", "toolCallId": "call-1" } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "streaming", "content": "Here is the summary...", "thinkingContent": "Let me analyze the request..." } }
+{ "type": "event", "event": "run", "payload": { "runId": "…", "sessionId": "…", "status": "completed" } }
 </code></pre>
-<h3 id="agent-params"><a class="header" href="#agent-params">Agent params</a></h3>
+<h3 id="runstart-params"><a class="header" href="#runstart-params"><code>run.start</code> params</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>prompt</code></td><td>string</td><td>yes</td><td>The user message</td></tr>
+<tr><td><code>input</code></td><td>string</td><td>yes</td><td>The user message</td></tr>
 <tr><td><code>idempotencyKey</code></td><td>string</td><td>yes</td><td>Deduplication key</td></tr>
 <tr><td><code>sessionId</code></td><td>string</td><td>no</td><td>Resume existing session</td></tr>
-<tr><td><code>context</code></td><td>object</td><td>no</td><td>Additional context blob</td></tr>
+<tr><td><code>instructions</code></td><td>object</td><td>no</td><td>Additional structured instructions persisted into the transcript</td></tr>
 <tr><td><code>thinking</code></td><td>bool</td><td>no</td><td>Enable extended thinking mode (default: false)</td></tr>
 <tr><td><code>modelId</code></td><td>string</td><td>no</td><td>Request a specific model</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="agent-event-payload"><a class="header" href="#agent-event-payload">Agent event payload</a></h3>
+<h3 id="run-event-payload"><a class="header" href="#run-event-payload"><code>run</code> event payload</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -565,20 +623,50 @@ processes the request.</p>
 <tr><td><code>content</code></td><td>string?</td><td>Visible reply text (on <code>streaming</code>)</td></tr>
 <tr><td><code>thinkingContent</code></td><td>string?</td><td>Ephemeral thinking text (on <code>streaming</code>, when thinking enabled)</td></tr>
 <tr><td><code>toolName</code></td><td>string?</td><td>Tool being called (on <code>tool_call</code>)</td></tr>
+<tr><td><code>toolCallId</code></td><td>string?</td><td>Tool call identifier (on tool events)</td></tr>
 <tr><td><code>error</code></td><td>string?</td><td>Error message (on <code>failed</code>)</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="agent-status-values"><a class="header" href="#agent-status-values">Agent status values</a></h3>
+<h3 id="run-status-values"><a class="header" href="#run-status-values"><code>run</code> status values</a></h3>
 <p><code>accepted</code> → <code>thinking</code> → <code>streaming</code> → <code>completed</code>
 <code>accepted</code> → <code>thinking</code> → <code>tool_call</code> → <code>thinking</code> → … → <code>completed</code>
 Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-initiated).</p>
+<h3 id="runinstructionsappend"><a class="header" href="#runinstructionsappend"><code>run.instructions.append</code></a></h3>
+<p>Append structured instructions to an active run. The gateway persists the payload as an
+<code>instruction</code> transcript entry and the next round will observe it.</p>
+<pre><code class="language-json">{
+  "type": "request",
+  "id": "…",
+  "method": "run.instructions.append",
+  "params": {
+    "runId": "run-uuid-v7",
+    "instructions": { "notes": ["daily.md"] }
+  }
+}
+</code></pre>
+<pre><code class="language-json">{
+  "type": "response",
+  "id": "…",
+  "ok": true,
+  "payload": {
+    "queued": true,
+    "messageId": "msg-uuid-v7"
+  }
+}
+</code></pre>
+<h3 id="runstop"><a class="header" href="#runstop"><code>run.stop</code></a></h3>
+<p>Stop an active run.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "run.stop", "params": { "runId": "run-uuid-v7" } }
+</code></pre>
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "stopped": true } }
+</code></pre>
 <h2 id="sessions-1"><a class="header" href="#sessions-1">Sessions</a></h2>
 <h3 id="sessioncreate"><a class="header" href="#sessioncreate"><code>session.create</code></a></h3>
-<p>Create a new conversation session.</p>
-<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat" } }
+<p>Create a new transcript session.</p>
+<pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat", "promptCollectionId": "default" } }
 </code></pre>
-<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…" } }
+<pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "sessionId": "…", "promptCollectionId": "default" } }
 </code></pre>
 <h3 id="sessionlist"><a class="header" href="#sessionlist"><code>session.list</code></a></h3>
 <p>List all sessions for the current user.</p>
@@ -588,22 +676,22 @@ Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-i
   "type": "response", "id": "…", "ok": true,
   "payload": {
     "sessions": [
-      { "sessionId": "…", "name": "My chat", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
+      { "sessionId": "…", "name": "My chat", "promptCollectionId": "default", "createdAt": "…", "lastActiveAt": "…", "messageCount": 12 }
     ]
   }
 }
 </code></pre>
 <h3 id="sessionget"><a class="header" href="#sessionget"><code>session.get</code></a></h3>
-<p>Retrieve a session with its full message history.</p>
+<p>Retrieve a session with its full transcript history.</p>
 <pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.get", "params": { "sessionId": "…" } }
 </code></pre>
 <pre><code class="language-json">{
   "type": "response", "id": "…", "ok": true,
   "payload": {
-    "sessionId": "…", "name": "My chat", "createdAt": "…",
+    "sessionId": "…", "name": "My chat", "promptCollectionId": "default", "createdAt": "…",
     "messages": [
-      { "id": "…", "role": "user", "content": "hello", "createdAt": "…" },
-      { "id": "…", "role": "assistant", "content": "hi back", "createdAt": "…" }
+      { "id": "…", "role": "user", "content": "hello", "kind": "user_input", "createdAt": "…" },
+      { "id": "…", "role": "assistant", "content": "hi back", "kind": "assistant_response", "createdAt": "…" }
     ]
   }
 }
@@ -616,10 +704,10 @@ Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-i
 </code></pre>
 <h2 id="cron-jobs"><a class="header" href="#cron-jobs">Cron jobs</a></h2>
 <h3 id="croncreate"><a class="header" href="#croncreate"><code>cron.create</code></a></h3>
-<p>Create a scheduled agent task.</p>
+<p>Create a scheduled run task.</p>
 <pre><code class="language-json">{
   "type": "request", "id": "…", "method": "cron.create",
-  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "prompt": "Summarize yesterday" }
+  "params": { "name": "Daily summary", "schedule": "0 9 * * *", "input": "Summarize yesterday" }
 }
 </code></pre>
 <pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "jobId": "…" } }
@@ -651,274 +739,7 @@ Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-i
 <li>All WS clients must include <code>device</code> identity during <code>connect</code> (user + node).</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="agent-loop"><a class="header" href="#agent-loop">Agent Loop</a></h1>
-<p>The agent loop is the brain of the NEXO system. It receives structured requests from
-the gateway WebSocket, orchestrates inference and tool execution, and streams lifecycle
-events back to the client.</p>
-<h2 id="overview-1"><a class="header" href="#overview-1">Overview</a></h2>
-<p>Each agent invocation spawns a <strong>serialized loop</strong> bound to a session. The loop:</p>
-<ol>
-<li>Persists the user message</li>
-<li>Assembles conversation context from the session’s message history</li>
-<li>Forwards an inference request to an LLM-capable node</li>
-<li>Handles the response — either streaming a reply or executing tool calls</li>
-<li>Repeats (tool results feed back into the next inference turn)</li>
-<li>Marks the run as completed or failed</li>
-</ol>
-<h2 id="agent-loop-lifecycle"><a class="header" href="#agent-loop-lifecycle">Agent loop lifecycle</a></h2>
-<pre class="mermaid">sequenceDiagram
-    participant Client
-    participant Gateway
-    participant Brain
-    participant Node
-
-    Client-&gt;&gt;Gateway: request:agent {prompt, sessionId?}
-    Gateway-&gt;&gt;Brain: AgentCommand::RunAgent
-    Gateway--&gt;&gt;Client: response:agent {runId, sessionId, status:"accepted"}
-
-    Brain-&gt;&gt;Brain: persist user message
-    Brain--&gt;&gt;Client: event:agent {status:"thinking"}
-    Brain-&gt;&gt;Brain: assemble context
-    Brain-&gt;&gt;Brain: acquire capability lock
-    Brain-&gt;&gt;Node: forward inference request
-    Node--&gt;&gt;Brain: inference response (text or tool_calls)
-
-    alt Plain reply
-        Brain-&gt;&gt;Brain: persist assistant message
-        Brain--&gt;&gt;Client: event:agent {status:"streaming", content}
-        Brain--&gt;&gt;Client: event:agent {status:"completed"}
-    else Tool calls
-        Brain--&gt;&gt;Client: event:agent {status:"tool_call", toolName}
-        Brain-&gt;&gt;Node: tools.execute {tool, args}
-        Node--&gt;&gt;Brain: tool result
-        Brain-&gt;&gt;Brain: persist tool result
-        Brain-&gt;&gt;Brain: re-enter loop (back to inference)
-    end
-
-    Brain-&gt;&gt;Brain: release locks, finish run
-</pre>
-
-<h2 id="agent-run-state-machine"><a class="header" href="#agent-run-state-machine">Agent run state machine</a></h2>
-<pre class="mermaid">stateDiagram-v2
-    [*] --&gt; Accepted
-    Accepted --&gt; Thinking
-    Thinking --&gt; Streaming: plain reply
-    Thinking --&gt; ToolCall: tool_calls in response
-    ToolCall --&gt; Thinking: tool results fed back
-    Streaming --&gt; Completed
-    Thinking --&gt; Failed: error
-    ToolCall --&gt; Failed: error
-    [*] --&gt; Cancelled: client cancels
-</pre>
-
-<h3 id="status-values"><a class="header" href="#status-values">Status values</a></h3>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Status</th><th>Description</th></tr>
-</thead>
-<tbody>
-<tr><td><code>accepted</code></td><td>Run created, queued for processing</td></tr>
-<tr><td><code>thinking</code></td><td>Assembling context and waiting for inference</td></tr>
-<tr><td><code>tool_call</code></td><td>Model requested a tool execution</td></tr>
-<tr><td><code>streaming</code></td><td>Model is generating a reply</td></tr>
-<tr><td><code>completed</code></td><td>Run finished successfully</td></tr>
-<tr><td><code>failed</code></td><td>Run encountered an error</td></tr>
-<tr><td><code>cancelled</code></td><td>Run was cancelled by the client</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="sessions-2"><a class="header" href="#sessions-2">Sessions</a></h2>
-<p>Sessions are persistent conversation containers. A client can:</p>
-<ul>
-<li><strong>Create</strong> a session explicitly via <code>session.create</code>, or let the gateway auto-create
-one when sending an <code>agent</code> request without a <code>sessionId</code>.</li>
-<li><strong>List</strong> active sessions via <code>session.list</code> (returns message counts and timestamps).</li>
-<li><strong>Retrieve</strong> a session’s full message history via <code>session.get</code>.</li>
-<li><strong>Clear</strong> a session and all its data via <code>session.clear</code>.</li>
-</ul>
-<pre class="mermaid">stateDiagram-v2
-    [*] --&gt; Created: session.create
-    Created --&gt; Active: agent request
-    Active --&gt; Active: more messages
-    Active --&gt; Cleared: session.clear
-    Cleared --&gt; [*]
-</pre>
-
-<p>Sessions persist across client reconnections. A client stores the <code>sessionId</code> locally
-and provides it in subsequent <code>agent</code> requests to maintain conversational context.</p>
-<h2 id="capability-locking-1"><a class="header" href="#capability-locking-1">Capability locking</a></h2>
-<p>When the agent loop invokes a node capability (e.g. LLM inference or a tool), it
-acquires an advisory lock in SQLite:</p>
-<ul>
-<li><strong>Acquire</strong>: <code>INSERT OR IGNORE</code> on the <code>capability_locks</code> table with a 5-minute expiry.</li>
-<li><strong>Release</strong>: <code>DELETE</code> after the operation completes.</li>
-<li><strong>Expiry</strong>: Locks older than their <code>expires_at</code> are automatically reaped.</li>
-</ul>
-<p>This prevents two concurrent agent runs from using the same capability simultaneously,
-ensuring consistent tool/model access across the distributed node network.</p>
-<h2 id="cron-jobs-1"><a class="header" href="#cron-jobs-1">Cron jobs</a></h2>
-<p>Cron jobs are scheduled agent tasks stored in the database. Each job specifies:</p>
-<ul>
-<li>A <strong>schedule</strong> (cron expression)</li>
-<li>A <strong>prompt</strong> (what the agent should do)</li>
-<li>An optional <strong>session_id</strong> (to continue a conversation)</li>
-</ul>
-<p>The cron scheduler runs as a background task, polling every 60 seconds for due jobs.
-When a job fires, it submits an <code>AgentCommand</code> to the brain and emits a <code>cron</code> event.</p>
-<h2 id="end-to-end-chat-flow"><a class="header" href="#end-to-end-chat-flow">End-to-end chat flow</a></h2>
-<p>The following diagram shows the full lifecycle of a chat message originating from the
-Moretimer app, flowing through the gateway and node, and streaming back to the client.</p>
-<pre class="mermaid">sequenceDiagram
-    participant App as Moretimer App
-    participant GW as Gateway
-    participant DB as SQLite
-    participant Node as LLM Node
-
-    App-&gt;&gt;GW: session.create {name}
-    GW-&gt;&gt;DB: INSERT session
-    GW--&gt;&gt;App: {sessionId}
-    App-&gt;&gt;App: store sessionId on thread
-
-    App-&gt;&gt;GW: agent {prompt, sessionId}
-    GW-&gt;&gt;DB: INSERT run + user message
-    GW--&gt;&gt;App: response {runId, sessionId, status: accepted}
-    GW--&gt;&gt;App: event:agent {status: thinking}
-
-    GW-&gt;&gt;GW: ensure_model_loaded
-    alt Model not in VRAM
-        GW-&gt;&gt;Node: model.load {modelId}
-        Node--&gt;&gt;GW: {loaded: true}
-        Node-&gt;&gt;GW: model.status (push)
-    end
-
-    GW-&gt;&gt;GW: load SOUL.md + resolve prefill (if collection set)
-    GW-&gt;&gt;GW: build system prompt (SOUL + prefill + tools)
-    GW-&gt;&gt;Node: agent {messages, tools}
-
-    Node--&gt;&gt;GW: inference response
-
-    alt Plain reply
-        GW-&gt;&gt;DB: INSERT assistant message
-        GW--&gt;&gt;App: event:agent {status: streaming, content}
-        GW--&gt;&gt;App: event:agent {status: completed}
-        App-&gt;&gt;App: update message bubble
-    else Tool calls
-        GW--&gt;&gt;App: event:agent {status: tool_call, toolName}
-        alt Gateway-native tool
-            GW-&gt;&gt;GW: execute locally (e.g. notes.create)
-        else Node tool
-            GW-&gt;&gt;Node: tools.execute {tool, args}
-            Node--&gt;&gt;GW: tool result
-        end
-        GW-&gt;&gt;DB: INSERT tool message
-        GW-&gt;&gt;Node: agent {messages + tool results}
-        Node--&gt;&gt;GW: final response
-        GW-&gt;&gt;DB: INSERT assistant message
-        GW--&gt;&gt;App: event:agent {status: streaming, content}
-        GW--&gt;&gt;App: event:agent {status: completed}
-    end
-
-    Note over App: Later, on re-open
-    App-&gt;&gt;GW: session.get {sessionId}
-    GW-&gt;&gt;DB: SELECT messages
-    GW--&gt;&gt;App: {messages}
-</pre>
-
-<h3 id="queued-requests"><a class="header" href="#queued-requests">Queued requests</a></h3>
-<p>When no LLM node is available at the time of an agent request, the gateway queues the
-run instead of failing it:</p>
-<pre class="mermaid">sequenceDiagram
-    participant App as Moretimer App
-    participant GW as Gateway
-    participant DB as SQLite
-    participant Node as LLM Node
-
-    App-&gt;&gt;GW: agent {prompt, sessionId}
-    GW-&gt;&gt;DB: INSERT run (status: accepted)
-    GW--&gt;&gt;App: response {runId, status: accepted}
-    GW-&gt;&gt;GW: no LLM node available
-    GW-&gt;&gt;DB: UPDATE run (status: queued)
-    GW--&gt;&gt;App: event:agent {status: queued}
-
-    Note over Node: Node connects later
-    Node-&gt;&gt;GW: connect {models: [...]}
-    GW-&gt;&gt;GW: drain_queue
-    GW-&gt;&gt;DB: claim queued runs
-    GW-&gt;&gt;Node: model.load + agent (inference)
-    Node--&gt;&gt;GW: response
-    GW--&gt;&gt;App: event:agent {status: streaming, content}
-    GW--&gt;&gt;App: event:agent {status: completed}
-</pre>
-
-<h2 id="thinking-mode"><a class="header" href="#thinking-mode">Thinking mode</a></h2>
-<p>When <code>thinking: true</code> is set in the agent request, the gateway enables Gemma 4’s
-extended thinking capability:</p>
-<ol>
-<li><strong>Injection</strong>: The <code>&lt;|think|&gt;</code> token is prepended to the system prompt before inference.</li>
-<li><strong>Response format</strong>: The model may return thinking content wrapped in
-<code>&lt;|channel&gt;thought\n...&lt;channel|&gt;</code> blocks alongside the visible reply.</li>
-<li><strong>Stripping</strong>: The gateway strips thinking blocks from the raw response. Only the
-visible text is persisted to the session history. Thinking content is emitted as
-an ephemeral <code>thinkingContent</code> field in the <code>streaming</code> agent event.</li>
-<li><strong>Multi-turn</strong>: Because thinking content is never persisted, subsequent turns in
-the same session automatically receive a clean history — no special handling is needed.</li>
-</ol>
-<h3 id="gemma-4-sampling-parameters"><a class="header" href="#gemma-4-sampling-parameters">Gemma 4 sampling parameters</a></h3>
-<p>When using Gemma 4 models, the recommended sampling configuration is:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Parameter</th><th>Value</th><th>Notes</th></tr>
-</thead>
-<tbody>
-<tr><td><code>temperature</code></td><td><code>1.0</code></td><td>Required for thinking mode</td></tr>
-<tr><td><code>top_p</code></td><td><code>0.95</code></td><td>Nucleus sampling</td></tr>
-<tr><td><code>top_k</code></td><td><code>64</code></td><td>Top-k filtering before top-p</td></tr>
-</tbody>
-</table>
-</div>
-<blockquote>
-<p><strong>Note</strong>: Queued runs that are drained on node reconnect lose the <code>thinking</code> flag
-and default to <code>thinking: false</code>.</p>
-</blockquote>
-<h2 id="system-prompt-composition"><a class="header" href="#system-prompt-composition">System prompt composition</a></h2>
-<p>The system prompt is assembled from these sources, in order:</p>
-<ol>
-<li><strong>Thinking token</strong> — If <code>thinking: true</code>, the <code>&lt;|think|&gt;</code> token is prepended.</li>
-<li><strong>SOUL.md</strong> — Always loaded from <code>~/.nexo/nexo-storage/SOUL.md</code> (if it exists). Defines the agent’s personality and persistent instructions.</li>
-<li><strong>Prefill collection</strong> — If the session has a <code>prefill_collection_id</code>, the gateway resolves it from <code>PREFILL/collections.json</code>, reads each referenced markdown file, and concatenates them.</li>
-<li><strong>Tool descriptions</strong> — A structured description of all available tools (both node-registered and gateway-native).</li>
-</ol>
-<p>If none of these produce content, a default “You are a helpful assistant.” prompt is used.</p>
-<h2 id="gateway-native-tools"><a class="header" href="#gateway-native-tools">Gateway-native tools</a></h2>
-<p>Some tools execute directly on the gateway rather than being forwarded to a node. These are registered at startup and appear in the tool catalog alongside node tools (with <code>source: "gateway"</code>).</p>
-<p>Current gateway-native tools:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Tool</th><th>Description</th></tr>
-</thead>
-<tbody>
-<tr><td><code>notes.create</code></td><td>Create a timestamped note in git storage</td></tr>
-<tr><td><code>notes.list</code></td><td>List all note filenames</td></tr>
-<tr><td><code>notes.read</code></td><td>Read a specific note</td></tr>
-<tr><td><code>notes.update_summary</code></td><td>Write the notes summary</td></tr>
-</tbody>
-</table>
-</div>
-<p>When the agent loop encounters a tool call, it checks gateway tools first. If a match is found, the tool executes locally without any node involvement. Otherwise, the call is forwarded to the appropriate node.</p>
-<h2 id="context-assembly"><a class="header" href="#context-assembly">Context assembly</a></h2>
-<p>Before each inference call, the brain loads the full conversation history from the
-<code>messages</code> table for the current session, ordered chronologically. The system prompt
-(see above) is prepended as a system message.</p>
-<p>The context window includes messages with roles:</p>
-<ul>
-<li><code>user</code> — user prompts</li>
-<li><code>assistant</code> — model responses</li>
-<li><code>tool</code> — tool execution results</li>
-<li><code>system</code> — context injections</li>
-</ul>
+<h1 id="agent"><a class="header" href="#agent">Agent</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory"><a class="header" href="#memory">Memory</a></h1>
 <h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
@@ -931,24 +752,21 @@ and default to <code>thinking: false</code>.</p>
 <p>The git-backed storage repository holds user-facing persistent data. Every write triggers a pull → write → commit → push cycle, keeping all data versioned and portable.</p>
 <h3 id="repository-structure"><a class="header" href="#repository-structure">Repository structure</a></h3>
 <pre><code>~/.nexo/nexo-storage/
-├── SOUL.md                  # Agent personality (always prepended to system prompt)
-├── PREFILL/
-│   ├── collections.json     # Collection definitions
-│   ├── identity.md          # Example prefill markdown
-│   └── skills.md            # Example prefill markdown
+├── PROMPTS/
+│   ├── collections.json     # Prompt collection definitions
+│   ├── identity.md          # Example prompt document
+│   └── skills.md            # Example prompt document
 └── NOTES/
     ├── SUMMARY.md           # Auto-generated summary of all notes
     └── 2026-01-15T12-00-00.md  # Timestamped notes
 </code></pre>
-<h3 id="soulmd"><a class="header" href="#soulmd">SOUL.md</a></h3>
-<p>A markdown file whose content is always prepended to the agent’s system prompt. Use it to define personality, communication style, or persistent instructions.</p>
-<h3 id="prefill-system-prefill"><a class="header" href="#prefill-system-prefill">Prefill system (<code>PREFILL/</code>)</a></h3>
-<p>Composable context templates that can be attached to sessions:</p>
+<h3 id="prompt-library-prompts"><a class="header" href="#prompt-library-prompts">Prompt library (<code>PROMPTS/</code>)</a></h3>
+<p>Composable prompt documents that can be attached to sessions:</p>
 <ul>
-<li><strong>Markdown files</strong> — Individual <code>.md</code> files stored in <code>PREFILL/</code></li>
-<li><strong>Collections</strong> — Named groups of markdown files defined in <code>PREFILL/collections.json</code></li>
+<li><strong>Prompt documents</strong> — Individual <code>.md</code> files stored in <code>PROMPTS/</code></li>
+<li><strong>Prompt collections</strong> — Named groups of prompt documents defined in <code>PROMPTS/collections.json</code></li>
 </ul>
-<p>When a session has a <code>prefill_collection_id</code>, the gateway resolves the collection at inference time: reads each referenced markdown file in order, concatenates them, and includes the result in the system prompt (after SOUL.md, before tool descriptions).</p>
+<p>When a session has a <code>prompt_collection_id</code>, the gateway resolves the collection at inference time: reads each referenced prompt document in order, concatenates them, and includes the result in the system prompt before tool descriptions.</p>
 <p><code>collections.json</code> schema:</p>
 <pre><code class="language-json">{
   "collections": [
@@ -956,13 +774,13 @@ and default to <code>thinking: false</code>.</p>
       "id": "default",
       "name": "Default Identity",
       "description": "Core personality",
-      "markdown_files": ["identity.md", "skills.md"]
+      "documents": ["identity.md", "skills.md"]
     }
   ]
 }
 </code></pre>
 <h3 id="notes-system-notes"><a class="header" href="#notes-system-notes">Notes system (<code>NOTES/</code>)</a></h3>
-<p>Agent-accessible note storage with gateway-native tools:</p>
+<p>Run-accessible note storage with gateway-native tools:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -976,7 +794,7 @@ and default to <code>thinking: false</code>.</p>
 </tbody>
 </table>
 </div>
-<p>A default cron job (<code>notes-summary</code>, every 6 hours) prompts the agent to read all notes and generate an organized summary.</p>
+<p>A default cron job (<code>notes-summary</code>, every 6 hours) prompts the run loop to read all notes and generate an organized summary.</p>
 <h2 id="sqlite-schema"><a class="header" href="#sqlite-schema">SQLite schema</a></h2>
 <p>The gateway’s SQLite database stores structured operational state:</p>
 <h3 id="core-tables"><a class="header" href="#core-tables">Core tables</a></h3>
@@ -992,35 +810,41 @@ and default to <code>thinking: false</code>.</p>
 </tbody>
 </table>
 </div>
-<h3 id="session--agent-tables"><a class="header" href="#session--agent-tables">Session &amp; agent tables</a></h3>
+<h3 id="session--run-tables"><a class="header" href="#session--run-tables">Session &amp; run tables</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Table</th><th>Purpose</th></tr>
 </thead>
 <tbody>
-<tr><td><code>sessions</code></td><td>Conversation containers, linked to a user</td></tr>
-<tr><td><code>agent_runs</code></td><td>One row per agent invocation, tracks status and summary</td></tr>
-<tr><td><code>messages</code></td><td>Conversation messages (user, assistant, tool, system), ordered by time</td></tr>
-<tr><td><code>capability_locks</code></td><td>Advisory locks for tool/model exclusivity during agent runs</td></tr>
-<tr><td><code>cron_jobs</code></td><td>Scheduled agent tasks with cron expressions</td></tr>
+<tr><td><code>sessions</code></td><td>Transcript containers, linked to a user</td></tr>
+<tr><td><code>runs</code></td><td>One row per run invocation, tracks lifecycle state for the run</td></tr>
+<tr><td><code>run_rounds</code></td><td>One row per inference round within a run</td></tr>
+<tr><td><code>transcript_entries</code></td><td>Transcript entries (user, assistant, tool, system), ordered by time</td></tr>
+<tr><td><code>tool_traces</code></td><td>Detailed records for tool execution attempts within a round</td></tr>
+<tr><td><code>run_summaries</code></td><td>Terminal summaries stored separately from run lifecycle metadata</td></tr>
+<tr><td><code>capability_locks</code></td><td>Advisory locks for tool/model exclusivity during runs</td></tr>
+<tr><td><code>cron_jobs</code></td><td>Scheduled run tasks with cron expressions</td></tr>
 </tbody>
 </table>
 </div>
 <h3 id="data-flow"><a class="header" href="#data-flow">Data flow</a></h3>
-<pre><code>User prompt
-  → messages table (role: "user")
-  → context assembly (SELECT * FROM messages WHERE session_id ORDER BY created_at)
+<pre><code>User input
+  → transcript_entries table (role: "user")
+  → context assembly (SELECT * FROM transcript_entries WHERE session_id ORDER BY created_at)
   → LLM inference (via node)
-  → messages table (role: "assistant" or "tool")
-  → agent_runs table (status: "completed")
+  → run_rounds table (round status + rationale + selected peer)
+  → transcript_entries table (role: "assistant" or "tool")
+  → tool_traces table (per tool invocation)
+  → runs table (status: "completed")
+  → run_summaries table (final summary text)
 </code></pre>
 <h2 id="categories"><a class="header" href="#categories">Categories</a></h2>
 <ul>
-<li><strong>Conversation / chat transcripts</strong> — stored in <code>messages</code> table per session</li>
-<li><strong>Daily / session summaries</strong> — stored as <code>agent_runs.summary</code></li>
-<li><strong>Core / long-term facts</strong> — SOUL.md and prefill markdown files in git storage</li>
-<li><strong>Notes</strong> — Timestamped agent-created notes in git storage</li>
+<li><strong>Transcript / chat history</strong> — stored in <code>transcript_entries</code> per session</li>
+<li><strong>Daily / session summaries</strong> — stored in <code>run_summaries</code></li>
+<li><strong>Core / long-term facts</strong> — Prompt documents in git storage</li>
+<li><strong>Notes</strong> — Timestamped run-created notes in git storage</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tools"><a class="header" href="#tools">Tools</a></h1>
@@ -1106,6 +930,13 @@ and default to <code>thinking: false</code>.</p>
 <li><strong>JSON</strong> — compacted (values preserved, long strings truncated, arrays summarized)</li>
 <li><strong>Other</strong> — returned as plain text with truncation</li>
 </ul>
+<h3 id="todo-tools"><a class="header" href="#todo-tools">Todo tools</a></h3>
+<p>TODO operations (<code>create</code>, <code>add</code>, <code>list</code>, <code>complete</code>, <code>delete</code>, <code>reorder</code>) are exposed as tools.</p>
+<ul>
+<li>These tools execute on the gateway (like other gateway-hosted tools).</li>
+<li>Results are appended to the transcript exactly like any other tool result.</li>
+<li>The gateway does <strong>not</strong> enforce TODO completion for run termination, it’s up to the model to manage the TODO list and decide when it’s “done.”</li>
+</ul>
 <h3 id="notes-tools"><a class="header" href="#notes-tools">Notes tools</a></h3>
 <p>Git-backed note-taking for persistent memory across conversations.</p>
 <div class="table-wrapper">
@@ -1129,8 +960,8 @@ and default to <code>thinking: false</code>.</p>
 <li>A <strong>nexo-node</strong> starts and connects to the gateway with <code>role: node</code></li>
 <li>After handshake, the node sends <code>tools.register</code> with full tool specifications (name, description, JSON Schema parameters)</li>
 <li>The gateway stores these in an <strong>in-memory registry</strong> (not persisted to disk)</li>
-<li>Users/agents can query available tools via <code>tools.catalog</code></li>
-<li>Users/agents can execute tools via <code>tools.execute</code> — the gateway routes the request to the owning node and relays the response</li>
+<li>Clients and automated runs can query available tools via <code>tools.catalog</code></li>
+<li>Clients and automated runs can execute tools via <code>tools.execute</code> — the gateway routes the request to the owning node and relays the response</li>
 </ol>
 <h3 id="lifecycle"><a class="header" href="#lifecycle">Lifecycle</a></h3>
 <ul>

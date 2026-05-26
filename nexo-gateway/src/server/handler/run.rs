@@ -1,36 +1,36 @@
-//! WebSocket handlers for agent and session lifecycle requests.
+//! WebSocket handlers for run and session lifecycle requests.
 
-use crate::agent::{AgentCommand, AgentHandle};
+use crate::agent::{RunCommand, RunHandle};
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
-    AgentContextAppendParams, AgentContextAppendResponse, AgentParams, AgentStatus,
-    AgentStopParams, AgentStopResponse, ErrorPayload, EventKind, Frame, SessionClearParams,
-    SessionCreateParams, SessionGetParams,
+    ErrorPayload, EventKind, Frame, RunEventPayload, RunInstructionsAppendParams,
+    RunInstructionsAppendResponse, RunStartParams, RunStatus, RunStopParams, RunStopResponse,
+    SessionClearParams, SessionCreateParams, SessionGetParams,
 };
 use sqlx::SqlitePool;
 
 use super::base::{internal_error, ok_or_internal_error, parse_params, resolve_user_id};
 
-/// Handle `agent` requests by creating a run and submitting it to the background task.
-pub(super) async fn handle_agent(
+/// Handle `run.start` requests by creating a run and submitting it to the background task.
+pub(super) async fn handle_run_start(
     request_id: &str,
     params: serde_json::Value,
     peer_id: &str,
     state: &SharedState,
     db: &SqlitePool,
-    agent_handle: &AgentHandle,
+    run_handle: &RunHandle,
 ) -> Frame {
-    let agent_params: AgentParams = match parse_params(request_id, params, "agent") {
+    let run_params: RunStartParams = match parse_params(request_id, params, "run.start") {
         Ok(p) => p,
         Err(f) => return f,
     };
 
     let user_id = resolve_user_id(state, peer_id).await;
 
-    let (session_id, prefill_collection_id) = match agent_params.session_id {
+    let (session_id, prompt_collection_id) = match run_params.session_id {
         Some(sid) => {
             let pcid: Option<String> = sqlx::query_as::<_, (Option<String>,)>(
-                "SELECT prefill_collection_id FROM sessions WHERE id = ?",
+                "SELECT prompt_collection_id FROM sessions WHERE id = ?",
             )
             .bind(&sid)
             .fetch_optional(db)
@@ -51,13 +51,13 @@ pub(super) async fn handle_agent(
     };
 
     let run_id = Frame::new_id();
-    let thinking = agent_params.thinking.unwrap_or(false);
+    let thinking = run_params.thinking.unwrap_or(false);
     if let Err(e) = crate::agent::session::create_run(
         db,
         &run_id,
         &session_id,
-        &agent_params.idempotency_key,
-        agent_params.model_id.as_deref(),
+        &run_params.idempotency_key,
+        run_params.model_id.as_deref(),
         thinking,
     )
     .await
@@ -65,39 +65,39 @@ pub(super) async fn handle_agent(
         return internal_error(request_id, format!("Failed to create run: {e}"));
     }
 
-    let cmd = AgentCommand::RunAgent {
+    let cmd = RunCommand::StartRun {
         run_id: run_id.clone(),
         session_id: session_id.clone(),
-        prompt: agent_params.prompt,
-        context: agent_params.context,
+        input: run_params.input,
+        instructions: run_params.instructions,
         peer_id: peer_id.to_string(),
-        model_id: agent_params.model_id,
-        prefill_collection_id,
+        model_id: run_params.model_id,
+        prompt_collection_id,
         thinking,
     };
-    if let Err(e) = agent_handle.submit(cmd).await {
-        tracing::error!("Failed to submit agent command: {e}");
+    if let Err(e) = run_handle.submit(cmd).await {
+        tracing::error!("Failed to submit run command: {e}");
     }
 
     ok_or_internal_error(
         request_id,
-        nexo_ws_schema::AgentResponse {
+        nexo_ws_schema::RunStartResponse {
             run_id,
             session_id,
-            status: AgentStatus::Accepted,
+            status: RunStatus::Accepted,
             summary: None,
         },
     )
 }
 
-/// Handle `agent.stop` requests by marking the run as cancelled.
-pub(super) async fn handle_agent_stop(
+/// Handle `run.stop` requests by marking the run as cancelled.
+pub(super) async fn handle_run_stop(
     request_id: &str,
     params: serde_json::Value,
     state: &SharedState,
     db: &SqlitePool,
 ) -> Frame {
-    let stop_params: AgentStopParams = match parse_params(request_id, params, "agent.stop") {
+    let stop_params: RunStopParams = match parse_params(request_id, params, "run.stop") {
         Ok(params) => params,
         Err(frame) => return frame,
     };
@@ -113,11 +113,11 @@ pub(super) async fn handle_agent_stop(
 
     if let Some(session_id) = stopped_session.as_ref() {
         let event = Frame::event(
-            EventKind::Agent,
-            nexo_ws_schema::AgentEventPayload {
+            EventKind::Run,
+            RunEventPayload {
                 run_id: stop_params.run_id.clone(),
                 session_id: session_id.clone(),
-                status: AgentStatus::Cancelled,
+                status: RunStatus::Cancelled,
                 content: None,
                 tool_name: None,
                 tool_call_id: None,
@@ -131,17 +131,17 @@ pub(super) async fn handle_agent_stop(
         }
     }
 
-    ok_or_internal_error(request_id, AgentStopResponse { stopped })
+    ok_or_internal_error(request_id, RunStopResponse { stopped })
 }
 
-/// Handle `agent.context.append` requests for active runs.
-pub(super) async fn handle_agent_context_append(
+/// Handle `run.instructions.append` requests for active runs.
+pub(super) async fn handle_run_instructions_append(
     request_id: &str,
     params: serde_json::Value,
     db: &SqlitePool,
 ) -> Frame {
-    let append_params: AgentContextAppendParams =
-        match parse_params(request_id, params, "agent.context.append") {
+    let append_params: RunInstructionsAppendParams =
+        match parse_params(request_id, params, "run.instructions.append") {
             Ok(params) => params,
             Err(frame) => return frame,
         };
@@ -149,19 +149,19 @@ pub(super) async fn handle_agent_context_append(
     let message_id = match crate::agent::session::append_run_context(
         db,
         &append_params.run_id,
-        &append_params.context,
+        &append_params.instructions,
     )
     .await
     {
         Ok(result) => result,
         Err(error) => {
-            return internal_error(request_id, format!("Failed to append context: {error}"));
+            return internal_error(request_id, format!("Failed to append instructions: {error}"));
         }
     };
 
     ok_or_internal_error(
         request_id,
-        AgentContextAppendResponse {
+        RunInstructionsAppendResponse {
             queued: message_id.is_some(),
             message_id,
         },
@@ -187,15 +187,15 @@ pub(super) async fn handle_session_create(
         db,
         &user_id,
         session_params.name.as_deref(),
-        session_params.prefill_collection_id.as_deref(),
+        session_params.prompt_collection_id.as_deref(),
     )
     .await
     {
-        Ok((session_id, prefill_collection_id)) => ok_or_internal_error(
+        Ok((session_id, prompt_collection_id)) => ok_or_internal_error(
             request_id,
             nexo_ws_schema::SessionCreateResponse {
                 session_id,
-                prefill_collection_id,
+                prompt_collection_id,
             },
         ),
         Err(e) => internal_error(request_id, format!("Failed to create session: {e}")),

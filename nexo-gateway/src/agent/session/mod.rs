@@ -1,4 +1,4 @@
-//! Session, transcript, and run persistence helpers for the agent runtime.
+//! Session, transcript, and run persistence helpers for the run runtime.
 
 mod runs;
 mod sessions;

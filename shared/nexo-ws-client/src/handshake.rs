@@ -83,7 +83,7 @@ pub fn default_node_connect_params(
             version: version.to_string(),
             platform,
         },
-        role: nexo_ws_schema::Role::Node,
+        role: nexo_ws_schema::ConnectionRole::Node,
         scopes: vec![],
         capabilities,
         commands,
@@ -111,7 +111,7 @@ pub fn default_user_connect_params(
             version: version.to_string(),
             platform,
         },
-        role: nexo_ws_schema::Role::User,
+        role: nexo_ws_schema::ConnectionRole::User,
         scopes: vec![
             nexo_ws_schema::Scope::UserRead,
             nexo_ws_schema::Scope::UserWrite,
