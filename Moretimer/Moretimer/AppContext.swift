@@ -35,7 +35,7 @@ struct AppContext {
     }
 
     /// Builds a shared application environment with all models registered.
-    /// Autosave is disabled to allow explicit saves in MRPFAPI.
+    /// Autosave is disabled to allow explicit saves.
     ///
     /// If the SwiftData store is incompatible with the current schema (e.g. after
     /// a model property type change), the store files are deleted and recreated

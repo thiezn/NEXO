@@ -1,6 +1,6 @@
 # Benchmarks
 
-Criterion benchmarks and profiling workflow for performance-critical MRPF code.
+Criterion benchmarks and profiling workflow for performance-critical code.
 
 ## Criterion Setup
 
@@ -35,39 +35,31 @@ criterion_main!(benches);
 
 ```bash
 # All benchmarks for a crate
-cargo bench -p mrpf_cert_parser
+cargo bench -p crate-name
 
 # Specific benchmark
-cargo bench -p mrpf_cert_parser -- parse_certificate
+cargo bench -p crate-name -- parse_certificate
 
 # With baseline comparison
-cargo bench -p mrpf_cert_parser -- --save-baseline before
+cargo bench -p crate-name -- --save-baseline before
 # ... make changes ...
-cargo bench -p mrpf_cert_parser -- --baseline before
+cargo bench -p crate-name -- --baseline before
 ```
 
 ## Profiling Workflow
 
 ```bash
 # Flamegraph (requires cargo-flamegraph)
-cargo flamegraph --bin mrpf -- [args]
+cargo flamegraph --bin my-binary -- [args]
 
 # macOS Instruments
-cargo instruments -t "Time Profiler" --bin mrpf -- [args]
+cargo instruments -t "Time Profiler" --bin my-binary -- [args]
 
 # Release build for accurate profiling (debug symbols enabled in workspace)
 cargo build --release
 ```
 
 The workspace `Cargo.toml` has `debug = true` in the release profile specifically to enable flamegraph profiling without performance overhead.
-
-## When to Benchmark
-
-- Touching packet construction/parsing in `mrpf_engine`
-- Modifying certificate parsing in `mrpf_cert_parser`
-- Changing matcher evaluation in `mrpf_matchers`
-- Modifying the Feistel cipher iterators
-- Any change to hot paths (send/receive thread loops)
 
 ## Rules
 

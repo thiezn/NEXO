@@ -1,6 +1,6 @@
 # API Design
 
-Builder patterns, newtype safety, and ergonomic public APIs for MRPF crates.
+Builder patterns, newtype safety, and ergonomic public APIs.
 
 ## Builder Pattern for Complex Configuration
 
@@ -51,8 +51,6 @@ pub struct TimeoutMs(u64);
 fn scan(ip: Ipv4Addr, port: Port, timeout: TimeoutMs) { ... }
 ```
 
-MRPF uses newtypes for IP ranges, port ranges, and other domain types to prevent accidental misuse.
-
 ## Accept Generic Input, Return Concrete Output
 
 ```rust
@@ -70,24 +68,21 @@ fn lookup(key: &str) -> Option<&Value> { ... }
 ## Use `#[must_use]` for Important Returns
 
 ```rust
-#[must_use]
+#[must_use = "validation results should be checked"]
 pub fn validate(&self) -> Result<()> { ... }
-
-#[must_use = "scan results should be processed"]
-pub fn run_scan(&self) -> ScanResults { ... }
 ```
 
 ## Visibility Rules
 
 ```rust
 // Public API — exported from the crate
-pub fn scan_target(config: &ScanConfig) -> Result<ScanResults> { ... }
+pub fn do() -> Result<Abc> { ... }
 
 // Internal to crate — not visible to consumers
-pub(crate) fn build_packet(target: &Target) -> Vec<u8> { ... }
+pub(crate) fn do_crate() -> Abc { ... }
 
 // Private — only visible in this module
-fn compute_checksum(data: &[u8]) -> u16 { ... }
+fn do_private() -> Abc { ... }
 ```
 
 ## Collections & Iterators

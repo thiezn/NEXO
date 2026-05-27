@@ -1,6 +1,6 @@
 # Naming Conventions
 
-Rust standard naming applied to MRPF with project-specific patterns.
+Rust standard naming with project-specific patterns.
 
 ## Getter Prefixes by Cost and Ownership
 
@@ -23,7 +23,6 @@ fn into_inner(self) -> Vec<u8> { self.data }
 
 ## Type and Module Naming
 
-- **Crate names:** `snake_case` with `mrpf_` prefix (e.g., `mrpf_engine`, `mrpf_tcp_syn_scanner`)
 - **Module names:** `snake_case`, keep focused on a single responsibility
 - **Types:** `PascalCase` (structs, enums, traits)
 - **Constants:** `SCREAMING_SNAKE_CASE`
@@ -51,23 +50,6 @@ fn scan(target: &str, verbosity: Verbosity) { ... }
 
 ## Module Organization
 
-```rust
-// src/lib.rs — re-export public API
-pub mod config;
-pub mod client;
-pub mod error;
-
-pub use config::Config;
-pub use client::Client;
-pub use error::{Error, Result};
-```
-
+- Always prefer to split crates up into submodules
 - Use `pub(crate)` for internal APIs not exposed to consumers
 - Keep `mod.rs` minimal — just `pub mod` and `pub use` declarations
-
-## MRPF-Specific Patterns
-
-- Scanner crates follow the pattern: `mrpf_{protocol}_scanner` (e.g., `mrpf_tls_scanner`)
-- Shared library crates use `mrpf_{purpose}` (e.g., `mrpf_core`, `mrpf_matchers`)
-- Infrastructure Lambda crates live under `infrastructure/` with clear binary names
-- The `Connection` trait in `mrpf_engine` uses verb methods: `build_request()`, `parse_response()`

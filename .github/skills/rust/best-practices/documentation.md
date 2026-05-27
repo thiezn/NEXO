@@ -1,6 +1,6 @@
 # Documentation
 
-Rustdoc conventions and documentation patterns for MRPF crates.
+Rustdoc conventions and documentation patterns
 
 ## Document Public APIs
 
@@ -38,12 +38,11 @@ pub fn new(config: Config) -> Result<Self> { ... }
 ## Module-Level Documentation
 
 ```rust
-//! # Network Engine
+//! # My Module
 //!
-//! Core packet crafting and parsing for the MRPF scanner.
+//! bla.
 //!
-//! This module implements the custom network stack using `libpnet`
-//! at the datalink layer, with separate send/receive threads.
+//! This module implements ..
 ```
 
 Use `//!` (inner doc comments) at the top of `lib.rs` or `mod.rs` for module/crate documentation.
@@ -71,9 +70,7 @@ fn name(&self) -> &str { &self.name }
 fn hostname(&self) -> &str { &self.hostname }
 ```
 
-## MRPF-Specific Notes
+## Architecture
 
-- Performance-critical sections should have comments explaining trade-offs (e.g., why a constant cipher suite array is used)
-- Document the `Connection` trait thoroughly — it's the main extension point for new scanners
-- Crate READMEs serve as the entry point for each crate's documentation
 - The `book/` directory contains prose-level architecture docs — rustdoc covers API-level docs
+- the book can be built using ./scripts/book.sh

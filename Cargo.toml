@@ -50,6 +50,7 @@ uuid = "1"
 
 [workspace.lints.rust]
 missing_docs = "warn"
+
 [workspace.lints.clippy]
 unwrap_used = "warn"
 expect_used = "warn"

@@ -83,10 +83,3 @@ where E: StdError + Send + Sync + 'static {
 | `Box<dyn Error>` in library signatures | Typed `Error` enum | Zero-cost, pattern-matchable |
 | Deep error chains in hot paths | Minimal error types, log only actionable errors | Performance |
 | `panic!` for recoverable errors | `Result` + `?` | Only `panic!` for programmer bugs / invariant violations |
-
-## MRPF-Specific Notes
-
-- `mrpf_core` uses feature-gated error variants (e.g., `#[cfg(feature = "sqlx")] Database(sqlx::Error)`)
-- `mrpf_engine` keeps error handling minimal in hot paths (send/receive threads) for performance
-- Workspace lints: `clippy::unwrap_used = "warn"`, `clippy::expect_used = "warn"`, `clippy::panic = "warn"`
-- Use `.expect("reason")` only when `None`/`Err` is truly impossible, with a clear explanation string

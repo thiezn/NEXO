@@ -1,6 +1,6 @@
 # Memory & Performance
 
-Hot path optimization, zero-copy patterns, and allocation strategies for MRPF.
+Hot path optimization, zero-copy patterns, and allocation strategies.
 
 ## Core Principles
 
@@ -47,34 +47,6 @@ fn process(data: Cow<'_, str>) -> Cow<'_, str> {
 }
 ```
 
-## Zero-Copy Parsing
-
-MRPF scanners parse raw packets without copying:
-
-```rust
-// Parse directly from the receive buffer slice
-fn parse_tcp_header(packet: &[u8]) -> Result<TcpHeader<'_>> {
-    // Work with references into the original buffer
-    let src_port = u16::from_be_bytes([packet[0], packet[1]]);
-    let dst_port = u16::from_be_bytes([packet[2], packet[3]]);
-    // ...
-}
-```
-
-- Parse only what you need — don't deserialize full structures if you only need 2 fields
-- Use byte slices (`&[u8]`) through the parsing pipeline
-- Only allocate (String, Vec) when you need to store results beyond the buffer lifetime
-
-## Hot Path Rules for MRPF
-
-The send and receive threads in `mrpf_engine` are the hottest paths:
-
-- **No allocations** in the packet send loop
-- **No logging** in the tight loop (log only on errors or at intervals)
-- **Pre-compute constants** — cipher suites, header templates, etc.
-- **Minimize branching** — keep the common path branch-free
-- **Use fixed-size buffers** — stack-allocated arrays for packet construction
-
 ## Prefer Borrowing Over Cloning
 
 ```rust
@@ -107,6 +79,6 @@ let results: Vec<_> = items.iter()
 
 ```bash
 cargo build --release                    # Debug symbols enabled in workspace profile
-cargo flamegraph --bin mrpf -- [args]    # Flamegraph
+cargo flamegraph --bin my-bin -- [args]  # Flamegraph
 cargo instruments -t "Time Profiler"     # macOS Instruments
 ```
