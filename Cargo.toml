@@ -5,6 +5,7 @@ members = [
     "shared/nexo-ws-schema",
     "shared/nexo-ws-client",
     "shared/nexo-spec",
+    "shared/nexo-core",
     "nexo-gateway",
     "nexo-node",
     "nexo-client",
@@ -13,12 +14,13 @@ members = [
     "nexo-ai",
     "integration-tests",
     "testmlxrs",
+
 ]
 
 resolver = "3"
 
 [workspace.dependencies]
-cli-helpers = { git = "https://github.com/thiezn/my-crates", rev = "c7be938728e4cdd509dfd3e0eac3e05192160230" }
+cli-helpers = { git = "https://github.com/thiezn/my-crates" }
 nexo-spec = { path = "shared/nexo-spec" }
 nexo-ws-client = { path = "shared/nexo-ws-client" }
 nexo-ws-schema = { path = "shared/nexo-ws-schema" }

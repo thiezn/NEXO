@@ -1,9 +1,6 @@
 # Gateway protocol (WebSocket)
 
-The Gateway WS protocol is the **single control plane + node transport** for
-NEXO. All clients (CLI, macOS/iOS app, headless
-nodes) connect over WebSocket and declare their **role** + **scope** at
-handshake time.
+The Gateway WS protocol is the **single control plane + node transport** for NEXO. All clients (CLI, macOS/iOS app, headless nodes) connect over WebSocket and declare their **role** + **scope** at handshake time.
 
 ## Transport
 

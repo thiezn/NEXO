@@ -1,0 +1,29 @@
+use thiserror::Error as ThisError;
+
+/// The result type used by `nexo-core` contracts.
+pub type Result<T = (), E = Error> = std::result::Result<T, E>;
+
+/// Error values shared by `nexo-core` service contracts.
+#[derive(Debug, Clone, PartialEq, Eq, ThisError)]
+pub enum Error {
+    /// The caller supplied an invalid request or malformed payload.
+    #[error("invalid request: {message}")]
+    InvalidRequest {
+        /// The human-readable validation error message.
+        message: String,
+    },
+
+    /// The requested operation is not supported by the selected implementation.
+    #[error("unsupported feature: {feature}")]
+    UnsupportedFeature {
+        /// The unsupported feature name.
+        feature: String,
+    },
+
+    /// The target service is in a state that prevents the requested operation.
+    #[error("invalid state: {message}")]
+    InvalidState {
+        /// The human-readable state violation message.
+        message: String,
+    },
+}
