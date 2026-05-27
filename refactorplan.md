@@ -9,7 +9,7 @@ One repo-specific detail to include in the first session: Cargo.toml already mov
 
 **Staged Prompts**
 
-1. Foundation and crate scaffold
+1. Foundation and crate scaffold (DONE)
 
 ```text
 /rust should be used for this task.

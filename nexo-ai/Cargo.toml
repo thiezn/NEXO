@@ -7,21 +7,26 @@ autobins = false
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "nexo-ai"
+path = "src/main.rs"
+
 [features]
 default = []
 candle = []
 cli = []
 download = []
 metal = ["candle-core/metal", "mistralrs-core/metal"]
-mlx = []
 
 [dependencies]
 anyhow = { workspace = true }
 candle-core = { workspace = true }
-cli-helpers = { workspace = true, features = ["config"] }
+clap = { workspace = true, features = ["derive"] }
+cli-helpers = { workspace = true, features = ["clap", "config"] }
 dirs = { workspace = true }
 futures-util = { workspace = true }
 nexo-core = { path = "../shared/nexo-core" }
+nexo-model-mgmt = { path = "../shared/nexo-model-mgmt" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

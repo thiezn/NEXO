@@ -24,8 +24,7 @@ struct ManifestItem {
 }
 
 pub fn read_epub(path: &Path, image_mode: ImageMode) -> cli_helpers::Result<EpubContent> {
-    let file = std::fs::File::open(path)
-        .map_err(|e| cli_helpers::Error::Io(format!("Failed to open '{}': {e}", path.display())))?;
+    let file = std::fs::File::open(path)?;
 
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|e| cli_helpers::Error::Other(format!("Invalid ZIP/EPUB: {e}")))?;
@@ -501,11 +500,10 @@ fn read_zip_text(
 ) -> cli_helpers::Result<String> {
     let mut file = archive
         .by_name(path)
-        .map_err(|e| cli_helpers::Error::Io(format!("ZIP entry '{path}' not found: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Other(format!("ZIP entry '{path}' not found: {e}")))?;
 
     let mut content = String::new();
-    file.read_to_string(&mut content)
-        .map_err(|e| cli_helpers::Error::Io(format!("Failed to read '{path}': {e}")))?;
+    file.read_to_string(&mut content)?;
 
     Ok(content)
 }
@@ -516,11 +514,10 @@ fn read_zip_bytes(
 ) -> cli_helpers::Result<Vec<u8>> {
     let mut file = archive
         .by_name(path)
-        .map_err(|e| cli_helpers::Error::Io(format!("ZIP entry '{path}' not found: {e}")))?;
+        .map_err(|e| cli_helpers::Error::Other(format!("ZIP entry '{path}' not found: {e}")))?;
 
     let mut buf = Vec::with_capacity(file.size() as usize);
-    file.read_to_end(&mut buf)
-        .map_err(|e| cli_helpers::Error::Io(format!("Failed to read '{path}': {e}")))?;
+    file.read_to_end(&mut buf);
 
     Ok(buf)
 }

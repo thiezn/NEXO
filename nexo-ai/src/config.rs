@@ -110,6 +110,10 @@ pub struct AutoModelLoader {
     /// The model identifier or local path understood by `mistralrs-core`.
     pub model_id: String,
 
+    /// Optional UQFF artifact filenames or paths. When omitted, local `.uqff` files are discovered.
+    #[serde(default)]
+    pub from_uqff: Option<Vec<PathBuf>>,
+
     /// An optional local `tokenizer.json` path used instead of remote metadata.
     pub tokenizer_json: Option<PathBuf>,
 

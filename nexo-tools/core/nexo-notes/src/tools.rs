@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexo_spec::tool::{Tool, ToolResult};
+use nexo_core::{ToolDefinition, ToolResult};
 
 use crate::NoteStorage;
 
 /// Return all note tools backed by the given storage.
-pub fn all_tools(storage: Arc<dyn NoteStorage>) -> Vec<Arc<dyn Tool>> {
+pub fn all_tools(storage: Arc<dyn NoteStorage>) -> Vec<ToolDefinition> {
     vec![
         Arc::new(NotesCreate {
             storage: storage.clone(),
@@ -28,7 +28,7 @@ struct NotesCreate {
 }
 
 #[async_trait]
-impl Tool for NotesCreate {
+impl ToolDefinition for NotesCreate {
     fn name(&self) -> &str {
         "notes.create"
     }
@@ -90,7 +90,7 @@ struct NotesList {
 }
 
 #[async_trait]
-impl Tool for NotesList {
+impl ToolDefinition for NotesList {
     fn name(&self) -> &str {
         "notes.list"
     }
@@ -133,7 +133,7 @@ struct NotesRead {
 }
 
 #[async_trait]
-impl Tool for NotesRead {
+impl ToolDefinition for NotesRead {
     fn name(&self) -> &str {
         "notes.read"
     }
@@ -182,7 +182,7 @@ struct NotesUpdateSummary {
 }
 
 #[async_trait]
-impl Tool for NotesUpdateSummary {
+impl ToolDefinition for NotesUpdateSummary {
     fn name(&self) -> &str {
         "notes.update_summary"
     }

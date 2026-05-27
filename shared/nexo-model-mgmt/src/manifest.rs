@@ -1,0 +1,195 @@
+//! Manifest data structures and local storage path mapping.
+
+use std::path::{Path, PathBuf};
+
+use nexo_core::ModelDescriptor;
+
+/// Component types for files that make up a model artifact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelComponent {
+    /// Primary model weight file.
+    Weights,
+    /// Sharded model weight file.
+    WeightShard,
+    /// Mistral UQFF quantized artifact.
+    UqffShard,
+    /// Non-quantized residual tensors needed next to UQFF artifacts.
+    UqffResidual,
+    /// Tokenizer file.
+    Tokenizer,
+    /// Tokenizer sidecar configuration.
+    TokenizerConfig,
+    /// Model configuration or auxiliary metadata file.
+    Config,
+    /// Generation defaults.
+    GenerationConfig,
+    /// Chat template file.
+    ChatTemplate,
+    /// Multimodal processor configuration.
+    ProcessorConfig,
+    /// Multimodal preprocessor configuration.
+    PreprocessorConfig,
+    /// Embedding module manifest.
+    Modules,
+    /// Multimodal projector weights.
+    VisionProjector,
+}
+
+impl ModelComponent {
+    /// Returns the stable component identifier used in CLI output.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Weights => "weights",
+            Self::WeightShard => "weight_shard",
+            Self::UqffShard => "uqff_shard",
+            Self::UqffResidual => "uqff_residual",
+            Self::Tokenizer => "tokenizer",
+            Self::TokenizerConfig => "tokenizer_config",
+            Self::Config => "config",
+            Self::GenerationConfig => "generation_config",
+            Self::ChatTemplate => "chat_template",
+            Self::ProcessorConfig => "processor_config",
+            Self::PreprocessorConfig => "preprocessor_config",
+            Self::Modules => "modules",
+            Self::VisionProjector => "vision_projector",
+        }
+    }
+}
+
+/// How a manifest selects files from a remote model repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelFileSelector {
+    /// A single known path in the remote repository.
+    Exact(String),
+    /// Every remote path ending with this suffix.
+    Suffix(String),
+    /// Every remote path starting with this prefix.
+    Prefix(String),
+}
+
+impl ModelFileSelector {
+    /// Returns whether a remote filename is matched by this selector.
+    #[must_use]
+    pub fn matches(&self, filename: &str) -> bool {
+        match self {
+            Self::Exact(exact) => filename == exact,
+            Self::Suffix(suffix) => filename.ends_with(suffix),
+            Self::Prefix(prefix) => filename.starts_with(prefix),
+        }
+    }
+
+    /// Returns the exact remote path when this selector is exact.
+    #[must_use]
+    pub fn exact_path(&self) -> Option<&str> {
+        match self {
+            Self::Exact(path) => Some(path),
+            Self::Suffix(_) | Self::Prefix(_) => None,
+        }
+    }
+
+    /// Human-readable selector label used in diagnostics.
+    #[must_use]
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Exact(path) | Self::Suffix(path) | Self::Prefix(path) => path,
+        }
+    }
+}
+
+/// A single file to download from Hugging Face.
+#[derive(Debug, Clone)]
+pub struct ModelFile {
+    /// The logical component this file belongs to.
+    pub component: ModelComponent,
+    /// Hugging Face model repository.
+    pub hf_repo: String,
+    /// Path selector inside the Hugging Face repository.
+    pub selector: ModelFileSelector,
+    /// Expected file size in bytes, when known.
+    pub size_bytes: Option<u64>,
+    /// Whether the source repository is gated.
+    pub gated: bool,
+    /// Expected SHA-256 hex digest. `None` means no digest is pinned yet.
+    pub sha256: Option<&'static str>,
+}
+
+/// A complete model definition: canonical descriptor, runtime metadata, and files.
+#[derive(Debug, Clone)]
+pub struct ModelManifest {
+    /// Canonical model identity and capabilities shared with the rest of Nexo.
+    pub descriptor: ModelDescriptor,
+    /// Loader/runtime backend label.
+    pub backend: String,
+    /// Approximate total download size in gigabytes.
+    pub size_gb: f32,
+    /// Files required for this model.
+    pub files: Vec<ModelFile>,
+}
+
+impl ModelManifest {
+    /// Stable local model id used by `models pull` and storage paths.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        self.descriptor.id.as_str()
+    }
+
+    /// Human-readable display name.
+    #[must_use]
+    pub fn display_name(&self) -> &str {
+        &self.descriptor.display_name
+    }
+}
+
+/// Determine the clean storage path for a remote filename relative to the models directory.
+#[must_use]
+pub fn storage_path(manifest: &ModelManifest, remote_filename: impl AsRef<Path>) -> PathBuf {
+    PathBuf::from(sanitize_model_name(manifest.id())).join(remote_filename)
+}
+
+/// Sanitize a model name for local directory storage.
+#[must_use]
+pub fn sanitize_model_name(model_name: &str) -> String {
+    model_name.replace([':', '/'], "-")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_path_preserves_subdirectories() {
+        let manifest = ModelManifest {
+            descriptor: nexo_core::ModelDescriptor {
+                id: "org/test:model".into(),
+                display_name: "Test model".to_string(),
+                provider: Some("test".to_string()),
+                capabilities: vec![nexo_core::ModelCapability::TextGeneration],
+                modalities: nexo_core::ModelModalities {
+                    input: vec![nexo_core::SupportedModality::Text],
+                    output: vec![nexo_core::SupportedModality::Text],
+                },
+                role_strategy: nexo_core::RoleStrategy::Default,
+                context_window_tokens: None,
+                max_output_tokens: None,
+                metadata: Default::default(),
+            },
+            backend: "candle-gguf".to_string(),
+            size_gb: 1.0,
+            files: Vec::new(),
+        };
+        let file = ModelFile {
+            component: ModelComponent::Weights,
+            hf_repo: "org/test".to_string(),
+            selector: ModelFileSelector::Exact("subdir/model.gguf".to_string()),
+            size_bytes: Some(1),
+            gated: false,
+            sha256: None,
+        };
+
+        assert_eq!(
+            storage_path(&manifest, file.selector.exact_path().unwrap_or_default()),
+            PathBuf::from("org-test-model/subdir/model.gguf")
+        );
+    }
+}

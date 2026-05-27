@@ -7,7 +7,7 @@ edition = "2024"
 clap = ["dep:clap"]
 
 [dependencies]
-nexo-spec = { workspace = true, features = ["schema"] }
+nexo-core = { workspace = true, features = ["schema"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 schemars = { workspace = true }

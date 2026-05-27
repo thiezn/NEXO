@@ -4,8 +4,8 @@ members = [
     "nexo-tools/plugins/game-extractor",
     "shared/nexo-ws-schema",
     "shared/nexo-ws-client",
-    "shared/nexo-spec",
     "shared/nexo-core",
+    "shared/nexo-model-mgmt",
     "nexo-gateway",
     "nexo-node",
     "nexo-client",
@@ -13,15 +13,13 @@ members = [
     "nexo-tools/nexo-io",
     "nexo-ai",
     "integration-tests",
-    "testmlxrs",
-
 ]
 
 resolver = "3"
 
 [workspace.dependencies]
 cli-helpers = { git = "https://github.com/thiezn/my-crates" }
-nexo-spec = { path = "shared/nexo-spec" }
+nexo-core = { path = "shared/nexo-core" }
 nexo-ws-client = { path = "shared/nexo-ws-client" }
 nexo-ws-schema = { path = "shared/nexo-ws-schema" }
 
@@ -60,8 +58,6 @@ panic = "warn"
 [profile.dev.package.candle-core]
 opt-level = 3
 [profile.dev.package.candle-nn]
-opt-level = 3
-[profile.dev.package.candle-transformers]
 opt-level = 3
 [profile.dev.package.candle-metal-kernels]
 opt-level = 3

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -7,15 +7,16 @@ use futures_util::{StreamExt, stream};
 use mistralrs_core::{
     AddModelConfig, AutoDeviceMapParams, DefaultSchedulerMethod, DeviceMapSetting,
     EngineConfig as MistralEngineConfig, GGUFLoaderBuilder, GGUFSpecificConfig, LoaderBuilder,
-    MistralRs, MistralRsBuilder, ModelSelected, ModelStatus, Request,
-    SchedulerConfig as MistralSchedulerConfig, TokenSource, get_auto_device_map_params,
-    get_model_dtype,
+    MistralRs, MistralRsBuilder, ModelPaths, ModelSelected, ModelStatus, Request,
+    SchedulerConfig as MistralSchedulerConfig, TokenSource, UQFF_MULTI_FILE_DELIMITER,
+    get_auto_device_map_params, get_model_dtype,
 };
 use nexo_core::inference::request::{EmbedRequest, GenerateRequest};
 use nexo_core::{
     DetokenizationRequest, InferenceRequest, InferenceResponse, InferenceStream, ModelDescriptor,
     ModelId, ModelRuntimeState, TokenUsage, TokenizationRequest,
 };
+use nexo_model_mgmt::resolve_model_storage_dir;
 use tokio::sync::mpsc;
 
 use crate::config::{
@@ -349,29 +350,31 @@ fn build_pipeline(
     device: &Device,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
     match &model.loader {
-        ModelLoader::Auto(loader) => {
-            build_auto_pipeline(loader, &model.revision, runtime_config, device)
-        }
-        ModelLoader::Gguf(loader) => {
-            build_gguf_pipeline(loader, &model.revision, runtime_config, device)
-        }
+        ModelLoader::Auto(loader) => build_auto_pipeline(loader, runtime_config, device),
+        ModelLoader::Gguf(loader) => build_gguf_pipeline(loader, runtime_config, device),
     }
 }
 
 fn build_auto_pipeline(
     loader: &AutoModelLoader,
-    revision: &Option<String>,
     runtime_config: &RuntimeConfig,
     device: &Device,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
+    let model_dir = resolve_model_storage_dir(&loader.model_id);
+    let from_uqff = resolve_uqff_selection(&model_dir, loader.from_uqff.as_deref())?;
+    let selected_model_id = if from_uqff.is_some() {
+        model_dir.to_string_lossy().into_owned()
+    } else {
+        loader.model_id.clone()
+    };
     let selected = ModelSelected::Run {
-        model_id: loader.model_id.clone(),
+        model_id: selected_model_id,
         tokenizer_json: path_to_string(loader.tokenizer_json.as_ref()),
         dtype: map_dtype(loader.dtype),
         topology: None,
         organization: None,
         write_uqff: None,
-        from_uqff: None,
+        from_uqff,
         imatrix: None,
         calibration_file: None,
         max_edge: None,
@@ -401,10 +404,28 @@ fn build_auto_pipeline(
             message: error.to_string(),
         })?;
 
+    if selected_uses_uqff(&selected) {
+        return built_loader
+            .load_model_from_hf(
+                None,
+                TokenSource::None,
+                &dtype,
+                device,
+                true,
+                DeviceMapSetting::Auto(device_map),
+                None,
+                None,
+            )
+            .map_err(|error| Error::MistralRuntime {
+                message: error.to_string(),
+            });
+    }
+
+    let local_paths = build_auto_model_paths(loader)?;
+
     built_loader
-        .load_model_from_hf(
-            revision.clone(),
-            TokenSource::CacheToken,
+        .load_model_from_path(
+            &local_paths,
             &dtype,
             device,
             true,
@@ -419,7 +440,6 @@ fn build_auto_pipeline(
 
 fn build_gguf_pipeline(
     loader: &GgufModelLoader,
-    revision: &Option<String>,
     runtime_config: &RuntimeConfig,
     device: &Device,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
@@ -434,10 +454,11 @@ fn build_gguf_pipeline(
     )
     .build();
 
+    let local_paths = build_gguf_model_paths(loader)?;
+
     built_loader
-        .load_model_from_hf(
-            revision.clone(),
-            TokenSource::CacheToken,
+        .load_model_from_path(
+            &local_paths,
             &map_dtype(loader.dtype),
             device,
             true,
@@ -448,6 +469,226 @@ fn build_gguf_pipeline(
         .map_err(|error| Error::MistralRuntime {
             message: error.to_string(),
         })
+}
+
+fn selected_uses_uqff(selected: &ModelSelected) -> bool {
+    matches!(
+        selected,
+        ModelSelected::Run {
+            from_uqff: Some(_),
+            ..
+        }
+    )
+}
+
+fn resolve_uqff_selection(
+    model_dir: &Path,
+    explicit: Option<&[PathBuf]>,
+) -> Result<Option<String>> {
+    let files = if let Some(files) = explicit {
+        files
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+    } else if model_dir.exists() {
+        discover_local_uqff_files(model_dir)?
+    } else {
+        Vec::new()
+    };
+
+    if files.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(files.join(UQFF_MULTI_FILE_DELIMITER)))
+    }
+}
+
+fn discover_local_uqff_files(model_dir: &Path) -> Result<Vec<String>> {
+    let entries = std::fs::read_dir(model_dir).map_err(|error| Error::MistralRuntime {
+        message: format!(
+            "failed to read local model directory `{}`: {error}",
+            model_dir.display()
+        ),
+    })?;
+    let mut files = Vec::new();
+
+    for entry in entries {
+        let entry = entry.map_err(|error| Error::MistralRuntime {
+            message: format!(
+                "failed to read local model directory entry under `{}`: {error}",
+                model_dir.display()
+            ),
+        })?;
+        let path = entry.path();
+        if is_uqff_file(&path)
+            && let Some(filename) = path.file_name().and_then(|filename| filename.to_str())
+        {
+            files.push(filename.to_string());
+        }
+    }
+
+    files.sort();
+    Ok(files)
+}
+
+fn build_auto_model_paths(loader: &AutoModelLoader) -> Result<Box<dyn ModelPaths>> {
+    let model_dir = resolve_model_storage_dir(&loader.model_id);
+    let tokenizer_filename = loader
+        .tokenizer_json
+        .clone()
+        .or_else(|| first_existing(&model_dir, &["tokenizer.json", "tekken.json"]))
+        .ok_or_else(|| missing_local_file(&model_dir, "tokenizer.json or tekken.json"))?;
+    let config_filename = first_existing(&model_dir, &["params.json", "config.json"])
+        .ok_or_else(|| missing_local_file(&model_dir, "params.json or config.json"))?;
+    let filenames = collect_weight_files(&model_dir, &[])?;
+
+    Ok(Box::new(mistralrs_core::LocalModelPaths {
+        tokenizer_filename,
+        config_filename,
+        template_filename: loader.chat_template.clone().or_else(|| {
+            first_existing(
+                &model_dir,
+                &["chat_template.jinja", "tokenizer_config.json"],
+            )
+        }),
+        filenames,
+        adapter_paths: mistralrs_core::AdapterPaths::None,
+        gen_conf: first_existing(&model_dir, &["generation_config.json"]),
+        preprocessor_config: first_existing(&model_dir, &["preprocessor_config.json"]),
+        processor_config: first_existing(&model_dir, &["processor_config.json"]),
+        chat_template_json_filename: loader
+            .jinja_explicit
+            .clone()
+            .or_else(|| first_existing(&model_dir, &["chat_template.json"])),
+    }))
+}
+
+fn build_gguf_model_paths(loader: &GgufModelLoader) -> Result<Box<dyn ModelPaths>> {
+    let model_dir = resolve_model_storage_dir(&loader.quantized_model_id);
+    let filenames = loader
+        .quantized_filenames
+        .iter()
+        .map(|filename| resolve_local_file(&model_dir, filename))
+        .collect::<Result<Vec<_>>>()?;
+    let tokenizer_dir = loader
+        .tokenizer_model_id
+        .as_ref()
+        .map(|model_id| resolve_model_storage_dir(model_id))
+        .unwrap_or_else(|| model_dir.clone());
+
+    Ok(Box::new(mistralrs_core::LocalModelPaths {
+        tokenizer_filename: first_existing(&tokenizer_dir, &["tokenizer.json"]).unwrap_or_default(),
+        config_filename: first_existing(&tokenizer_dir, &["config.json"]).unwrap_or_default(),
+        template_filename: loader.chat_template.clone().or_else(|| {
+            first_existing(
+                &tokenizer_dir,
+                &["chat_template.jinja", "tokenizer_config.json"],
+            )
+        }),
+        filenames,
+        adapter_paths: mistralrs_core::AdapterPaths::None,
+        gen_conf: first_existing(&tokenizer_dir, &["generation_config.json"]),
+        preprocessor_config: first_existing(&tokenizer_dir, &["preprocessor_config.json"]),
+        processor_config: first_existing(&tokenizer_dir, &["processor_config.json"]),
+        chat_template_json_filename: loader
+            .jinja_explicit
+            .clone()
+            .or_else(|| first_existing(&tokenizer_dir, &["chat_template.json"])),
+    }))
+}
+
+fn collect_weight_files(model_dir: &Path, explicit_filenames: &[String]) -> Result<Vec<PathBuf>> {
+    if !explicit_filenames.is_empty() {
+        return explicit_filenames
+            .iter()
+            .map(|filename| resolve_local_file(model_dir, filename))
+            .collect();
+    }
+
+    let mut files = Vec::new();
+    collect_weight_files_recursive(model_dir, &mut files)?;
+    files.sort();
+
+    if files.is_empty() {
+        return Err(Error::MistralRuntime {
+            message: format!(
+                "no local model weight files found under `{}`; run `nexo-ai models pull <model>` first",
+                model_dir.display()
+            ),
+        });
+    }
+
+    Ok(files)
+}
+
+fn collect_weight_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> Result {
+    let entries = std::fs::read_dir(dir).map_err(|error| Error::MistralRuntime {
+        message: format!(
+            "failed to read local model directory `{}`: {error}",
+            dir.display()
+        ),
+    })?;
+
+    for entry in entries {
+        let entry = entry.map_err(|error| Error::MistralRuntime {
+            message: format!(
+                "failed to read local model directory entry under `{}`: {error}",
+                dir.display()
+            ),
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_weight_files_recursive(&path, files)?;
+        } else if is_weight_file(&path) {
+            files.push(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_local_file(model_dir: &Path, filename: &str) -> Result<PathBuf> {
+    let path = Path::new(filename);
+    let resolved = if path.is_absolute() || path.exists() {
+        path.to_path_buf()
+    } else {
+        model_dir.join(path)
+    };
+
+    if resolved.exists() {
+        Ok(resolved)
+    } else {
+        Err(missing_local_file(model_dir, filename))
+    }
+}
+
+fn first_existing(model_dir: &Path, filenames: &[&str]) -> Option<PathBuf> {
+    filenames
+        .iter()
+        .map(|filename| model_dir.join(filename))
+        .find(|path| path.exists())
+}
+
+fn is_weight_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "safetensors" | "bin" | "pth" | "pt"))
+}
+
+fn is_uqff_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension == "uqff")
+}
+
+fn missing_local_file(model_dir: &Path, filename: &str) -> Error {
+    Error::MistralRuntime {
+        message: format!(
+            "missing local model file `{}` under `{}`; run `nexo-ai models pull <model>` first",
+            filename,
+            model_dir.display()
+        ),
+    }
 }
 
 fn resolve_device(device: DeviceSpec) -> Result<Device> {

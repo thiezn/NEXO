@@ -37,47 +37,24 @@ pub fn write_result(
     // Remove existing output directory if it exists
     if output_dir.exists() {
         tracing::debug!("Removing existing output dir: {}", output_dir.display());
-        std::fs::remove_dir_all(&output_dir).map_err(|e| {
-            cli_helpers::Error::Io(format!(
-                "Failed to remove existing dir '{}': {e}",
-                output_dir.display()
-            ))
-        })?;
+        std::fs::remove_dir_all(&output_dir)?;
     }
 
-    std::fs::create_dir_all(&output_dir).map_err(|e| {
-        cli_helpers::Error::Io(format!(
-            "Failed to create output dir '{}': {e}",
-            output_dir.display()
-        ))
-    })?;
+    std::fs::create_dir_all(&output_dir)?;
 
     let json_path = output_dir.join("book.json");
-    let file = std::fs::File::create(&json_path).map_err(|e| {
-        cli_helpers::Error::Io(format!("Failed to create '{}': {e}", json_path.display()))
-    })?;
-    serde_json::to_writer_pretty(BufWriter::new(file), &result.output)
-        .map_err(|e| cli_helpers::Error::Other(format!("JSON serialization: {e}")))?;
+    let file = std::fs::File::create(&json_path)?;
+    serde_json::to_writer_pretty(BufWriter::new(file), &result.output)?;
 
     tracing::debug!("Wrote {}", json_path.display());
 
     if image_mode == ImageMode::Files && !result.image_data.is_empty() {
         let images_dir = output_dir.join("images");
-        std::fs::create_dir_all(&images_dir).map_err(|e| {
-            cli_helpers::Error::Io(format!(
-                "Failed to create images dir '{}': {e}",
-                images_dir.display()
-            ))
-        })?;
+        std::fs::create_dir_all(&images_dir)?;
 
         for (filename, data) in &result.image_data {
             let img_path = images_dir.join(filename);
-            std::fs::write(&img_path, data).map_err(|e| {
-                cli_helpers::Error::Io(format!(
-                    "Failed to write image '{}': {e}",
-                    img_path.display()
-                ))
-            })?;
+            std::fs::write(&img_path, data)?;
         }
 
         tracing::debug!(
