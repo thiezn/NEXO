@@ -1,19 +1,31 @@
 /// Programming language classification for comment-aware filtering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
+    /// Rust source files.
     Rust,
+    /// Python source files.
     Python,
+    /// JavaScript source files.
     JavaScript,
+    /// TypeScript source files.
     TypeScript,
+    /// Go source files.
     Go,
+    /// C source or header files.
     C,
+    /// C++ source or header files.
     Cpp,
+    /// Java source files.
     Java,
+    /// Ruby source files.
     Ruby,
+    /// Shell scripts.
     Shell,
+    /// Swift source files.
     Swift,
     /// Data formats (JSON, YAML, TOML, XML, CSV, etc.) — no comment stripping.
     Data,
+    /// Unknown or unsupported file types.
     Unknown,
 }
 
@@ -103,10 +115,15 @@ impl Language {
 /// Comment syntax patterns for a specific language.
 #[derive(Debug, Clone)]
 pub struct CommentPatterns {
+    /// Prefix for single-line comments.
     pub line: Option<&'static str>,
+    /// Prefix for block comment start marker.
     pub block_start: Option<&'static str>,
+    /// Suffix for block comment end marker.
     pub block_end: Option<&'static str>,
+    /// Prefix for single-line documentation comments.
     pub doc_line: Option<&'static str>,
+    /// Prefix for block documentation comments.
     pub doc_block_start: Option<&'static str>,
 }
 

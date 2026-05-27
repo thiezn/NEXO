@@ -1,91 +1,172 @@
-use std::sync::Arc;
+use std::collections::BTreeMap;
 
-use async_trait::async_trait;
-use nexo_core::tool::{Tool, ToolResult};
+use nexo_core::{
+    Error, ToolCall, ToolDefinition, ToolExecutionConstraints, ToolExecutor, ToolParallelism,
+    ToolResult, ToolResultContent, ToolResultStatus, ToolSideEffectLevel,
+};
 
 use crate::transform;
 
 /// Return all IO tools for gateway-native registration.
-///
-/// Unlike nexo-notes, these tools operate on the local filesystem and network
-/// directly — no storage dependency needed.
-pub fn all_tools() -> Vec<Arc<dyn Tool>> {
+pub fn all_tools() -> Vec<ToolDefinition> {
     vec![
-        Arc::new(IoRead),
-        Arc::new(IoEdit),
-        Arc::new(IoBash),
-        Arc::new(IoWebFetch {
+        ToolDefinition {
+            name: "io.read".to_string(),
+            description: "Read a file from the local filesystem. Returns file content with optional offset/limit for partial reads. Applies language-aware filtering to strip comments and normalize formatting.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path to read"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Line number to start reading from (0-indexed)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of lines to return"
+                    }
+                },
+                "required": ["path"]
+            }),
+            contract_version: None,
+            execution: ToolExecutionConstraints {
+                side_effect_level: ToolSideEffectLevel::ReadOnly,
+                parallelism: ToolParallelism::ParallelGlobal,
+                timeout_ms: None,
+            },
+            metadata: BTreeMap::new(),
+        },
+        ToolDefinition {
+            name: "io.edit".to_string(),
+            description: "Edit an existing file or create a new file. For editing: provide path, old_string (text to find), and new_string (replacement). For creating: provide path and content.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path to edit or create"
+                    },
+                    "old_string": {
+                        "type": "string",
+                        "description": "Text to find and replace (omit for file creation)"
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "Replacement text (used with old_string)"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full file content (for creating new files)"
+                    }
+                },
+                "required": ["path"]
+            }),
+            contract_version: None,
+            execution: ToolExecutionConstraints {
+                side_effect_level: ToolSideEffectLevel::SideEffecting,
+                parallelism: ToolParallelism::Sequential,
+                timeout_ms: None,
+            },
+            metadata: BTreeMap::new(),
+        },
+        ToolDefinition {
+            name: "io.bash".to_string(),
+            description: "Execute a bash command on the gateway host. Returns stdout, stderr, and exit code. Output is cleaned (ANSI stripped) and truncated if very large.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Bash command to execute"
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "description": "Timeout in milliseconds (default: 30000, max: 120000)"
+                    }
+                },
+                "required": ["command"]
+            }),
+            contract_version: None,
+            execution: ToolExecutionConstraints {
+                side_effect_level: ToolSideEffectLevel::SideEffecting,
+                parallelism: ToolParallelism::Sequential,
+                timeout_ms: Some(120_000),
+            },
+            metadata: BTreeMap::new(),
+        },
+        ToolDefinition {
+            name: "io.web_fetch".to_string(),
+            description: "Fetch a web page or API endpoint. HTML responses are converted to readable markdown. JSON responses are compacted. Plain text is returned as-is.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL to fetch"
+                    }
+                },
+                "required": ["url"]
+            }),
+            contract_version: None,
+            execution: ToolExecutionConstraints {
+                side_effect_level: ToolSideEffectLevel::ReadOnly,
+                parallelism: ToolParallelism::ParallelGlobal,
+                timeout_ms: Some(30_000),
+            },
+            metadata: BTreeMap::new(),
+        },
+    ]
+}
+
+/// Executes `io.*` tools against local filesystem, shell, and HTTP endpoints.
+pub struct IoToolExecutor {
+    client: reqwest::Client,
+}
+
+impl IoToolExecutor {
+    /// Create a new IO tool executor with a default HTTP client.
+    ///
+    /// The internal client uses a 30-second timeout and a `nexo-io/0.1`
+    /// user-agent string for remote fetch operations.
+    pub fn new() -> Self {
+        Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .user_agent("nexo-io/0.1")
                 .build()
                 .expect("valid HTTP client config"),
-        }),
-    ]
-}
-
-// ── io.read ───────────────────────────────────────────────────────────────────
-
-struct IoRead;
-
-#[async_trait]
-impl Tool for IoRead {
-    fn name(&self) -> &str {
-        "io.read"
+        }
     }
 
-    fn description(&self) -> &str {
-        "Read a file from the local filesystem. Returns file content with optional \
-         offset/limit for partial reads. Applies language-aware filtering to strip \
-         comments and normalize formatting."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path to read"
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "Line number to start reading from (0-indexed)"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of lines to return"
-                }
-            },
-            "required": ["path"]
-        })
-    }
-
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        let path = args
+    async fn execute_read(&self, call: ToolCall) -> nexo_core::Result<ToolResult> {
+        let path = call
+            .arguments
             .get("path")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("missing required parameter: path"))?
+            .ok_or_else(|| Error::InvalidRequest {
+                message: "missing required parameter: path".to_string(),
+            })?
             .to_string();
-        let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let limit = args
+        let offset = call
+            .arguments
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        let limit = call
+            .arguments
             .get("limit")
             .and_then(|v| v.as_u64())
             .map(|v| v as usize);
 
-        tokio::task::spawn_blocking(move || {
+        let outcome = tokio::task::spawn_blocking(move || {
             let content = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
-                Err(e) => {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some(format!("Failed to read {path}: {e}")),
-                    });
-                }
+                Err(e) => return Err(format!("Failed to read {path}: {e}")),
             };
 
-            // Detect language and apply minimal filter
             let lang = std::path::Path::new(&path)
                 .extension()
                 .and_then(|e| e.to_str())
@@ -93,244 +174,134 @@ impl Tool for IoRead {
                 .unwrap_or(transform::code_filter::Language::Unknown);
 
             let mut filtered = transform::code_filter::minimal_filter(&content, &lang);
-
-            // Safety: if filter emptied a non-empty file, fall back to raw
             if filtered.trim().is_empty() && !content.trim().is_empty() {
                 filtered = content;
             }
 
-            // Apply offset/limit
             let lines: Vec<&str> = filtered.lines().collect();
             let start = offset.min(lines.len());
             let end = match limit {
                 Some(lim) => (start + lim).min(lines.len()),
                 None => lines.len(),
             };
+
             let sliced = lines[start..end].join("\n");
-
-            // Strip any ANSI codes
-            let output = transform::ansi::strip_ansi(&sliced);
-
-            Ok(ToolResult {
-                success: true,
-                output,
-                error: None,
-            })
+            Ok(transform::ansi::strip_ansi(&sliced))
         })
-        .await?
-    }
-}
+        .await
+        .map_err(|e| Error::InvalidState {
+            message: format!("io.read join error: {e}"),
+        })?;
 
-// ── io.edit ───────────────────────────────────────────────────────────────────
-
-struct IoEdit;
-
-#[async_trait]
-impl Tool for IoEdit {
-    fn name(&self) -> &str {
-        "io.edit"
-    }
-
-    fn description(&self) -> &str {
-        "Edit an existing file or create a new file. For editing: provide path, \
-         old_string (text to find), and new_string (replacement). For creating: \
-         provide path and content."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path to edit or create"
-                },
-                "old_string": {
-                    "type": "string",
-                    "description": "Text to find and replace (omit for file creation)"
-                },
-                "new_string": {
-                    "type": "string",
-                    "description": "Replacement text (used with old_string)"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Full file content (for creating new files)"
-                }
-            },
-            "required": ["path"]
+        Ok(match outcome {
+            Ok(output) => ok_text(call, output),
+            Err(message) => fail_text(call, message),
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        let path = args
+    async fn execute_edit(&self, call: ToolCall) -> nexo_core::Result<ToolResult> {
+        let path = call
+            .arguments
             .get("path")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("missing required parameter: path"))?
+            .ok_or_else(|| Error::InvalidRequest {
+                message: "missing required parameter: path".to_string(),
+            })?
             .to_string();
-        let old_string = args
+        let old_string = call
+            .arguments
             .get("old_string")
             .and_then(|v| v.as_str())
             .map(String::from);
-        let new_string = args
+        let new_string = call
+            .arguments
             .get("new_string")
             .and_then(|v| v.as_str())
             .map(String::from);
-        let content = args
+        let content = call
+            .arguments
             .get("content")
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        tokio::task::spawn_blocking(move || {
+        let outcome = tokio::task::spawn_blocking(move || {
             let p = std::path::Path::new(&path);
 
-            // Create mode: content present, no old_string
             if let Some(content) = content {
                 if old_string.is_some() {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some(
-                            "Cannot use both 'content' (create) and 'old_string' (edit) simultaneously"
-                                .into(),
-                        ),
-                    });
+                    return Err("Cannot use both 'content' (create) and 'old_string' (edit) simultaneously".to_string());
                 }
-                if let Some(parent) = p.parent() {
-                    if let Err(e) = std::fs::create_dir_all(parent) {
-                        return Ok(ToolResult {
-                            success: false,
-                            output: String::new(),
-                            error: Some(format!("Failed to create directory: {e}")),
-                        });
-                    }
+
+                if let Some(parent) = p.parent()
+                    && let Err(e) = std::fs::create_dir_all(parent)
+                {
+                    return Err(format!("Failed to create directory: {e}"));
                 }
+
                 if let Err(e) = std::fs::write(p, &content) {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some(format!("Failed to write {path}: {e}")),
-                    });
+                    return Err(format!("Failed to write {path}: {e}"));
                 }
-                return Ok(ToolResult {
-                    success: true,
-                    output: format!("Created {path} ({} bytes)", content.len()),
-                    error: None,
-                });
+
+                return Ok(format!("Created {path} ({} bytes)", content.len()));
             }
 
-            // Edit mode: old_string present
             if let Some(old_string) = old_string {
                 let new_string = new_string.unwrap_or_default();
+                let file_content =
+                    std::fs::read_to_string(p).map_err(|e| format!("Failed to read {path}: {e}"))?;
 
-                let file_content = match std::fs::read_to_string(p) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        return Ok(ToolResult {
-                            success: false,
-                            output: String::new(),
-                            error: Some(format!("Failed to read {path}: {e}")),
-                        });
-                    }
-                };
+                let pos = file_content
+                    .find(&old_string)
+                    .ok_or_else(|| "old_string not found in file".to_string())?;
 
-                let pos = match file_content.find(&old_string) {
-                    Some(p) => p,
-                    None => {
-                        return Ok(ToolResult {
-                            success: false,
-                            output: String::new(),
-                            error: Some("old_string not found in file".into()),
-                        });
-                    }
-                };
-
-                // Check for a second occurrence
                 if file_content[pos + old_string.len()..].contains(&old_string) {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some(
-                            "old_string found multiple times; provide more surrounding context for a unique match"
-                                .into(),
-                        ),
-                    });
+                    return Err(
+                        "old_string found multiple times; provide more surrounding context for a unique match"
+                            .to_string(),
+                    );
                 }
 
-                let mut updated = String::with_capacity(
-                    file_content.len() - old_string.len() + new_string.len(),
-                );
+                let mut updated =
+                    String::with_capacity(file_content.len() - old_string.len() + new_string.len());
                 updated.push_str(&file_content[..pos]);
                 updated.push_str(&new_string);
                 updated.push_str(&file_content[pos + old_string.len()..]);
+
                 if let Err(e) = std::fs::write(p, &updated) {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some(format!("Failed to write {path}: {e}")),
-                    });
+                    return Err(format!("Failed to write {path}: {e}"));
                 }
 
-                return Ok(ToolResult {
-                    success: true,
-                    output: format!("Edited {path}: replaced 1 occurrence"),
-                    error: None,
-                });
+                return Ok(format!("Edited {path}: replaced 1 occurrence"));
             }
 
-            // Neither mode
-            Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(
-                    "Provide either 'content' (to create a file) or 'old_string' (to edit a file)"
-                        .into(),
-                ),
-            })
+            Err(
+                "Provide either 'content' (to create a file) or 'old_string' (to edit a file)"
+                    .to_string(),
+            )
         })
-        .await?
-    }
-}
+        .await
+        .map_err(|e| Error::InvalidState {
+            message: format!("io.edit join error: {e}"),
+        })?;
 
-// ── io.bash ───────────────────────────────────────────────────────────────────
-
-struct IoBash;
-
-#[async_trait]
-impl Tool for IoBash {
-    fn name(&self) -> &str {
-        "io.bash"
-    }
-
-    fn description(&self) -> &str {
-        "Execute a bash command on the gateway host. Returns stdout, stderr, and exit code. \
-         Output is cleaned (ANSI stripped) and truncated if very large."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "Bash command to execute"
-                },
-                "timeout_ms": {
-                    "type": "integer",
-                    "description": "Timeout in milliseconds (default: 30000, max: 120000)"
-                }
-            },
-            "required": ["command"]
+        Ok(match outcome {
+            Ok(output) => ok_text(call, output),
+            Err(message) => fail_text(call, message),
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        let command = args
+    async fn execute_bash(&self, call: ToolCall) -> nexo_core::Result<ToolResult> {
+        let command = call
+            .arguments
             .get("command")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("missing required parameter: command"))?
+            .ok_or_else(|| Error::InvalidRequest {
+                message: "missing required parameter: command".to_string(),
+            })?
             .to_string();
-        let timeout_ms = args
+
+        let timeout_ms = call
+            .arguments
             .get("timeout_ms")
             .and_then(|v| v.as_u64())
             .unwrap_or(30_000)
@@ -350,15 +321,11 @@ impl Tool for IoBash {
         })
         .await;
 
-        match result {
+        Ok(match result {
             Ok(Ok(output)) => {
                 let exit_code = output.status.code().unwrap_or(-1);
-                let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-
-                let stdout = transform::ansi::strip_ansi(&stdout);
-                let stderr = transform::ansi::strip_ansi(&stderr);
-
+                let stdout = transform::ansi::strip_ansi(&String::from_utf8_lossy(&output.stdout));
+                let stderr = transform::ansi::strip_ansi(&String::from_utf8_lossy(&output.stderr));
                 let stdout = transform::truncate::truncate_lines(&stdout, 500);
                 let stderr = transform::truncate::truncate_lines(&stderr, 500);
 
@@ -375,81 +342,35 @@ impl Tool for IoBash {
                     out.push_str(&stderr);
                 }
 
-                Ok(ToolResult {
-                    success: exit_code == 0,
-                    output: out,
-                    error: None,
-                })
-            }
-            Ok(Err(e)) => Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("Failed to execute command: {e}")),
-            }),
-            Err(_) => Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("Command timed out after {timeout_ms}ms")),
-            }),
-        }
-    }
-}
-
-// ── io.web_fetch ──────────────────────────────────────────────────────────────
-
-struct IoWebFetch {
-    client: reqwest::Client,
-}
-
-#[async_trait]
-impl Tool for IoWebFetch {
-    fn name(&self) -> &str {
-        "io.web_fetch"
-    }
-
-    fn description(&self) -> &str {
-        "Fetch a web page or API endpoint. HTML responses are converted to readable \
-         markdown. JSON responses are compacted. Plain text is returned as-is."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "URL to fetch"
+                if exit_code == 0 {
+                    ok_text(call, out)
+                } else {
+                    fail_text(call, out)
                 }
-            },
-            "required": ["url"]
+            }
+            Ok(Err(e)) => fail_text(call, format!("Failed to execute command: {e}")),
+            Err(_) => fail_text(call, format!("Command timed out after {timeout_ms}ms")),
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        let url = args
+    async fn execute_web_fetch(&self, call: ToolCall) -> nexo_core::Result<ToolResult> {
+        let url = call
+            .arguments
             .get("url")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("missing required parameter: url"))?
+            .ok_or_else(|| Error::InvalidRequest {
+                message: "missing required parameter: url".to_string(),
+            })?
             .to_string();
 
         let response = match self.client.get(&url).send().await {
             Ok(r) => r,
-            Err(e) => {
-                return Ok(ToolResult {
-                    success: false,
-                    output: String::new(),
-                    error: Some(format!("Request failed: {e}")),
-                });
-            }
+            Err(e) => return Ok(fail_text(call, format!("Request failed: {e}"))),
         };
 
         let status = response.status();
         if !status.is_success() {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("HTTP {status}")),
-            });
+            return Ok(fail_text(call, format!("HTTP {status}")));
         }
 
         let content_type = response
@@ -462,11 +383,10 @@ impl Tool for IoWebFetch {
         let body = match response.text().await {
             Ok(b) => b,
             Err(e) => {
-                return Ok(ToolResult {
-                    success: false,
-                    output: String::new(),
-                    error: Some(format!("Failed to read response body: {e}")),
-                });
+                return Ok(fail_text(
+                    call,
+                    format!("Failed to read response body: {e}"),
+                ));
             }
         };
 
@@ -482,11 +402,45 @@ impl Tool for IoWebFetch {
             transform::truncate::truncate_lines(&body, 500)
         };
 
-        Ok(ToolResult {
-            success: true,
-            output,
-            error: None,
-        })
+        Ok(ok_text(call, output))
+    }
+}
+
+impl Default for IoToolExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ToolExecutor for IoToolExecutor {
+    async fn execute(&self, call: ToolCall) -> nexo_core::Result<ToolResult> {
+        match call.name.as_str() {
+            "io.read" => self.execute_read(call).await,
+            "io.edit" => self.execute_edit(call).await,
+            "io.bash" => self.execute_bash(call).await,
+            "io.web_fetch" => self.execute_web_fetch(call).await,
+            _ => Err(Error::UnsupportedFeature {
+                feature: format!("unknown tool: {}", call.name),
+            }),
+        }
+    }
+}
+
+fn ok_text(call: ToolCall, output: String) -> ToolResult {
+    ToolResult {
+        tool_call_id: call.id,
+        tool_name: call.name,
+        status: ToolResultStatus::Success,
+        content: ToolResultContent::Text(output),
+    }
+}
+
+fn fail_text(call: ToolCall, message: String) -> ToolResult {
+    ToolResult {
+        tool_call_id: call.id,
+        tool_name: call.name,
+        status: ToolResultStatus::Failure,
+        content: ToolResultContent::Text(message),
     }
 }
 
@@ -495,53 +449,71 @@ impl Tool for IoWebFetch {
 mod tests {
     use super::*;
 
+    fn call(name: &str, args: serde_json::Value) -> ToolCall {
+        ToolCall {
+            id: "tc-1".into(),
+            index: 0,
+            name: name.to_string(),
+            arguments: args,
+        }
+    }
+
+    fn text_output(result: &ToolResult) -> &str {
+        match &result.content {
+            ToolResultContent::Text(value) => value.as_str(),
+            ToolResultContent::Json(_) => panic!("expected text output"),
+        }
+    }
+
     #[tokio::test]
     async fn read_nonexistent_file() {
-        let tools = all_tools();
-        let read = tools.iter().find(|t| t.name() == "io.read").unwrap();
-        let result = read
-            .execute(serde_json::json!({"path": "/nonexistent/file.txt"}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.read",
+                serde_json::json!({"path": "/nonexistent/file.txt"}),
+            ))
             .await
             .unwrap();
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("Failed to read"));
+        assert_eq!(result.status, ToolResultStatus::Failure);
+        assert!(text_output(&result).contains("Failed to read"));
     }
 
     #[tokio::test]
     async fn read_real_file() {
-        let tools = all_tools();
-        let read = tools.iter().find(|t| t.name() == "io.read").unwrap();
-        let result = read
-            .execute(serde_json::json!({"path": "/etc/hosts"}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call("io.read", serde_json::json!({"path": "/etc/hosts"})))
             .await
             .unwrap();
-        assert!(result.success);
-        assert!(!result.output.is_empty());
+        assert_eq!(result.status, ToolResultStatus::Success);
+        assert!(!text_output(&result).is_empty());
     }
 
     #[tokio::test]
     async fn read_with_offset_limit() {
-        // Create a temp file
         let dir = std::env::temp_dir().join("nexo-io-test-read");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("lines.txt");
         std::fs::write(&path, "line0\nline1\nline2\nline3\nline4\n").unwrap();
 
-        let tools = all_tools();
-        let read = tools.iter().find(|t| t.name() == "io.read").unwrap();
-        let result = read
-            .execute(serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "offset": 1,
-                "limit": 2
-            }))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.read",
+                serde_json::json!({
+                    "path": path.to_str().unwrap(),
+                    "offset": 1,
+                    "limit": 2
+                }),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
-        assert!(result.output.contains("line1"));
-        assert!(result.output.contains("line2"));
-        assert!(!result.output.contains("line0"));
-        assert!(!result.output.contains("line3"));
+        assert_eq!(result.status, ToolResultStatus::Success);
+        assert!(text_output(&result).contains("line1"));
+        assert!(text_output(&result).contains("line2"));
+        assert!(!text_output(&result).contains("line0"));
+        assert!(!text_output(&result).contains("line3"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -550,21 +522,18 @@ mod tests {
     async fn edit_create_file() {
         let dir = std::env::temp_dir().join("nexo-io-test-create");
         let path = dir.join("new.txt");
-
-        // Clean up from previous runs
         std::fs::remove_dir_all(&dir).ok();
 
-        let tools = all_tools();
-        let edit = tools.iter().find(|t| t.name() == "io.edit").unwrap();
-        let result = edit
-            .execute(serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "content": "hello world"
-            }))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.edit",
+                serde_json::json!({"path": path.to_str().unwrap(), "content": "hello world"}),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
-        assert!(result.output.contains("Created"));
+        assert_eq!(result.status, ToolResultStatus::Success);
+        assert!(text_output(&result).contains("Created"));
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "hello world");
@@ -579,17 +548,15 @@ mod tests {
         let path = dir.join("edit.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
 
-        let tools = all_tools();
-        let edit = tools.iter().find(|t| t.name() == "io.edit").unwrap();
-        let result = edit
-            .execute(serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "old_string": "bar",
-                "new_string": "qux"
-            }))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.edit",
+                serde_json::json!({"path": path.to_str().unwrap(), "old_string": "bar", "new_string": "qux"}),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
+        assert_eq!(result.status, ToolResultStatus::Success);
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "foo qux baz");
@@ -604,18 +571,16 @@ mod tests {
         let path = dir.join("dup.txt");
         std::fs::write(&path, "aa bb aa").unwrap();
 
-        let tools = all_tools();
-        let edit = tools.iter().find(|t| t.name() == "io.edit").unwrap();
-        let result = edit
-            .execute(serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "old_string": "aa",
-                "new_string": "cc"
-            }))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.edit",
+                serde_json::json!({"path": path.to_str().unwrap(), "old_string": "aa", "new_string": "cc"}),
+            ))
             .await
             .unwrap();
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("multiple times"));
+        assert_eq!(result.status, ToolResultStatus::Failure);
+        assert!(text_output(&result).contains("multiple times"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -627,67 +592,65 @@ mod tests {
         let path = dir.join("nf.txt");
         std::fs::write(&path, "hello").unwrap();
 
-        let tools = all_tools();
-        let edit = tools.iter().find(|t| t.name() == "io.edit").unwrap();
-        let result = edit
-            .execute(serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "old_string": "nonexistent",
-                "new_string": "x"
-            }))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.edit",
+                serde_json::json!({"path": path.to_str().unwrap(), "old_string": "nonexistent", "new_string": "x"}),
+            ))
             .await
             .unwrap();
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("not found"));
+        assert_eq!(result.status, ToolResultStatus::Failure);
+        assert!(text_output(&result).contains("not found"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
     async fn bash_echo() {
-        let tools = all_tools();
-        let bash = tools.iter().find(|t| t.name() == "io.bash").unwrap();
-        let result = bash
-            .execute(serde_json::json!({"command": "echo hello"}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.bash",
+                serde_json::json!({"command": "echo hello"}),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
-        assert!(result.output.contains("hello"));
-        assert!(result.output.contains("exit_code: 0"));
+        assert_eq!(result.status, ToolResultStatus::Success);
+        assert!(text_output(&result).contains("hello"));
+        assert!(text_output(&result).contains("exit_code: 0"));
     }
 
     #[tokio::test]
     async fn bash_failing_command() {
-        let tools = all_tools();
-        let bash = tools.iter().find(|t| t.name() == "io.bash").unwrap();
-        let result = bash
-            .execute(serde_json::json!({"command": "exit 42"}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call("io.bash", serde_json::json!({"command": "exit 42"})))
             .await
             .unwrap();
-        assert!(!result.success);
-        assert!(result.output.contains("exit_code: 42"));
+        assert_eq!(result.status, ToolResultStatus::Failure);
+        assert!(text_output(&result).contains("exit_code: 42"));
     }
 
     #[tokio::test]
     async fn bash_timeout() {
-        let tools = all_tools();
-        let bash = tools.iter().find(|t| t.name() == "io.bash").unwrap();
-        let result = bash
-            .execute(serde_json::json!({
-                "command": "sleep 60",
-                "timeout_ms": 1000
-            }))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.bash",
+                serde_json::json!({"command": "sleep 60", "timeout_ms": 1000}),
+            ))
             .await
             .unwrap();
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("timed out"));
+        assert_eq!(result.status, ToolResultStatus::Failure);
+        assert!(text_output(&result).contains("timed out"));
     }
 
     #[tokio::test]
     async fn all_tools_registered() {
         let tools = all_tools();
         assert_eq!(tools.len(), 4);
-        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"io.read"));
         assert!(names.contains(&"io.edit"));
         assert!(names.contains(&"io.bash"));
@@ -697,10 +660,9 @@ mod tests {
     #[tokio::test]
     async fn all_tools_have_specs() {
         for tool in all_tools() {
-            let spec = tool.spec();
-            assert!(!spec.name.is_empty());
-            assert!(!spec.description.is_empty());
-            assert!(spec.parameters.is_object());
+            assert!(!tool.name.is_empty());
+            assert!(!tool.description.is_empty());
+            assert!(tool.parameters.is_object());
         }
     }
 
@@ -711,15 +673,17 @@ mod tests {
         let path = dir.join("code.rs");
         std::fs::write(&path, "// comment\nfn main() {}\n").unwrap();
 
-        let tools = all_tools();
-        let read = tools.iter().find(|t| t.name() == "io.read").unwrap();
-        let result = read
-            .execute(serde_json::json!({"path": path.to_str().unwrap()}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.read",
+                serde_json::json!({"path": path.to_str().unwrap()}),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
-        assert!(!result.output.contains("// comment"));
-        assert!(result.output.contains("fn main()"));
+        assert_eq!(result.status, ToolResultStatus::Success);
+        assert!(!text_output(&result).contains("// comment"));
+        assert!(text_output(&result).contains("fn main()"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -731,44 +695,46 @@ mod tests {
         let path = dir.join("data.json");
         std::fs::write(&path, r#"{"packages": ["pkg/*"]}"#).unwrap();
 
-        let tools = all_tools();
-        let read = tools.iter().find(|t| t.name() == "io.read").unwrap();
-        let result = read
-            .execute(serde_json::json!({"path": path.to_str().unwrap()}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.read",
+                serde_json::json!({"path": path.to_str().unwrap()}),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
-        assert!(result.output.contains("pkg/*"));
+        assert_eq!(result.status, ToolResultStatus::Success);
+        assert!(text_output(&result).contains("pkg/*"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
     async fn edit_no_params_returns_error() {
-        let tools = all_tools();
-        let edit = tools.iter().find(|t| t.name() == "io.edit").unwrap();
-        let result = edit
-            .execute(serde_json::json!({"path": "/tmp/whatever.txt"}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.edit",
+                serde_json::json!({"path": "/tmp/whatever.txt"}),
+            ))
             .await
             .unwrap();
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("Provide either"));
+        assert_eq!(result.status, ToolResultStatus::Failure);
+        assert!(text_output(&result).contains("Provide either"));
     }
 
     #[tokio::test]
     async fn edit_content_and_old_string_conflict() {
-        let tools = all_tools();
-        let edit = tools.iter().find(|t| t.name() == "io.edit").unwrap();
-        let result = edit
-            .execute(serde_json::json!({
-                "path": "/tmp/conflict.txt",
-                "content": "new file",
-                "old_string": "foo"
-            }))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.edit",
+                serde_json::json!({"path": "/tmp/conflict.txt", "content": "new file", "old_string": "foo"}),
+            ))
             .await
             .unwrap();
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("Cannot use both"));
+        assert_eq!(result.status, ToolResultStatus::Failure);
+        assert!(text_output(&result).contains("Cannot use both"));
     }
 
     #[tokio::test]
@@ -777,16 +743,15 @@ mod tests {
         let path = dir.join("deep.txt");
         std::fs::remove_dir_all(std::env::temp_dir().join("nexo-io-test-nested")).ok();
 
-        let tools = all_tools();
-        let edit = tools.iter().find(|t| t.name() == "io.edit").unwrap();
-        let result = edit
-            .execute(serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "content": "deep content"
-            }))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.edit",
+                serde_json::json!({"path": path.to_str().unwrap(), "content": "deep content"}),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
+        assert_eq!(result.status, ToolResultStatus::Success);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "deep content");
 
         std::fs::remove_dir_all(std::env::temp_dir().join("nexo-io-test-nested")).ok();
@@ -794,59 +759,61 @@ mod tests {
 
     #[tokio::test]
     async fn bash_captures_stderr() {
-        let tools = all_tools();
-        let bash = tools.iter().find(|t| t.name() == "io.bash").unwrap();
-        let result = bash
-            .execute(serde_json::json!({"command": "echo err >&2"}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.bash",
+                serde_json::json!({"command": "echo err >&2"}),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
-        assert!(result.output.contains("stderr:"));
-        assert!(result.output.contains("err"));
+        assert_eq!(result.status, ToolResultStatus::Success);
+        assert!(text_output(&result).contains("stderr:"));
+        assert!(text_output(&result).contains("err"));
     }
 
     #[tokio::test]
     async fn bash_strips_ansi() {
-        let tools = all_tools();
-        let bash = tools.iter().find(|t| t.name() == "io.bash").unwrap();
-        let result = bash
-            .execute(serde_json::json!({"command": "printf '\\x1b[31mred\\x1b[0m'"}))
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call(
+                "io.bash",
+                serde_json::json!({"command": "printf '\\x1b[31mred\\x1b[0m'"}),
+            ))
             .await
             .unwrap();
-        assert!(result.success);
-        assert!(result.output.contains("red"));
-        assert!(!result.output.contains("\x1b["));
+        assert_eq!(result.status, ToolResultStatus::Success);
+        assert!(text_output(&result).contains("red"));
+        assert!(!text_output(&result).contains("\x1b["));
     }
 
     #[tokio::test]
     async fn bash_missing_command_param() {
-        let tools = all_tools();
-        let bash = tools.iter().find(|t| t.name() == "io.bash").unwrap();
-        let result = bash.execute(serde_json::json!({})).await;
+        let exec = IoToolExecutor::new();
+        let result = exec.execute(call("io.bash", serde_json::json!({}))).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn web_fetch_missing_url() {
-        let tools = all_tools();
-        let fetch = tools.iter().find(|t| t.name() == "io.web_fetch").unwrap();
-        let result = fetch.execute(serde_json::json!({})).await;
+        let exec = IoToolExecutor::new();
+        let result = exec
+            .execute(call("io.web_fetch", serde_json::json!({})))
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn read_missing_path() {
-        let tools = all_tools();
-        let read = tools.iter().find(|t| t.name() == "io.read").unwrap();
-        let result = read.execute(serde_json::json!({})).await;
+        let exec = IoToolExecutor::new();
+        let result = exec.execute(call("io.read", serde_json::json!({}))).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn edit_missing_path() {
-        let tools = all_tools();
-        let edit = tools.iter().find(|t| t.name() == "io.edit").unwrap();
-        let result = edit.execute(serde_json::json!({})).await;
+        let exec = IoToolExecutor::new();
+        let result = exec.execute(call("io.edit", serde_json::json!({}))).await;
         assert!(result.is_err());
     }
 }

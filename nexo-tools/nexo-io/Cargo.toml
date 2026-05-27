@@ -9,7 +9,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
-tokio = { workspace = true, features = ["rt", "process", "time"] }
+tokio = { workspace = true, features = ["rt", "macros", "process", "time"] }
 reqwest = { version = "0", default-features = false, features = ["rustls-tls"] }
 regex = "1"
 fast_html2md = "0"

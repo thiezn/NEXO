@@ -1,10 +1,17 @@
+//! Text and content normalization helpers shared by `io.*` tools.
+
 use regex::Regex;
 use std::sync::LazyLock;
 
+/// ANSI escape-sequence stripping utilities.
 pub mod ansi;
+/// Language-aware comment filtering for source files.
 pub mod code_filter;
+/// HTML to markdown conversion utilities.
 pub mod html;
+/// JSON formatting and compaction helpers.
 pub mod json;
+/// Output truncation helpers for large payloads.
 pub mod truncate;
 
 static MULTIPLE_BLANK_LINES: LazyLock<Regex> =

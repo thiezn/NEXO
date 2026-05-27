@@ -1,11 +1,5 @@
-use nexo_spec::message::{MessageRole, TranscriptMessage};
-#[cfg(test)]
-use nexo_spec::tool::ToolExecutionConstraints;
-#[cfg(test)]
-use nexo_spec::transcript::TranscriptEntryKind;
-use nexo_spec::{
-    model::LoadedModelInfo, prompt::PromptCollection, tool::ToolSpec, transcript::TranscriptEntry,
-};
+use nexo_core::message::ConversationMessage;
+use nexo_core::{ModelDescriptor, ToolCall, ToolDefinition};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -218,13 +212,13 @@ pub struct RunStartResponse {
 }
 
 /// Gateway-to-node payload for a single run round inference.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct RunRoundRequest {
     pub run_id: String,
     pub round_id: String,
     pub session_id: String,
-    pub messages: Vec<TranscriptMessage>,
+    pub messages: Vec<ConversationMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolSpecEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -232,16 +226,15 @@ pub struct RunRoundRequest {
 }
 
 /// A single tool call returned from a node for a round.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct RunRoundToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
+    #[serde(flatten)]
+    pub call: ToolCall,
 }
 
 /// Node-to-gateway response payload for a single run round inference.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct RunRoundResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,18 +246,18 @@ pub struct RunRoundResponse {
 }
 
 /// A single tool entry in the tools catalog response.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct ToolEntry {
     #[serde(flatten)]
-    pub spec: ToolSpec,
+    pub spec: ToolDefinition,
     pub source: String,
     pub available: bool,
 }
 
 impl ToolEntry {
     /// Create a tool catalog entry from a shared tool spec.
-    pub fn new(spec: ToolSpec, source: impl Into<String>, available: bool) -> Self {
+    pub fn new(spec: ToolDefinition, source: impl Into<String>, available: bool) -> Self {
         Self {
             spec,
             source: source.into(),
@@ -274,7 +267,7 @@ impl ToolEntry {
 }
 
 /// Response payload for `tools.catalog`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ToolsCatalogResponse {
     pub tools: Vec<ToolEntry>,
 }
@@ -282,10 +275,10 @@ pub struct ToolsCatalogResponse {
 // -- tools.register --
 
 /// A tool specification entry for registration.
-pub type ToolSpecEntry = ToolSpec;
+pub type ToolSpecEntry = ToolDefinition;
 
 /// Parameters for the `tools.register` method (sent by nodes).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ToolsRegisterParams {
     pub tools: Vec<ToolSpecEntry>,
 }
@@ -375,7 +368,7 @@ pub struct SessionGetParams {
 }
 
 /// Response payload for `session.get`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct SessionGetResponse {
     pub session_id: String,
@@ -383,7 +376,7 @@ pub struct SessionGetResponse {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_collection_id: Option<String>,
-    pub messages: Vec<TranscriptEntry>,
+    pub messages: Vec<ConversationMessage>,
     pub created_at: String,
 }
 
@@ -500,18 +493,49 @@ pub struct ModelUnloadResponse {
 // -- model.status --
 
 /// Sent by a node to report its model state.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct ModelStatusParams {
     /// Models currently loaded with their categories.
     #[serde(default)]
-    pub loaded_models: Vec<LoadedModelInfo>,
+    pub loaded_models: Vec<ModelDescriptor>,
     /// All model IDs available on disk on this node.
     #[serde(default)]
     pub available_models: Vec<String>,
 }
 
 // -- prompt.document.create --
+
+/// A stored prompt document.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PromptDocument {
+    /// Stable prompt document identifier (for example `identity.md`).
+    pub id: String,
+    /// Markdown or plain text content of the prompt document.
+    pub content: String,
+}
+
+/// An ordered collection of prompt documents.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PromptCollection {
+    /// Unique collection identifier.
+    pub id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// Optional description shown in UIs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Ordered prompt document IDs that compose the collection.
+    #[serde(default)]
+    pub documents: Vec<String>,
+}
+
+/// The assembled system prompt sent to a model round.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct SystemPrompt {
+    /// Fully assembled prompt content passed to an inference round.
+    pub content: String,
+}
 
 /// Parameters for `prompt.document.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -647,6 +671,9 @@ pub struct ImageAnalyzeResponse {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    use nexo_core::ToolExecutionConstraints;
+    use nexo_core::message::{ContentPart, MessageRole, TextPart};
+    use std::collections::BTreeMap;
 
     #[test]
     fn method_serialization() {
@@ -764,12 +791,13 @@ mod tests {
     fn tools_catalog_response() {
         let resp = ToolsCatalogResponse {
             tools: vec![ToolEntry::new(
-                ToolSpec {
+                ToolDefinition {
                     name: "extractor".into(),
                     description: "Extract data".into(),
                     parameters: serde_json::json!({"type": "object"}),
                     contract_version: None,
                     execution: ToolExecutionConstraints::default(),
+                    metadata: BTreeMap::new(),
                 },
                 "core",
                 true,
@@ -784,15 +812,17 @@ mod tests {
     #[test]
     fn tool_entry_with_parameters() {
         let entry = ToolEntry::new(
-            ToolSpec {
+            ToolDefinition {
                 name: "echo".into(),
                 description: "Echo input".into(),
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: Some("2026-05-22".into()),
                 execution: ToolExecutionConstraints {
-                    side_effect_level: nexo_spec::tool::ToolSideEffectLevel::ReadOnly,
-                    parallel_safe: true,
+                    side_effect_level: nexo_core::ToolSideEffectLevel::ReadOnly,
+                    parallelism: nexo_core::ToolParallelism::ParallelGlobal,
+                    timeout_ms: Some(5_000),
                 },
+                metadata: BTreeMap::new(),
             },
             "node",
             true,
@@ -801,26 +831,28 @@ mod tests {
         assert_eq!(json["parameters"]["type"], "object");
         assert_eq!(json["contractVersion"], "2026-05-22");
         assert_eq!(json["execution"]["sideEffectLevel"], "read_only");
-        assert_eq!(json["execution"]["parallelSafe"], true);
+        assert_eq!(json["execution"]["parallelism"], "parallel_global");
+        assert_eq!(json["execution"]["timeoutMs"], 5_000);
     }
 
     #[test]
     fn tool_entry_omits_default_spec_metadata() {
         let entry = ToolEntry::new(
-            ToolSpec {
+            ToolDefinition {
                 name: "echo".into(),
                 description: "Echo input".into(),
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: None,
                 execution: ToolExecutionConstraints::default(),
+                metadata: BTreeMap::new(),
             },
             "node",
             true,
         );
         let json = serde_json::to_value(&entry).unwrap();
         assert_eq!(json["parameters"]["type"], "object");
-        assert!(!json.as_object().unwrap().contains_key("contractVersion"));
-        assert!(!json.as_object().unwrap().contains_key("execution"));
+        assert!(json.as_object().unwrap().contains_key("execution"));
+        assert!(json.as_object().unwrap().contains_key("metadata"));
     }
 
     #[test]
@@ -844,6 +876,7 @@ mod tests {
                 parameters: serde_json::json!({"type": "object", "properties": {"input": {"type": "string"}}}),
                 contract_version: Some("2026-05-22".into()),
                 execution: ToolExecutionConstraints::default(),
+                metadata: BTreeMap::new(),
             }],
         };
         let json = serde_json::to_string(&params).unwrap();
@@ -914,16 +947,20 @@ mod tests {
             run_id: "run-1".into(),
             round_id: "round-1".into(),
             session_id: "sess-1".into(),
-            messages: vec![TranscriptMessage::new(
-                MessageRole::System,
-                "You are helpful",
-            )],
+            messages: vec![ConversationMessage {
+                role: MessageRole::System,
+                parts: vec![ContentPart::Text(TextPart {
+                    text: "You are helpful".into(),
+                })],
+                metadata: BTreeMap::new(),
+            }],
             tools: vec![ToolSpecEntry {
                 name: "echo.run".into(),
                 description: "Echo input".into(),
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: None,
                 execution: ToolExecutionConstraints::default(),
+                metadata: BTreeMap::new(),
             }],
             model_id: Some("gemma-4-e4b-it".into()),
         };
@@ -939,9 +976,12 @@ mod tests {
             content: Some("Final answer".into()),
             rationale: Some("Reasoning summary".into()),
             tool_calls: vec![RunRoundToolCall {
-                id: "call-1".into(),
-                name: "echo.run".into(),
-                arguments: serde_json::json!({"input": "hello"}),
+                call: ToolCall {
+                    id: "call-1".into(),
+                    index: 0,
+                    name: "echo.run".into(),
+                    arguments: serde_json::json!({"input": "hello"}),
+                },
             }],
         };
 
@@ -1053,15 +1093,16 @@ mod tests {
     }
 
     #[test]
-    fn transcript_entry_roundtrip() {
-        let msg = TranscriptEntry {
-            id: "m1".into(),
-            message: TranscriptMessage::new(MessageRole::Assistant, "hello"),
-            kind: TranscriptEntryKind::AssistantResponse,
-            created_at: "2026-01-01T00:00:00Z".into(),
+    fn conversation_message_roundtrip() {
+        let msg = ConversationMessage {
+            role: MessageRole::Assistant,
+            parts: vec![ContentPart::Text(TextPart {
+                text: "hello".into(),
+            })],
+            metadata: BTreeMap::new(),
         };
         let json = serde_json::to_string(&msg).unwrap();
-        let decoded: TranscriptEntry = serde_json::from_str(&json).unwrap();
+        let decoded: ConversationMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, decoded);
     }
 

@@ -1,9 +1,18 @@
+//! WebSocket protocol schema types shared by gateway, node, and client crates.
+
+/// Connect handshake payloads and policy types.
 pub mod connect;
+/// Error payload types used in response frames.
 pub mod error;
+/// Server-pushed event payloads.
 pub mod events;
+/// Request/response/event frame envelope definitions.
 pub mod frame;
+/// Protocol method enums and request/response payload structs.
 pub mod methods;
+/// Schema generation helpers for protocol docs and tooling.
 pub mod schema;
+/// Shared handshake and identity primitives.
 pub mod types;
 
 // Re-exports
@@ -14,28 +23,28 @@ pub use events::{
     ShutdownPayload, TickPayload,
 };
 pub use frame::Frame;
+pub use methods::PromptCollection;
 pub use methods::{
-    PromptCollectionCreateParams, PromptCollectionCreateResponse,
-    PromptCollectionDeleteParams, PromptCollectionDeleteResponse, PromptCollectionListParams,
-    PromptCollectionListResponse, PromptDocumentCreateParams, PromptDocumentCreateResponse,
-    PromptDocumentDeleteParams, PromptDocumentDeleteResponse, PromptDocumentEntry,
-    PromptDocumentListParams, PromptDocumentListResponse, RunInstructionsAppendParams,
-    RunInstructionsAppendResponse, RunRoundRequest, RunRoundResponse, RunRoundToolCall,
-    RunStartParams, RunStartResponse, RunStatus, RunStopParams, RunStopResponse,
     CronCreateParams, CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry,
     CronListParams, CronListResponse, HealthParams, HealthResponse, ImageAnalyzeParams,
     ImageAnalyzeResponse, Method, ModelLoadParams, ModelLoadResponse, ModelStatusParams,
-    ModelUnloadParams, ModelUnloadResponse, SendParams, SendResponse,
-    SessionClearParams, SessionClearResponse, SessionCreateParams, SessionCreateResponse,
-    SessionEntry, SessionGetParams, SessionGetResponse, SessionListParams, SessionListResponse,
-    StatusParams, StatusResponse, SystemPresenceParams, ToolEntry, ToolSpecEntry,
+    ModelUnloadParams, ModelUnloadResponse, PromptCollectionCreateParams,
+    PromptCollectionCreateResponse, PromptCollectionDeleteParams, PromptCollectionDeleteResponse,
+    PromptCollectionListParams, PromptCollectionListResponse, PromptDocument,
+    PromptDocumentCreateParams, PromptDocumentCreateResponse, PromptDocumentDeleteParams,
+    PromptDocumentDeleteResponse, PromptDocumentEntry, PromptDocumentListParams,
+    PromptDocumentListResponse, RunInstructionsAppendParams, RunInstructionsAppendResponse,
+    RunRoundRequest, RunRoundResponse, RunRoundToolCall, RunStartParams, RunStartResponse,
+    RunStatus, RunStopParams, RunStopResponse, SendParams, SendResponse, SessionClearParams,
+    SessionClearResponse, SessionCreateParams, SessionCreateResponse, SessionEntry,
+    SessionGetParams, SessionGetResponse, SessionListParams, SessionListResponse, StatusParams,
+    StatusResponse, SystemPresenceParams, SystemPrompt, ToolEntry, ToolSpecEntry,
     ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams, ToolsExecuteResponse,
     ToolsRegisterParams, ToolsRegisterResponse,
 };
-pub use nexo_spec::message::{MessageRole, TranscriptMessage};
-pub use nexo_spec::model::{LoadedModelInfo, ModelCategory};
-pub use nexo_spec::prompt::{PromptCollection, PromptDocument, SystemPrompt};
-pub use nexo_spec::transcript::{TranscriptEntry, TranscriptEntryKind};
+pub use nexo_core::message::{ContentPart, ConversationMessage, MessageRole, TextPart};
+pub use nexo_core::model::ModelDescriptor;
+pub use nexo_core::tools::{ToolCall, ToolDefinition};
 pub use schema::{SchemaSection, generate_schema, schema_json};
 pub use types::{ClientInfo, ConnectionRole, DeviceInfo, Platform, Scope};
 
