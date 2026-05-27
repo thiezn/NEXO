@@ -52,6 +52,7 @@ pub enum AudioFormat {
 /// A unified request enum for all supported inference operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum InferenceRequest {
     /// Generate text or multimodal conversational output.

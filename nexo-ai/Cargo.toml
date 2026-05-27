@@ -2,10 +2,40 @@
 name = "nexo-ai"
 version = "0.1.0"
 edition = "2024"
+autobins = false
 
-[[bin]]
-name = "nexo-ai"
-path = "src/main.rs"
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+candle = []
+cli = []
+download = []
+metal = ["candle-core/metal", "mistralrs-core/metal"]
+mlx = []
+
+[dependencies]
+anyhow = { workspace = true }
+candle-core = { workspace = true }
+cli-helpers = { workspace = true, features = ["config"] }
+dirs = { workspace = true }
+futures-util = { workspace = true }
+nexo-core = { path = "../shared/nexo-core" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+
+[dependencies.either]
+version = "1"
+
+[dependencies.indexmap]
+version = "2"
+
+[dependencies.mistralrs-core]
+version = "0"
+default-features = false
 
 [lints]
 workspace = true

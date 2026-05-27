@@ -17,10 +17,10 @@ One repo-specific detail to include in the first session: Cargo.toml already mov
 Rebuild the new `nexo-ai` crate as a library-first crate around `nexo-core` and `mistralrs-core`.
 
 Context:
-- `nexo-core` now lives at `shared/nexo-core`.
+- `nexo-core` lives at `shared/nexo-core`.
 - The current `nexo-ai` crate is basically an empty stub.
 - `nexo-ai-old` is reference material only.
-- `nexo-ai` must not depend on `nexo-spec`, `nexo-ws-client`, or `nexo-ws-schema`.
+- `nexo-ai` must not depend on `nexo-ws-client`, or `nexo-ws-schema`.
 - `nexo-ai` must not touch websocket transport or serialization concerns.
 - `nexo-node` is out of scope.
 - `nexo-ai` should use the workspace `cli-helpers` crate.
