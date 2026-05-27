@@ -7,19 +7,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum EventKind {
+    /// Periodic heartbeat tick event.
     Tick,
+    /// Run lifecycle update event.
     Run,
+    /// Message delivery event.
     Message,
+    /// Presence state update event.
     Presence,
+    /// Server shutdown notification event.
     Shutdown,
+    /// Keepalive heartbeat event.
     Heartbeat,
+    /// Cron job execution event.
     Cron,
 }
 
 /// Payload for `tick` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct TickPayload {
+    /// Timestamp at which the tick was emitted.
     pub timestamp: String,
+    /// Monotonic sequence number for the tick stream.
     pub seq: u64,
 }
 
@@ -27,16 +36,23 @@ pub struct TickPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct RunEventPayload {
+    /// Run identifier.
     pub run_id: String,
+    /// Session identifier associated with the run.
     pub session_id: String,
+    /// Current run status.
     pub status: RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional textual output content.
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional tool name when status reflects a tool call.
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional tool call identifier when status reflects a tool call.
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional error message when the run fails.
     pub error: Option<String>,
     /// Ephemeral thinking/reasoning content (not persisted in conversation history).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,8 +63,11 @@ pub struct RunEventPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct PresencePayload {
+    /// Client identifier whose status changed.
     pub client_id: String,
+    /// Role of the client.
     pub role: ConnectionRole,
+    /// Presence status value.
     pub status: String,
 }
 
@@ -56,15 +75,20 @@ pub struct PresencePayload {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct MessagePayload {
+    /// Message identifier.
     pub message_id: String,
+    /// Message sender identifier.
     pub from: String,
+    /// Message target identifier.
     pub target: String,
+    /// Arbitrary message payload data.
     pub payload: serde_json::Value,
 }
 
 /// Payload for `shutdown` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ShutdownPayload {
+    /// Human-readable shutdown reason.
     pub reason: String,
 }
 
@@ -76,7 +100,9 @@ pub struct HeartbeatPayload {}
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct CronPayload {
+    /// Cron job identifier.
     pub job_id: String,
+    /// Cron job display name.
     pub name: String,
 }
 

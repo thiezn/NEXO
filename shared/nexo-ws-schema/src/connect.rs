@@ -6,24 +6,34 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct ConnectParams {
+    /// Minimum protocol version supported by the client.
     pub min_protocol: u32,
+    /// Maximum protocol version supported by the client.
     pub max_protocol: u32,
+    /// Client identity metadata.
     pub client: ClientInfo,
+    /// Connection role (`user` or `node`).
     pub role: ConnectionRole,
     #[serde(default)]
+    /// Requested authorization scopes (typically for user role).
     pub scopes: Vec<Scope>,
     #[serde(default)]
+    /// Node capability identifiers exposed to the gateway.
     pub capabilities: Vec<String>,
     #[serde(default)]
+    /// Command identifiers exposed by the node.
     pub commands: Vec<String>,
     /// Model IDs available on disk for this node. Empty for user clients.
     #[serde(default)]
     pub models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional locale hint (for example `en-US`).
     pub locale: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional user-agent style client descriptor.
     pub user_agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional stable device identity used for pairing.
     pub device: Option<DeviceInfo>,
 }
 
@@ -31,6 +41,7 @@ pub struct ConnectParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct Policy {
+    /// Tick/heartbeat interval in milliseconds.
     pub tick_interval_ms: u64,
 }
 
@@ -38,8 +49,11 @@ pub struct Policy {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct HelloOk {
     #[serde(rename = "type")]
+    /// Wire payload discriminator, always `hello-ok`.
     pub payload_type: String,
+    /// Negotiated protocol version.
     pub protocol: u32,
+    /// Server heartbeat/tick policy.
     pub policy: Policy,
 }
 

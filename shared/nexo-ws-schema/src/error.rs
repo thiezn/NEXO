@@ -2,45 +2,66 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Protocol-level errors surfaced by the ws-schema transport layer.
 #[derive(Debug, Error)]
 pub enum WsError {
+    /// Generic protocol framing or semantic error.
     #[error("Protocol error: {0}")]
     Protocol(String),
 
+    /// Request/response payload validation error.
     #[error("Validation error: {0}")]
     Validation(String),
 
+    /// Underlying connection failure.
     #[error("Connection error: {0}")]
     Connection(String),
 
+    /// Handshake negotiation failed.
     #[error("Handshake failed: {0}")]
     Handshake(String),
 
+    /// Authentication or authorization failure.
     #[error("Auth failed: {0}")]
     Auth(String),
 
+    /// Client/server protocol range mismatch.
     #[error("Unsupported protocol version: client [{min}..{max}], server {server}")]
-    ProtocolMismatch { min: u32, max: u32, server: u32 },
+    ProtocolMismatch {
+        /// Minimum protocol version supported by the client.
+        min: u32,
+        /// Maximum protocol version supported by the client.
+        max: u32,
+        /// Protocol version supported by the server.
+        server: u32,
+    },
 
+    /// Requested method was not recognized.
     #[error("Method not found: {0}")]
     MethodNotFound(String),
 
+    /// JSON serialization/deserialization failure.
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    /// Message processing failure.
     #[error("Message error: {0}")]
     Message(String),
 
+    /// Operation timed out.
     #[error("Timeout: {0}")]
     Timeout(String),
 }
 
+/// Result alias for ws-schema operations.
 pub type Result<T = ()> = std::result::Result<T, WsError>;
 
 /// Wire-format error payload included in error responses.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ErrorPayload {
+    /// Stable machine-readable error code.
     pub code: String,
+    /// Human-readable error message.
     pub message: String,
 }
 

@@ -8,11 +8,17 @@ use crate::methods::Method;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum SchemaSection {
+    /// Generate all schema sections in a single JSON object.
     All,
+    /// Generate only frame envelope schema.
     Frames,
+    /// Generate connect handshake schema.
     Connect,
+    /// Generate method enum schema.
     Methods,
+    /// Generate event kind schema.
     Events,
+    /// Generate wire error payload schema.
     Errors,
 }
 

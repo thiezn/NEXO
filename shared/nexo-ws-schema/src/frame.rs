@@ -13,29 +13,43 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Frame {
+    /// A client-initiated request frame.
     Request {
+        /// Correlation identifier for request/response pairing.
         id: String,
+        /// Requested method.
         method: Method,
+        /// Method-specific parameter payload.
         params: serde_json::Value,
     },
+    /// A response frame to a prior request.
     Response {
+        /// Correlation identifier matching the original request.
         id: String,
+        /// Whether the request succeeded.
         ok: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Optional response payload when `ok` is true.
         payload: Option<serde_json::Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Optional wire error payload when `ok` is false.
         error: Option<ErrorPayload>,
     },
+    /// A server-pushed event frame.
     Event {
+        /// Event kind discriminator.
         event: EventKind,
+        /// Event payload object.
         payload: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Optional event sequence number.
         seq: Option<u64>,
         #[serde(
             default,
             skip_serializing_if = "Option::is_none",
             rename = "stateVersion"
         )]
+        /// Optional monotonic state version attached to the event.
         state_version: Option<u64>,
     },
 }

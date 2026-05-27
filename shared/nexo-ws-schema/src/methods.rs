@@ -7,38 +7,57 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum Method {
+    /// Client or node connect handshake.
     Connect,
+    /// Health check request.
     Health,
+    /// Gateway status request.
     Status,
+    /// Generic send request.
     Send,
     #[serde(rename = "run.start")]
+    /// Run start request.
     RunStart,
     #[serde(rename = "run.stop")]
+    /// Run stop request.
     RunStop,
     #[serde(rename = "run.instructions.append")]
+    /// Append instructions to an active run.
     RunInstructionsAppend,
     #[serde(rename = "run.round")]
+    /// Execute one run round.
     RunRound,
+    /// Presence update.
     SystemPresence,
     #[serde(rename = "tools.catalog")]
+    /// Tool catalog request.
     ToolsCatalog,
     #[serde(rename = "tools.register")]
+    /// Tool registration request.
     ToolsRegister,
     #[serde(rename = "tools.execute")]
+    /// Tool execution request.
     ToolsExecute,
     #[serde(rename = "session.create")]
+    /// Session create request.
     SessionCreate,
     #[serde(rename = "session.list")]
+    /// Session list request.
     SessionList,
     #[serde(rename = "session.get")]
+    /// Session get request.
     SessionGet,
     #[serde(rename = "session.clear")]
+    /// Session clear request.
     SessionClear,
     #[serde(rename = "cron.create")]
+    /// Cron create request.
     CronCreate,
     #[serde(rename = "cron.list")]
+    /// Cron list request.
     CronList,
     #[serde(rename = "cron.delete")]
+    /// Cron delete request.
     CronDelete,
     /// Gateway → node: load a model into VRAM.
     #[serde(rename = "model.load")]
@@ -76,14 +95,21 @@ pub enum Method {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
+    /// Run accepted by the gateway.
     Accepted,
     /// Run is queued, waiting for an LLM node to become available.
     Queued,
+    /// Run is building reasoning/thinking tokens.
     Thinking,
+    /// Run is waiting for tool execution.
     ToolCall,
+    /// Run is streaming output tokens.
     Streaming,
+    /// Run completed successfully.
     Completed,
+    /// Run failed.
     Failed,
+    /// Run was cancelled.
     Cancelled,
 }
 
@@ -101,8 +127,11 @@ pub struct StatusParams {}
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct SendParams {
+    /// Field value.
     pub target: String,
+    /// Field value.
     pub payload: serde_json::Value,
+    /// Field value.
     pub idempotency_key: String,
 }
 
@@ -110,18 +139,24 @@ pub struct SendParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct RunStartParams {
+    /// Field value.
     pub input: String,
+    /// Field value.
     pub idempotency_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub instructions: Option<serde_json::Value>,
     /// The model ID to use for inference. If omitted, any available LLM node is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub model_id: Option<String>,
     /// Enable thinking mode (Gemma 4). When true the model emits reasoning
     /// tokens that are returned in the event but not persisted in history.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub thinking: Option<bool>,
 }
 
@@ -159,12 +194,14 @@ pub struct RunInstructionsAppendResponse {
     pub queued: bool,
     /// The persisted message identifier, when context was queued successfully.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub message_id: Option<String>,
 }
 
 /// Parameters for the `system-presence` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct SystemPresenceParams {
+    /// Field value.
     pub status: String,
 }
 
@@ -172,6 +209,7 @@ pub struct SystemPresenceParams {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ToolsCatalogParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub filter: Option<String>,
 }
 
@@ -181,7 +219,9 @@ pub struct ToolsCatalogParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct HealthResponse {
+    /// Field value.
     pub status: String,
+    /// Field value.
     pub uptime_secs: u64,
 }
 
@@ -189,14 +229,18 @@ pub struct HealthResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct StatusResponse {
+    /// Field value.
     pub connected_users: u32,
+    /// Field value.
     pub connected_nodes: u32,
+    /// Field value.
     pub capabilities: Vec<String>,
 }
 
 /// Response payload for `send`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct SendResponse {
+    /// Field value.
     pub delivered: bool,
 }
 
@@ -204,10 +248,14 @@ pub struct SendResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct RunStartResponse {
+    /// Field value.
     pub run_id: String,
+    /// Field value.
     pub session_id: String,
+    /// Field value.
     pub status: RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub summary: Option<String>,
 }
 
@@ -215,13 +263,19 @@ pub struct RunStartResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct RunRoundRequest {
+    /// Field value.
     pub run_id: String,
+    /// Field value.
     pub round_id: String,
+    /// Field value.
     pub session_id: String,
+    /// Field value.
     pub messages: Vec<ConversationMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Field value.
     pub tools: Vec<ToolSpecEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub model_id: Option<String>,
 }
 
@@ -230,6 +284,7 @@ pub struct RunRoundRequest {
 #[serde(rename_all = "lowercase")]
 pub struct RunRoundToolCall {
     #[serde(flatten)]
+    /// Field value.
     pub call: ToolCall,
 }
 
@@ -238,10 +293,13 @@ pub struct RunRoundToolCall {
 #[serde(rename_all = "lowercase")]
 pub struct RunRoundResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub rationale: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Field value.
     pub tool_calls: Vec<RunRoundToolCall>,
 }
 
@@ -250,8 +308,11 @@ pub struct RunRoundResponse {
 #[serde(rename_all = "lowercase")]
 pub struct ToolEntry {
     #[serde(flatten)]
+    /// Field value.
     pub spec: ToolDefinition,
+    /// Field value.
     pub source: String,
+    /// Field value.
     pub available: bool,
 }
 
@@ -269,6 +330,7 @@ impl ToolEntry {
 /// Response payload for `tools.catalog`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ToolsCatalogResponse {
+    /// Field value.
     pub tools: Vec<ToolEntry>,
 }
 
@@ -280,12 +342,14 @@ pub type ToolSpecEntry = ToolDefinition;
 /// Parameters for the `tools.register` method (sent by nodes).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ToolsRegisterParams {
+    /// Field value.
     pub tools: Vec<ToolSpecEntry>,
 }
 
 /// Response payload for `tools.register`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ToolsRegisterResponse {
+    /// Field value.
     pub registered: u32,
 }
 
@@ -295,17 +359,23 @@ pub struct ToolsRegisterResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct ToolsExecuteParams {
+    /// Field value.
     pub tool: String,
+    /// Field value.
     pub args: serde_json::Value,
+    /// Field value.
     pub idempotency_key: String,
 }
 
 /// Response payload for `tools.execute`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ToolsExecuteResponse {
+    /// Field value.
     pub success: bool,
+    /// Field value.
     pub output: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub error: Option<String>,
 }
 
@@ -316,9 +386,11 @@ pub struct ToolsExecuteResponse {
 #[serde(rename_all = "lowercase")]
 pub struct SessionCreateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub name: Option<String>,
     /// ID of a prompt collection to associate with this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub prompt_collection_id: Option<String>,
 }
 
@@ -326,9 +398,11 @@ pub struct SessionCreateParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct SessionCreateResponse {
+    /// Field value.
     pub session_id: String,
     /// The prompt collection ID associated with this session, if one was provided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub prompt_collection_id: Option<String>,
 }
 
@@ -342,19 +416,26 @@ pub struct SessionListParams {}
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct SessionEntry {
+    /// Field value.
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub prompt_collection_id: Option<String>,
+    /// Field value.
     pub created_at: String,
+    /// Field value.
     pub last_active_at: String,
+    /// Field value.
     pub message_count: u32,
 }
 
 /// Response payload for `session.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct SessionListResponse {
+    /// Field value.
     pub sessions: Vec<SessionEntry>,
 }
 
@@ -364,6 +445,7 @@ pub struct SessionListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct SessionGetParams {
+    /// Field value.
     pub session_id: String,
 }
 
@@ -371,12 +453,17 @@ pub struct SessionGetParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub struct SessionGetResponse {
+    /// Field value.
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub prompt_collection_id: Option<String>,
+    /// Field value.
     pub messages: Vec<ConversationMessage>,
+    /// Field value.
     pub created_at: String,
 }
 
@@ -386,12 +473,14 @@ pub struct SessionGetResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct SessionClearParams {
+    /// Field value.
     pub session_id: String,
 }
 
 /// Response payload for `session.clear`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct SessionClearResponse {
+    /// Field value.
     pub cleared: bool,
 }
 
@@ -401,10 +490,14 @@ pub struct SessionClearResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct CronCreateParams {
+    /// Field value.
     pub name: String,
+    /// Field value.
     pub schedule: String,
+    /// Field value.
     pub input: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub session_id: Option<String>,
 }
 
@@ -412,6 +505,7 @@ pub struct CronCreateParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct CronCreateResponse {
+    /// Field value.
     pub job_id: String,
 }
 
@@ -425,19 +519,26 @@ pub struct CronListParams {}
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct CronEntry {
+    /// Field value.
     pub job_id: String,
+    /// Field value.
     pub name: String,
+    /// Field value.
     pub schedule: String,
+    /// Field value.
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub last_run_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub next_run_at: Option<String>,
 }
 
 /// Response payload for `cron.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct CronListResponse {
+    /// Field value.
     pub jobs: Vec<CronEntry>,
 }
 
@@ -447,12 +548,14 @@ pub struct CronListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct CronDeleteParams {
+    /// Field value.
     pub job_id: String,
 }
 
 /// Response payload for `cron.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct CronDeleteResponse {
+    /// Field value.
     pub deleted: bool,
 }
 
@@ -462,6 +565,7 @@ pub struct CronDeleteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct ModelLoadParams {
+    /// Field value.
     pub model_id: String,
 }
 
@@ -469,9 +573,12 @@ pub struct ModelLoadParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct ModelLoadResponse {
+    /// Field value.
     pub model_id: String,
+    /// Field value.
     pub loaded: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub error: Option<String>,
 }
 
@@ -481,12 +588,14 @@ pub struct ModelLoadResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct ModelUnloadParams {
+    /// Field value.
     pub model_id: String,
 }
 
 /// Response payload for `model.unload`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ModelUnloadResponse {
+    /// Field value.
     pub unloaded: bool,
 }
 
@@ -498,9 +607,11 @@ pub struct ModelUnloadResponse {
 pub struct ModelStatusParams {
     /// Models currently loaded with their categories.
     #[serde(default)]
+    /// Field value.
     pub loaded_models: Vec<ModelDescriptor>,
     /// All model IDs available on disk on this node.
     #[serde(default)]
+    /// Field value.
     pub available_models: Vec<String>,
 }
 
@@ -524,9 +635,11 @@ pub struct PromptCollection {
     pub name: String,
     /// Optional description shown in UIs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub description: Option<String>,
     /// Ordered prompt document IDs that compose the collection.
     #[serde(default)]
+    /// Field value.
     pub documents: Vec<String>,
 }
 
@@ -542,12 +655,14 @@ pub struct SystemPrompt {
 pub struct PromptDocumentCreateParams {
     /// Stable ID for the prompt document (for example `identity.md`).
     pub id: String,
+    /// Field value.
     pub content: String,
 }
 
 /// Response payload for `prompt.document.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentCreateResponse {
+    /// Field value.
     pub id: String,
 }
 
@@ -560,12 +675,14 @@ pub struct PromptDocumentListParams {}
 /// A single prompt document entry.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentEntry {
+    /// Field value.
     pub id: String,
 }
 
 /// Response payload for `prompt.document.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentListResponse {
+    /// Field value.
     pub documents: Vec<PromptDocumentEntry>,
 }
 
@@ -574,12 +691,14 @@ pub struct PromptDocumentListResponse {
 /// Parameters for `prompt.document.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentDeleteParams {
+    /// Field value.
     pub id: String,
 }
 
 /// Response payload for `prompt.document.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentDeleteResponse {
+    /// Field value.
     pub deleted: bool,
 }
 
@@ -591,8 +710,10 @@ pub struct PromptDocumentDeleteResponse {
 pub struct PromptCollectionCreateParams {
     /// Unique ID for the collection.
     pub id: String,
+    /// Field value.
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub description: Option<String>,
     /// Ordered list of prompt document IDs that form this collection.
     pub documents: Vec<String>,
@@ -601,6 +722,7 @@ pub struct PromptCollectionCreateParams {
 /// Response payload for `prompt.collection.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptCollectionCreateResponse {
+    /// Field value.
     pub id: String,
 }
 
@@ -613,6 +735,7 @@ pub struct PromptCollectionListParams {}
 /// Response payload for `prompt.collection.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptCollectionListResponse {
+    /// Field value.
     pub collections: Vec<PromptCollection>,
 }
 
@@ -621,12 +744,14 @@ pub struct PromptCollectionListResponse {
 /// Parameters for `prompt.collection.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptCollectionDeleteParams {
+    /// Field value.
     pub id: String,
 }
 
 /// Response payload for `prompt.collection.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptCollectionDeleteResponse {
+    /// Field value.
     pub deleted: bool,
 }
 
@@ -641,12 +766,16 @@ pub struct ImageAnalyzeParams {
     /// The prompt/question about the image.
     pub prompt: String,
     #[serde(default = "default_image_analyze_max_tokens")]
+    /// Field value.
     pub max_tokens: usize,
     #[serde(default = "default_image_analyze_temperature")]
+    /// Field value.
     pub temperature: f64,
     /// Visual token budget for variable resolution. Common values: 70, 140, 280, 560, 1120.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Field value.
     pub visual_token_budget: Option<u32>,
+    /// Field value.
     pub idempotency_key: String,
 }
 
@@ -662,8 +791,11 @@ fn default_image_analyze_temperature() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct ImageAnalyzeResponse {
+    /// Field value.
     pub text: String,
+    /// Field value.
     pub tokens_generated: usize,
+    /// Field value.
     pub inference_time_ms: u64,
 }
 

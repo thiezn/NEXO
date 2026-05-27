@@ -5,11 +5,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum ConnectionRole {
+    /// Control-plane user/client connection.
     User,
+    /// Node/capability-host connection.
     Node,
 }
 
 impl ConnectionRole {
+    /// Return the wire-format role string.
     pub fn as_str(&self) -> &str {
         match self {
             Self::User => "user",
@@ -21,10 +24,13 @@ impl ConnectionRole {
 /// Authorization scopes for user-role connections.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 pub enum Scope {
+    /// Read-only user scope.
     #[serde(rename = "user.read")]
     UserRead,
+    /// Read/write user scope.
     #[serde(rename = "user.write")]
     UserWrite,
+    /// Administrative user scope.
     #[serde(rename = "user.admin")]
     UserAdmin,
 }
@@ -33,10 +39,15 @@ pub enum Scope {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
+    /// Apple macOS platform.
     Macos,
+    /// Apple iOS platform.
     Ios,
+    /// Linux platform.
     Linux,
+    /// Microsoft Windows platform.
     Windows,
+    /// Mortimmy platform identifier.
     Mortimmy,
 }
 
@@ -57,14 +68,18 @@ impl Platform {
 /// Client identity included in the connect handshake.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ClientInfo {
+    /// Stable client identifier.
     pub id: String,
+    /// Client version string.
     pub version: String,
+    /// Client platform.
     pub platform: Platform,
 }
 
 /// Stable device identity for pairing.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DeviceInfo {
+    /// Stable paired-device identifier.
     pub id: String,
 }
 
@@ -75,8 +90,14 @@ mod tests {
 
     #[test]
     fn role_serialization() {
-        assert_eq!(serde_json::to_string(&ConnectionRole::User).unwrap(), "\"user\"");
-        assert_eq!(serde_json::to_string(&ConnectionRole::Node).unwrap(), "\"node\"");
+        assert_eq!(
+            serde_json::to_string(&ConnectionRole::User).unwrap(),
+            "\"user\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ConnectionRole::Node).unwrap(),
+            "\"node\""
+        );
     }
 
     #[test]
