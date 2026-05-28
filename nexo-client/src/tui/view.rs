@@ -94,9 +94,12 @@ fn render_summary(model: &Model, frame: &mut Frame<'_>, area: Rect, theme: Theme
         summarize_value(&model.summary.capabilities.join(", "), 52)
     };
     let run_status = match &model.active_stream {
-        Some(stream) => match &stream.tool_name {
-            Some(tool_name) => format!("{:?} via {tool_name}", stream.status),
-            None => format!("{:?}", stream.status),
+        Some(stream) => match (&stream.tool_name, &stream.tool_call_id) {
+            (Some(tool_name), Some(tool_call_id)) => {
+                format!("{:?} via {tool_name} ({tool_call_id})", stream.status)
+            }
+            (Some(tool_name), None) => format!("{:?} via {tool_name}", stream.status),
+            _ => format!("{:?}", stream.status),
         },
         None => "idle".to_string(),
     };

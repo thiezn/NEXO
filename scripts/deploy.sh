@@ -43,17 +43,6 @@ binary_for_target() {
 	esac
 }
 
-should_update_inference_tools() {
-	local target
-	for target in "$@"; do
-		case "$target" in
-			"nexo-node"|"nexo-ai")
-				return 0
-				;;
-		esac
-	done
-	return 1
-}
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	print_usage
@@ -100,12 +89,6 @@ for deploy_target in "${DEPLOY_TARGETS[@]}"; do
 	binary_name="$(binary_for_target "$deploy_target")"
 	sudo chown root:admin "/usr/local/bin/${binary_name}"
 done
-
-if should_update_inference_tools "${DEPLOY_TARGETS[@]}"; then
-	echo "Updating local inference tools..."
-	source /Users/Mathijs.Mortimer/Development/utilities/.venv/bin/activate
-	uv pip install --upgrade mlx-vlm mlx-audio
-fi
 
 # Verify the permissions
 # ls -ltrah /usr/local/bin/* | grep "\-rwx"

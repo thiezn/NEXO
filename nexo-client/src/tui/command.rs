@@ -119,11 +119,8 @@ pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, Str
         "prompt document create" => parse_json_args(args, "/prompt document create <json>")
             .map(AppCommand::PromptDocumentCreate),
         "prompt document list" => Ok(AppCommand::PromptDocumentList),
-        "prompt document delete" => {
-            required_arg(args, "/prompt document delete <id>").map(|id| {
-                AppCommand::PromptDocumentDelete(PromptDocumentDeleteParams { id })
-            })
-        }
+        "prompt document delete" => required_arg(args, "/prompt document delete <id>")
+            .map(|id| AppCommand::PromptDocumentDelete(PromptDocumentDeleteParams { id })),
         "prompt collection create" => parse_json_args(args, "/prompt collection create <json>")
             .map(AppCommand::PromptCollectionCreate),
         "prompt collection list" => Ok(AppCommand::PromptCollectionList),
@@ -270,7 +267,7 @@ fn parse_run(args: &str, context: CommandContext<'_>) -> Result<AppCommand, Stri
         session_id,
         instructions: None,
         model_id,
-        thinking: None,
+        reasoning: None,
     }))
 }
 

@@ -10,23 +10,29 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
+fn io_error(message: impl Into<String>) -> cli_helpers::Error {
+    cli_helpers::Error::Io(io::Error::other(message.into()))
+}
+
+fn other_error(message: impl Into<String>) -> cli_helpers::Error {
+    cli_helpers::Error::Other(message.into())
+}
+
 pub struct TerminalHandle {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
 }
 
 impl TerminalHandle {
     pub fn new() -> cli_helpers::Result<Self> {
-        enable_raw_mode()
-            .map_err(|e| cli_helpers::Error::Io(format!("Failed to enable raw mode: {e}")))?;
+        enable_raw_mode().map_err(|e| io_error(format!("Failed to enable raw mode: {e}")))?;
         let mut out = stdout();
-        out.execute(EnterAlternateScreen).map_err(|e| {
-            cli_helpers::Error::Io(format!("Failed to enter alternate screen: {e}"))
-        })?;
+        out.execute(EnterAlternateScreen)
+            .map_err(|e| io_error(format!("Failed to enter alternate screen: {e}")))?;
         out.execute(EnableMouseCapture)
-            .map_err(|e| cli_helpers::Error::Io(format!("Failed to enable mouse capture: {e}")))?;
+            .map_err(|e| io_error(format!("Failed to enable mouse capture: {e}")))?;
 
         let terminal = Terminal::new(CrosstermBackend::new(stdout()))
-            .map_err(|e| cli_helpers::Error::Io(format!("Failed to create terminal: {e}")))?;
+            .map_err(|e| io_error(format!("Failed to create terminal: {e}")))?;
 
         Ok(Self { terminal })
     }
@@ -35,7 +41,7 @@ impl TerminalHandle {
         self.terminal
             .draw(draw_fn)
             .map(|_| ())
-            .map_err(|e| cli_helpers::Error::Io(format!("Terminal draw failed: {e}")))
+            .map_err(|e| io_error(format!("Terminal draw failed: {e}")))
     }
 }
 
@@ -72,17 +78,15 @@ pub fn copy_to_clipboard(text: &str) -> cli_helpers::Result {
         ] {
             match run_clipboard_command(program, args, text) {
                 Ok(()) => return Ok(()),
-                Err(cli_helpers::Error::Io(error))
-                    if error.contains("No such file or directory") =>
-                {
+                Err(cli_helpers::Error::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
                     continue;
                 }
                 Err(error) => return Err(error),
             }
         }
 
-        return Err(cli_helpers::Error::Io(
-            "No supported clipboard utility found (tried wl-copy, xclip, xsel)".to_string(),
+        return Err(other_error(
+            "No supported clipboard utility found (tried wl-copy, xclip, xsel)",
         ));
     }
 
@@ -92,8 +96,8 @@ pub fn copy_to_clipboard(text: &str) -> cli_helpers::Result {
     }
 
     #[allow(unreachable_code)]
-    Err(cli_helpers::Error::Io(
-        "Clipboard copy is not supported on this platform".to_string(),
+    Err(other_error(
+        "Clipboard copy is not supported on this platform",
     ))
 }
 
@@ -102,23 +106,21 @@ fn run_clipboard_command(program: &str, args: &[&str], text: &str) -> cli_helper
         .args(args)
         .stdin(Stdio::piped())
         .spawn()
-        .map_err(|e| cli_helpers::Error::Io(format!("Failed to launch {program}: {e}")))?;
+        .map_err(|e| io_error(format!("Failed to launch {program}: {e}")))?;
 
     if let Some(stdin) = child.stdin.as_mut() {
         stdin
             .write_all(text.as_bytes())
-            .map_err(|e| cli_helpers::Error::Io(format!("Failed to write to {program}: {e}")))?;
+            .map_err(|e| io_error(format!("Failed to write to {program}: {e}")))?;
     }
 
     let status = child
         .wait()
-        .map_err(|e| cli_helpers::Error::Io(format!("Failed to wait for {program}: {e}")))?;
+        .map_err(|e| io_error(format!("Failed to wait for {program}: {e}")))?;
 
     if status.success() {
         Ok(())
     } else {
-        Err(cli_helpers::Error::Io(format!(
-            "{program} exited with status {status}"
-        )))
+        Err(io_error(format!("{program} exited with status {status}")))
     }
 }

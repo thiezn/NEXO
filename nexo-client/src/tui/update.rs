@@ -1,7 +1,11 @@
 use nexo_ws_schema::{
-    CronPayload, EventKind, Frame, HealthResponse, ImageAnalyzeResponse, MessagePayload, Method,
-    PresencePayload, RunEventPayload, RunStartResponse, RunStatus, SendResponse,
-    SessionCreateResponse, ShutdownPayload, StatusResponse,
+    CronListParams, CronListResponse, CronPayload, EventKind, Frame, HealthParams, HealthResponse,
+    ImageAnalyzeResponse, MessagePayload, Method, PresencePayload, PromptCollectionListParams,
+    PromptCollectionListResponse, PromptDocumentListParams, PromptDocumentListResponse,
+    RunEventPayload, RunStartResponse, RunStatus, SendResponse, SessionClearResponse,
+    SessionCreateResponse, SessionGetResponse, SessionListParams, SessionListResponse,
+    ShutdownPayload, StatusParams, StatusResponse, ToolEntry, ToolsCatalogParams,
+    ToolsCatalogResponse, ToolsExecuteResponse,
 };
 
 use super::command::{self, AppCommand, CommandContext};
@@ -139,7 +143,7 @@ fn handle_tick(model: &mut Model) -> Vec<Effect> {
             model,
             PendingRequest::Status { silent: true },
             Method::Status,
-            serde_json::json!({}),
+            StatusParams::default(),
         ) {
             Ok(effect) => effects.push(effect),
             Err(error) => model.push_log(LogKind::Error, "status", error),
@@ -194,13 +198,13 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             model,
             PendingRequest::Health,
             Method::Health,
-            serde_json::json!({}),
+            HealthParams::default(),
         ),
         AppCommand::Status => single_request(
             model,
             PendingRequest::Status { silent: false },
             Method::Status,
-            serde_json::json!({}),
+            StatusParams::default(),
         ),
         AppCommand::Send(params) => {
             single_request(model, PendingRequest::Send, Method::Send, params)
@@ -219,7 +223,7 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             model,
             PendingRequest::SessionList,
             Method::SessionList,
-            serde_json::json!({}),
+            SessionListParams::default(),
         ),
         AppCommand::SessionGet(params) => single_request(
             model,
@@ -237,7 +241,7 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             model,
             PendingRequest::ToolsCatalog,
             Method::ToolsCatalog,
-            serde_json::json!({}),
+            ToolsCatalogParams::default(),
         ),
         AppCommand::ToolsExecute(params) => single_request(
             model,
@@ -255,7 +259,7 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             model,
             PendingRequest::CronList,
             Method::CronList,
-            serde_json::json!({}),
+            CronListParams::default(),
         ),
         AppCommand::CronDelete(params) => single_request(
             model,
@@ -273,7 +277,7 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             model,
             PendingRequest::PromptDocumentList,
             Method::PromptDocumentList,
-            serde_json::json!({}),
+            PromptDocumentListParams::default(),
         ),
         AppCommand::PromptDocumentDelete(params) => single_request(
             model,
@@ -291,7 +295,7 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             model,
             PendingRequest::PromptCollectionList,
             Method::PromptCollectionList,
-            serde_json::json!({}),
+            PromptCollectionListParams::default(),
         ),
         AppCommand::PromptCollectionDelete(params) => single_request(
             model,
@@ -370,16 +374,8 @@ fn handle_success_response(
 ) -> Vec<Effect> {
     match pending {
         PendingRequest::Health => {
-            let response: HealthResponse = match serde_json::from_value(payload) {
-                Ok(response) => response,
-                Err(error) => {
-                    model.push_log(
-                        LogKind::Error,
-                        "health",
-                        format!("Invalid response: {error}"),
-                    );
-                    return Vec::new();
-                }
+            let Some(response) = decode_response::<HealthResponse>(model, "health", payload) else {
+                return Vec::new();
             };
             model.push_log(
                 LogKind::Success,
@@ -391,16 +387,8 @@ fn handle_success_response(
             );
         }
         PendingRequest::Status { silent } => {
-            let response: StatusResponse = match serde_json::from_value(payload.clone()) {
-                Ok(response) => response,
-                Err(error) => {
-                    model.push_log(
-                        LogKind::Error,
-                        "status",
-                        format!("Invalid response: {error}"),
-                    );
-                    return Vec::new();
-                }
+            let Some(response) = decode_response::<StatusResponse>(model, "status", payload) else {
+                return Vec::new();
             };
             model.summary.connected_nodes = Some(response.connected_nodes);
             model.summary.connected_clients = Some(response.connected_users);
@@ -419,12 +407,8 @@ fn handle_success_response(
             }
         }
         PendingRequest::Send => {
-            let response: SendResponse = match serde_json::from_value(payload) {
-                Ok(response) => response,
-                Err(error) => {
-                    model.push_log(LogKind::Error, "send", format!("Invalid response: {error}"));
-                    return Vec::new();
-                }
+            let Some(response) = decode_response::<SendResponse>(model, "send", payload) else {
+                return Vec::new();
             };
             model.push_log(
                 LogKind::Success,
@@ -433,12 +417,8 @@ fn handle_success_response(
             );
         }
         PendingRequest::RunStart => {
-            let response: RunStartResponse = match serde_json::from_value(payload) {
-                Ok(response) => response,
-                Err(error) => {
-                    model.push_log(LogKind::Error, "run", format!("Invalid response: {error}"));
-                    return Vec::new();
-                }
+            let Some(response) = decode_response::<RunStartResponse>(model, "run", payload) else {
+                return Vec::new();
             };
             model.current_session_id = Some(response.session_id.clone());
             model.active_stream = Some(ActiveStream {
@@ -447,6 +427,8 @@ fn handle_success_response(
                 status: response.status,
                 content: String::new(),
                 tool_name: None,
+                tool_call_id: None,
+                thinking_content: None,
                 error: None,
             });
             model.push_log(
@@ -457,18 +439,15 @@ fn handle_success_response(
                     response.run_id, response.session_id, response.status
                 ),
             );
+            if let Some(summary) = response.summary {
+                model.push_log(LogKind::Info, "run summary", summary);
+            }
         }
         PendingRequest::SessionCreate => {
-            let response: SessionCreateResponse = match serde_json::from_value(payload) {
-                Ok(response) => response,
-                Err(error) => {
-                    model.push_log(
-                        LogKind::Error,
-                        "session create",
-                        format!("Invalid response: {error}"),
-                    );
-                    return Vec::new();
-                }
+            let Some(response) =
+                decode_response::<SessionCreateResponse>(model, "session create", payload)
+            else {
+                return Vec::new();
             };
             model.current_session_id = Some(response.session_id.clone());
             model.push_log(
@@ -477,17 +456,118 @@ fn handle_success_response(
                 format!("Current session is {}", response.session_id),
             );
         }
+        PendingRequest::SessionList => {
+            let Some(response) =
+                decode_response::<SessionListResponse>(model, "session list", payload)
+            else {
+                return Vec::new();
+            };
+            model.push_log(
+                LogKind::Response,
+                "session list",
+                format_session_list(&response),
+            );
+        }
+        PendingRequest::SessionGet => {
+            let Some(response) =
+                decode_response::<SessionGetResponse>(model, "session get", payload)
+            else {
+                return Vec::new();
+            };
+            model.current_session_id = Some(response.session_id.clone());
+            model.push_log(
+                LogKind::Response,
+                "session get",
+                format_session_get(&response),
+            );
+        }
+        PendingRequest::SessionClear => {
+            let Some(response) =
+                decode_response::<SessionClearResponse>(model, "session clear", payload)
+            else {
+                return Vec::new();
+            };
+            model.push_log(
+                LogKind::Success,
+                "session clear",
+                format!("cleared={}", response.cleared),
+            );
+        }
+        PendingRequest::ToolsCatalog => {
+            let Some(response) =
+                decode_response::<ToolsCatalogResponse>(model, "tools catalog", payload)
+            else {
+                return Vec::new();
+            };
+            model.push_log(
+                LogKind::Response,
+                "tools catalog",
+                format_tools_catalog(&response.tools),
+            );
+        }
+        PendingRequest::ToolsExecute => {
+            let Some(response) =
+                decode_response::<ToolsExecuteResponse>(model, "tools execute", payload)
+            else {
+                return Vec::new();
+            };
+            let mut parts = vec![format!("success={}", response.success)];
+            if !response.output.is_empty() {
+                parts.push(response.output);
+            }
+            if let Some(error) = response.error {
+                parts.push(format!("error={error}"));
+            }
+            model.push_log(
+                if response.success {
+                    LogKind::Success
+                } else {
+                    LogKind::Error
+                },
+                "tools execute",
+                parts.join("\n"),
+            );
+        }
+        PendingRequest::CronList => {
+            let Some(response) = decode_response::<CronListResponse>(model, "cron list", payload)
+            else {
+                return Vec::new();
+            };
+            model.push_log(LogKind::Response, "cron list", format_cron_list(&response));
+        }
+        PendingRequest::PromptDocumentList => {
+            let Some(response) = decode_response::<PromptDocumentListResponse>(
+                model,
+                "prompt document list",
+                payload,
+            ) else {
+                return Vec::new();
+            };
+            model.push_log(
+                LogKind::Response,
+                "prompt document list",
+                format_prompt_document_list(&response),
+            );
+        }
+        PendingRequest::PromptCollectionList => {
+            let Some(response) = decode_response::<PromptCollectionListResponse>(
+                model,
+                "prompt collection list",
+                payload,
+            ) else {
+                return Vec::new();
+            };
+            model.push_log(
+                LogKind::Response,
+                "prompt collection list",
+                format_prompt_collection_list(&response),
+            );
+        }
         PendingRequest::ImageAnalyze => {
-            let response: ImageAnalyzeResponse = match serde_json::from_value(payload) {
-                Ok(response) => response,
-                Err(error) => {
-                    model.push_log(
-                        LogKind::Error,
-                        "image analyze",
-                        format!("Invalid response: {error}"),
-                    );
-                    return Vec::new();
-                }
+            let Some(response) =
+                decode_response::<ImageAnalyzeResponse>(model, "image analyze", payload)
+            else {
+                return Vec::new();
             };
             model.push_log(
                 LogKind::Success,
@@ -599,6 +679,8 @@ fn handle_run_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effect
         status: event.status,
         content: String::new(),
         tool_name: None,
+        tool_call_id: None,
+        thinking_content: None,
         error: None,
     });
 
@@ -614,7 +696,11 @@ fn handle_run_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effect
     stream.session_id = event.session_id.clone();
     stream.status = event.status;
     stream.tool_name = event.tool_name.clone();
+    stream.tool_call_id = event.tool_call_id.clone();
     stream.error = event.error.clone();
+    if let Some(thinking_content) = event.thinking_content.clone() {
+        stream.thinking_content = Some(thinking_content);
+    }
     if matches!(event.status, RunStatus::Streaming | RunStatus::Accepted)
         && let Some(content) = &event.content
     {
@@ -625,11 +711,16 @@ fn handle_run_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effect
         RunStatus::Queued => model.push_log(
             LogKind::Info,
             "agent",
-            "Run queued, waiting for an inference node",
+            event
+                .content
+                .unwrap_or_else(|| "Run queued, waiting for an inference node".to_string()),
         ),
         RunStatus::Thinking => {}
         RunStatus::ToolCall => {
-            let tool_name = event.tool_name.unwrap_or_else(|| "unknown".to_string());
+            let tool_name = format_tool_activity(
+                event.tool_name.as_deref().unwrap_or("unknown"),
+                event.tool_call_id.as_deref(),
+            );
             if let Some(content) = event.content {
                 model.push_log(
                     LogKind::Info,
@@ -644,7 +735,21 @@ fn handle_run_event(model: &mut Model, payload: serde_json::Value) -> Vec<Effect
         RunStatus::Completed => {
             if let Some(stream) = model.active_stream.take() {
                 model.current_session_id = Some(stream.session_id);
-                model.push_log(LogKind::Success, "assistant", stream.content);
+                if let Some(thinking_content) = stream
+                    .thinking_content
+                    .filter(|thinking| !thinking.is_empty())
+                {
+                    model.push_log(LogKind::Info, "assistant reasoning", thinking_content);
+                }
+                if stream.content.is_empty() {
+                    model.push_log(
+                        LogKind::Warning,
+                        "assistant",
+                        "Run completed without assistant content",
+                    );
+                } else {
+                    model.push_log(LogKind::Success, "assistant", stream.content);
+                }
             }
         }
         RunStatus::Failed => {
@@ -699,6 +804,146 @@ fn enqueue_request(
     }
     model.pending_requests.insert(request_id, pending);
     Ok(Effect::Send(frame))
+}
+
+fn decode_response<T: serde::de::DeserializeOwned>(
+    model: &mut Model,
+    label: &str,
+    payload: serde_json::Value,
+) -> Option<T> {
+    match serde_json::from_value(payload) {
+        Ok(response) => Some(response),
+        Err(error) => {
+            model.push_log(LogKind::Error, label, format!("Invalid response: {error}"));
+            None
+        }
+    }
+}
+
+fn format_tool_activity(tool_name: &str, tool_call_id: Option<&str>) -> String {
+    match tool_call_id {
+        Some(tool_call_id) => format!("{tool_name} ({tool_call_id})"),
+        None => tool_name.to_string(),
+    }
+}
+
+fn format_tools_catalog(tools: &[ToolEntry]) -> String {
+    if tools.is_empty() {
+        return "No tools available".to_string();
+    }
+
+    tools
+        .iter()
+        .map(|tool| {
+            let availability = if tool.available {
+                "available"
+            } else {
+                "unavailable"
+            };
+            match tool.spec.contract_version.as_deref() {
+                Some(contract_version) => format!(
+                    "{} [{}] source={} contract={}",
+                    tool.spec.name, availability, tool.source, contract_version
+                ),
+                None => format!(
+                    "{} [{}] source={}",
+                    tool.spec.name, availability, tool.source
+                ),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_session_list(response: &SessionListResponse) -> String {
+    if response.sessions.is_empty() {
+        return "No sessions".to_string();
+    }
+
+    response
+        .sessions
+        .iter()
+        .map(|session| {
+            format!(
+                "{} name={} promptCollection={} messages={} createdAt={} lastActiveAt={}",
+                session.session_id,
+                session.name.as_deref().unwrap_or("-"),
+                session.prompt_collection_id.as_deref().unwrap_or("-"),
+                session.message_count,
+                session.created_at,
+                session.last_active_at,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_session_get(response: &SessionGetResponse) -> String {
+    format!(
+        "session={}\nname={}\npromptCollection={}\nmessages={}\ncreatedAt={}",
+        response.session_id,
+        response.name.as_deref().unwrap_or("-"),
+        response.prompt_collection_id.as_deref().unwrap_or("-"),
+        response.messages.len(),
+        response.created_at,
+    )
+}
+
+fn format_cron_list(response: &CronListResponse) -> String {
+    if response.jobs.is_empty() {
+        return "No cron jobs".to_string();
+    }
+
+    response
+        .jobs
+        .iter()
+        .map(|job| {
+            format!(
+                "{} name={} schedule={} enabled={} lastRunAt={} nextRunAt={}",
+                job.job_id,
+                job.name,
+                job.schedule,
+                job.enabled,
+                job.last_run_at.as_deref().unwrap_or("-"),
+                job.next_run_at.as_deref().unwrap_or("-"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_prompt_document_list(response: &PromptDocumentListResponse) -> String {
+    if response.documents.is_empty() {
+        return "No prompt documents".to_string();
+    }
+
+    response
+        .documents
+        .iter()
+        .map(|document| document.id.clone())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_prompt_collection_list(response: &PromptCollectionListResponse) -> String {
+    if response.collections.is_empty() {
+        return "No prompt collections".to_string();
+    }
+
+    response
+        .collections
+        .iter()
+        .map(|collection| {
+            format!(
+                "{} name={} documents={} description={}",
+                collection.id,
+                collection.name,
+                collection.documents.join(","),
+                collection.description.as_deref().unwrap_or("-"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn pretty_json(value: &serde_json::Value) -> String {

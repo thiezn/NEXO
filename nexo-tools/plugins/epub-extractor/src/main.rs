@@ -8,14 +8,21 @@ use clap::Parser;
 use cli::{Cli, ImageMode};
 use rayon::prelude::*;
 use std::path::Path;
+use std::process::ExitCode;
 
-fn main() {
+fn main() -> ExitCode {
     let cli = Cli::parse();
-    cli.common.init_tracing()?;
+    if let Err(error) = cli_helpers::init_tracing(cli.log_level, cli.no_color) {
+        eprintln!("{error}");
+        return ExitCode::FAILURE;
+    }
 
-    if let Err(e) = run(&cli) {
-        tracing::error!("{e}");
-        std::process::exit(1);
+    match run(&cli) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!("{error}");
+            ExitCode::FAILURE
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use cli_helpers::LogLevel;
+use cli_helpers::clap::CommonArgs;
 use rayon::prelude::*;
 
 use game_extractor::analyze;
@@ -20,12 +20,6 @@ struct Cli {
 
     #[command(subcommand)]
     command: Command,
-
-    #[arg(short, long, value_enum, default_value_t = LogLevel::Info, global = true)]
-    log_level: LogLevel,
-
-    #[arg(long, global = true)]
-    no_color: bool,
 }
 
 #[derive(Subcommand)]

@@ -8,7 +8,7 @@ name = "game-extractor"
 path = "src/main.rs"
 
 [dependencies]
-cli-helpers = { workspace = true, features = ["progress", "tracing"] }
+cli-helpers = { workspace = true, features = ["clap", "progress", "tracing"] }
 image = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }

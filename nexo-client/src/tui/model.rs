@@ -134,6 +134,8 @@ pub struct ActiveStream {
     pub status: RunStatus,
     pub content: String,
     pub tool_name: Option<String>,
+    pub tool_call_id: Option<String>,
+    pub thinking_content: Option<String>,
     pub error: Option<String>,
 }
 
@@ -493,6 +495,11 @@ impl Model {
             if !stream.content.is_empty() {
                 return Some(stream.content.clone());
             }
+            if let Some(thinking_content) = &stream.thinking_content
+                && !thinking_content.is_empty()
+            {
+                return Some(thinking_content.clone());
+            }
             if let Some(error) = &stream.error {
                 return Some(error.clone());
             }
@@ -529,17 +536,24 @@ impl Model {
     fn activity_entries(&self) -> Vec<LogEntry> {
         let mut entries: Vec<LogEntry> = self.logs.iter().cloned().collect();
         if let Some(stream) = &self.active_stream {
-            let title = match &stream.tool_name {
-                Some(tool_name) => format!("assistant ({:?}, tool: {tool_name})", stream.status),
-                None => format!("assistant ({:?})", stream.status),
+            let title = match (&stream.tool_name, &stream.tool_call_id) {
+                (Some(tool_name), Some(tool_call_id)) => format!(
+                    "assistant ({:?}, tool: {tool_name}, call: {tool_call_id})",
+                    stream.status
+                ),
+                (Some(tool_name), None) => {
+                    format!("assistant ({:?}, tool: {tool_name})", stream.status)
+                }
+                _ => format!("assistant ({:?})", stream.status),
             };
             entries.push(LogEntry {
                 kind: LogKind::Response,
                 title,
                 body: if stream.content.is_empty() {
                     stream
-                        .error
+                        .thinking_content
                         .clone()
+                        .or_else(|| stream.error.clone())
                         .unwrap_or_else(|| "...waiting for response...".to_string())
                 } else {
                     stream.content.clone()
@@ -683,6 +697,26 @@ mod tests {
         );
 
         assert_eq!(model.last_output_text().as_deref(), Some("real output"));
+    }
+
+    #[test]
+    fn last_output_text_uses_reasoning_for_active_stream() {
+        let mut model = make_model();
+        model.active_stream = Some(ActiveStream {
+            run_id: "run-1".into(),
+            session_id: "session-1".into(),
+            status: RunStatus::Thinking,
+            content: String::new(),
+            tool_name: None,
+            tool_call_id: None,
+            thinking_content: Some("planning next step".into()),
+            error: None,
+        });
+
+        assert_eq!(
+            model.last_output_text().as_deref(),
+            Some("planning next step")
+        );
     }
 
     #[test]
