@@ -14,21 +14,13 @@ pub(crate) struct PreparedContext {
 /// Builds the model-facing context for each run round.
 pub(crate) struct ContextManager {
     system_prompt: Option<SystemPrompt>,
-    thinking: bool,
 }
 
 impl ContextManager {
     /// Load prompt-backed configuration needed for the lifetime of a run.
-    pub(crate) async fn new(
-        state: &SharedState,
-        prompt_collection_id: Option<&str>,
-        thinking: bool,
-    ) -> Self {
+    pub(crate) async fn new(state: &SharedState, prompt_collection_id: Option<&str>) -> Self {
         let system_prompt = load_system_prompt(state, prompt_collection_id).await;
-        Self {
-            system_prompt,
-            thinking,
-        }
+        Self { system_prompt }
     }
 
     /// Assemble the messages sent to the model for the next round.
@@ -44,7 +36,6 @@ impl ContextManager {
             &conversation_messages,
             self.system_prompt.as_ref(),
             &tool_prompt_section,
-            self.thinking,
         );
 
         Ok(PreparedContext {
@@ -79,12 +70,8 @@ fn assemble_round_messages(
     conversation_messages: &[ConversationMessage],
     system_prompt: Option<&SystemPrompt>,
     tool_prompt_section: &str,
-    thinking: bool,
 ) -> Vec<ConversationMessage> {
     let mut system_parts = Vec::new();
-    if thinking {
-        system_parts.push(super::engine::THINK_TOKEN.to_string());
-    }
     if let Some(system_prompt) = system_prompt
         && !system_prompt.content.is_empty()
     {

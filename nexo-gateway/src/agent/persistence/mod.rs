@@ -1,6 +1,7 @@
 //! Persistence helpers for conversations, prompts, runs, and sessions.
 
 mod conversations;
+mod db_types;
 mod prompts;
 mod runs;
 mod sessions;
@@ -8,9 +9,10 @@ mod sessions;
 mod tests;
 
 pub use conversations::{
-    ENTRY_ASSISTANT_RESPONSE, ENTRY_INSTRUCTION, ENTRY_TOOL_CALL_INTENT, ENTRY_TOOL_RESULT,
-    ENTRY_USER_INPUT, append_run_instructions, insert_conversation_entry,
-    load_conversation_messages,
+    append_run_instructions, insert_conversation_entry, load_conversation_messages,
+};
+pub use db_types::{
+    ConversationEntryKind, RoundStatus, RunSummaryKind, ToolTraceStatus, run_status_to_db,
 };
 pub use prompts::{
     create_prompt_document, delete_prompt_collection, delete_prompt_document,
@@ -26,5 +28,7 @@ pub use sessions::{clear_session, create_session, get_session, list_sessions};
 pub(crate) use conversations::insert_message;
 #[cfg(test)]
 pub(crate) use runs::store_run_summary;
+
+pub(crate) use runs::decode_reasoning_json;
 
 pub(crate) use prompts::load_prompt_collection_system_prompt;

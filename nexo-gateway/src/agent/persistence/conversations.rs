@@ -1,22 +1,14 @@
 //! Conversation persistence helpers for sessions and runs.
 
+use super::db_types::{
+    ConversationEntryKind, message_role_to_db, parse_entry_kind, parse_message_role,
+};
 use nexo_core::{
     ContentPart, ConversationMessage, MessageRole, MetadataMap, TextPart, ToolCall, ToolCallId,
     ToolResult, ToolResultContent, ToolResultStatus,
 };
 use nexo_ws_schema::Frame;
 use sqlx::SqlitePool;
-
-/// Persisted conversation kind for user-authored input.
-pub const ENTRY_USER_INPUT: &str = "user_input";
-/// Persisted conversation kind for system/developer instructions.
-pub const ENTRY_INSTRUCTION: &str = "instruction";
-/// Persisted conversation kind for assistant-authored final text.
-pub const ENTRY_ASSISTANT_RESPONSE: &str = "assistant_response";
-/// Persisted conversation kind for assistant-emitted tool calls.
-pub const ENTRY_TOOL_CALL_INTENT: &str = "tool_call_intent";
-/// Persisted conversation kind for tool execution results.
-pub const ENTRY_TOOL_RESULT: &str = "tool_result";
 
 type ConversationRow = (String, String, String, Option<String>, Option<String>);
 
@@ -27,9 +19,9 @@ pub async fn insert_conversation_entry(
     session_id: &str,
     run_id: Option<&str>,
     round_id: Option<&str>,
-    role: &str,
+    role: MessageRole,
     content: &str,
-    entry_kind: &str,
+    entry_kind: ConversationEntryKind,
     tool_call_id: Option<&str>,
     tool_name: Option<&str>,
 ) -> Result<String, sqlx::Error> {
@@ -43,9 +35,9 @@ pub async fn insert_conversation_entry(
     .bind(session_id)
     .bind(run_id)
     .bind(round_id)
-    .bind(role)
+    .bind(message_role_to_db(role))
     .bind(content)
-    .bind(entry_kind)
+    .bind(entry_kind.as_str())
     .bind(tool_call_id)
     .bind(tool_name)
     .execute(pool)
@@ -90,13 +82,8 @@ pub async fn insert_message(
     tool_call_id: Option<&str>,
     tool_name: Option<&str>,
 ) -> Result<String, sqlx::Error> {
-    let entry_kind = match role {
-        "user" => ENTRY_USER_INPUT,
-        "assistant" => ENTRY_ASSISTANT_RESPONSE,
-        "system" => ENTRY_INSTRUCTION,
-        "tool" => ENTRY_TOOL_RESULT,
-        _ => ENTRY_ASSISTANT_RESPONSE,
-    };
+    let role = parse_message_role(role)?;
+    let entry_kind = ConversationEntryKind::from_role(role);
 
     insert_conversation_entry(
         pool,
@@ -134,19 +121,14 @@ pub async fn append_run_instructions(
         &session_id,
         Some(run_id),
         None,
-        "system",
+        MessageRole::System,
         &content,
-        ENTRY_INSTRUCTION,
+        ConversationEntryKind::Instruction,
         None,
         None,
     )
     .await?;
     Ok(Some(message_id))
-}
-
-fn decode_role(role: String) -> Result<MessageRole, sqlx::Error> {
-    serde_json::from_value(serde_json::Value::String(role))
-        .map_err(|error| sqlx::Error::Decode(Box::new(error)))
 }
 
 fn conversation_message_from_row(
@@ -156,10 +138,11 @@ fn conversation_message_from_row(
     tool_call_id: Option<String>,
     tool_name: Option<String>,
 ) -> Result<ConversationMessage, sqlx::Error> {
-    let role = decode_role(role)?;
-    let parts = match entry_kind.as_str() {
-        ENTRY_TOOL_CALL_INTENT => tool_call_parts(&content),
-        ENTRY_TOOL_RESULT => tool_result_parts(content, tool_call_id, tool_name),
+    let role = parse_message_role(&role)?;
+    let entry_kind = parse_entry_kind(&entry_kind)?;
+    let parts = match entry_kind {
+        ConversationEntryKind::ToolCallIntent => tool_call_parts(&content),
+        ConversationEntryKind::ToolResult => tool_result_parts(content, tool_call_id, tool_name),
         _ => text_parts(content),
     };
 

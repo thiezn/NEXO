@@ -3,5 +3,8 @@
 mod context_manager;
 mod engine;
 mod events;
+mod inference;
+mod router;
 
-pub use engine::{resume_run, start_run};
+pub(crate) use engine::run_existing;
+pub use engine::start_run;

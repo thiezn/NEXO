@@ -15,6 +15,9 @@ use game_extractor::extractor::{Engine, ExtractionSummary, common::progress, sci
     about = "Extract and analyze assets from adventure game files"
 )]
 struct Cli {
+    #[command(flatten)]
+    pub common: CommonArgs,
+
     #[command(subcommand)]
     command: Command,
 

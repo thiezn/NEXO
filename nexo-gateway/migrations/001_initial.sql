@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS devices (
     id         TEXT PRIMARY KEY,
-    role       TEXT NOT NULL,
+    role       TEXT NOT NULL CHECK (role IN ('user', 'node')),
     first_seen TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -38,9 +38,16 @@ CREATE TABLE IF NOT EXISTS runs (
     id              TEXT PRIMARY KEY,
     session_id      TEXT NOT NULL REFERENCES sessions(id),
     idempotency_key TEXT NOT NULL UNIQUE,
-    status          TEXT NOT NULL DEFAULT 'accepted',
+    status          TEXT NOT NULL DEFAULT 'accepted' CHECK (status IN ('accepted', 'queued', 'thinking', 'tool_call', 'streaming', 'completed', 'failed', 'cancelled')),
     model_id        TEXT,
-    thinking        INTEGER NOT NULL DEFAULT 0,
+    reasoning       TEXT NOT NULL DEFAULT '{"thinking":"disabled"}' CHECK (
+        json_valid(reasoning)
+        AND json_extract(reasoning, '$.thinking') IN ('disabled', 'enabled')
+        AND (
+            json_type(reasoning, '$.effort') IS NULL
+            OR json_extract(reasoning, '$.effort') IN ('low', 'medium', 'high')
+        )
+    ),
     queued_at       TEXT,
     started_at      TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at     TEXT
@@ -50,7 +57,7 @@ CREATE TABLE IF NOT EXISTS run_rounds (
     id               TEXT PRIMARY KEY,
     run_id           TEXT NOT NULL REFERENCES runs(id),
     round_index      INTEGER NOT NULL,
-    status           TEXT NOT NULL DEFAULT 'started',
+    status           TEXT NOT NULL DEFAULT 'started' CHECK (status IN ('started', 'completed', 'failed', 'queued', 'cancelled')),
     selected_peer_id TEXT,
     model_id         TEXT,
     rationale        TEXT,
@@ -64,9 +71,9 @@ CREATE TABLE IF NOT EXISTS conversation_entries (
     session_id   TEXT NOT NULL REFERENCES sessions(id),
     run_id       TEXT REFERENCES runs(id),
     round_id     TEXT REFERENCES run_rounds(id),
-    role         TEXT NOT NULL,
+    role         TEXT NOT NULL CHECK (role IN ('system', 'developer', 'user', 'assistant', 'tool')),
     content      TEXT NOT NULL,
-    entry_kind   TEXT NOT NULL,
+    entry_kind   TEXT NOT NULL CHECK (entry_kind IN ('user_input', 'instruction', 'assistant_response', 'tool_call_intent', 'tool_result')),
     tool_call_id TEXT,
     tool_name    TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -79,7 +86,7 @@ CREATE TABLE IF NOT EXISTS tool_traces (
     tool_call_id TEXT NOT NULL,
     tool_name    TEXT NOT NULL,
     arguments    TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'started',
+    status       TEXT NOT NULL DEFAULT 'started' CHECK (status IN ('started', 'completed', 'failed')),
     output       TEXT,
     error        TEXT,
     started_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -90,7 +97,7 @@ CREATE TABLE IF NOT EXISTS run_summaries (
     id           TEXT PRIMARY KEY,
     run_id       TEXT NOT NULL REFERENCES runs(id),
     round_id     TEXT REFERENCES run_rounds(id),
-    kind         TEXT NOT NULL,
+    kind         TEXT NOT NULL CHECK (kind IN ('final_response', 'failure', 'cancelled', 'terminal_state')),
     content      TEXT NOT NULL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -108,7 +115,7 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     schedule    TEXT NOT NULL,
     input       TEXT NOT NULL,
     session_id  TEXT REFERENCES sessions(id),
-    enabled     INTEGER NOT NULL DEFAULT 1,
+    enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
     last_run_at TEXT,
     next_run_at TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))

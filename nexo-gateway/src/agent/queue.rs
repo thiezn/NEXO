@@ -1,5 +1,5 @@
 use crate::server::state::SharedState;
-use nexo_ws_schema::Frame;
+use nexo_ws_schema::{Frame, RunStatus};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
@@ -12,18 +12,17 @@ pub async fn drain_queue(
     state: &SharedState,
     event_tx: &broadcast::Sender<Frame>,
 ) {
-    // Return early if no LLM node is connected
-    if !state.read().await.has_llm_peer() {
-        return;
-    }
+    let queued_status = crate::agent::persistence::run_status_to_db(RunStatus::Queued);
+    let accepted_status = crate::agent::persistence::run_status_to_db(RunStatus::Accepted);
 
     // Fetch all queued runs in order they were queued
-    let queued: Vec<(String, String, Option<String>, i64)> = match sqlx::query_as(
-        "SELECT ar.id, ar.session_id, ar.model_id, ar.thinking
+    let queued: Vec<(String, String, Option<String>, String)> = match sqlx::query_as(
+        "SELECT ar.id, ar.session_id, ar.model_id, ar.reasoning
             FROM runs ar
-            WHERE ar.status = 'queued'
+            WHERE ar.status = ?
             ORDER BY ar.queued_at ASC",
     )
+    .bind(queued_status)
     .fetch_all(db)
     .await
     {
@@ -40,15 +39,16 @@ pub async fn drain_queue(
 
     tracing::info!("Draining {} queued run(s)", queued.len());
 
-    for (run_id, session_id, model_id, thinking) in queued {
+    for (run_id, session_id, model_id, reasoning_json) in queued {
         // Claim the run by setting status to 'accepted'. This prevents re-processing if another
         // DrainQueue is somehow triggered before this one finishes.
-        let result = sqlx::query(
-            "UPDATE runs SET status = 'accepted', queued_at = NULL WHERE id = ? AND status = 'queued'",
-        )
-        .bind(&run_id)
-        .execute(db)
-        .await;
+        let result =
+            sqlx::query("UPDATE runs SET status = ?, queued_at = NULL WHERE id = ? AND status = ?")
+                .bind(accepted_status)
+                .bind(&run_id)
+                .bind(queued_status)
+                .execute(db)
+                .await;
 
         match result {
             Ok(r) if r.rows_affected() == 1 => {}
@@ -76,16 +76,25 @@ pub async fn drain_queue(
         .flatten()
         .and_then(|(c,)| c);
 
-        super::r#loop::resume_run(
+        let reasoning = match crate::agent::persistence::decode_reasoning_json(&reasoning_json) {
+            Ok(reasoning) => reasoning,
+            Err(error) => {
+                tracing::error!("Failed to decode reasoning for queued run {run_id}: {error}");
+                continue;
+            }
+        };
+
+        // If the node disappeared between the model.status update and this drain pass,
+        // the run loop will cleanly queue the run again via `InferenceOutcome::NoLlmAvailable`.
+        super::r#loop::run_existing(
             &run_id,
             &session_id,
-            "queue-drain",
             db,
             state,
             event_tx,
             model_id.as_deref(),
             prompt_collection_id.as_deref(),
-            thinking != 0,
+            reasoning,
         )
         .await;
     }

@@ -471,7 +471,7 @@ fn run_round_request(request_id: &str, round: RunRoundRequest) -> InferenceReque
         } else {
             ToolChoice::Disabled
         },
-        reasoning: ReasoningSettings::default(),
+        reasoning: round.reasoning,
         output_constraint: OutputConstraint::None,
         sampling: SamplingConfig::default(),
         streaming: StreamingMode::Buffered,
@@ -749,6 +749,7 @@ mod tests {
                     execution: nexo_core::ToolExecutionConstraints::default(),
                     metadata: MetadataMap::new(),
                 }],
+                reasoning: ReasoningSettings::default(),
                 model_id: None,
             },
         );

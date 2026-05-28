@@ -1,7 +1,9 @@
 //! WebSocket handler for image analysis requests.
 
-use crate::server::state::SharedState;
-use nexo_ws_schema::{ErrorPayload, Frame, Method};
+use crate::server::state::{GatewayState, SharedState};
+use nexo_core::ModelCapability;
+use nexo_ws_schema::{ConnectionRole, ErrorPayload, Frame, Method};
+use tokio::sync::mpsc;
 
 use super::base::{ForwardErrorCodes, IMAGE_ANALYSIS_TIMEOUT, forward_to_node};
 
@@ -14,7 +16,7 @@ pub(super) async fn handle(
 ) -> Frame {
     let node_sender = {
         let state_read = state.read().await;
-        match state_read.find_image_analyze_peer() {
+        match find_image_analyze_sender(&state_read) {
             Some((_, sender)) => sender,
             None => {
                 return Frame::error_response(
@@ -41,4 +43,31 @@ pub(super) async fn handle(
         },
     )
     .await
+}
+
+fn find_image_analyze_sender(state: &GatewayState) -> Option<(String, mpsc::Sender<Frame>)> {
+    state.peers.iter().find_map(|(peer_id, peer)| {
+        if peer.role != ConnectionRole::Node {
+            return None;
+        }
+
+        let supports_image_analysis = state.loaded_models.get(peer_id).is_some_and(|models| {
+            models.iter().any(|model| {
+                model
+                    .capabilities
+                    .iter()
+                    .any(|capability| matches!(capability, ModelCapability::ImageInput))
+            })
+        });
+
+        if !supports_image_analysis {
+            return None;
+        }
+
+        state
+            .peer_senders
+            .get(peer_id)
+            .cloned()
+            .map(|sender| (peer_id.clone(), sender))
+    })
 }

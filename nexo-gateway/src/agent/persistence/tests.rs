@@ -3,6 +3,17 @@
 use super::*;
 use sqlx::SqlitePool;
 
+fn disabled_reasoning() -> nexo_core::ReasoningSettings {
+    nexo_core::ReasoningSettings::default()
+}
+
+fn enabled_reasoning() -> nexo_core::ReasoningSettings {
+    nexo_core::ReasoningSettings {
+        thinking: nexo_core::ThinkingMode::Enabled,
+        effort: None,
+    }
+}
+
 #[sqlx::test(migrations = "./migrations")]
 async fn create_session_generates_uuid(pool: SqlitePool) {
     // Insert a user first (FK constraint)
@@ -128,7 +139,7 @@ async fn clear_session_deletes_everything(pool: SqlitePool) {
         .unwrap();
 
     let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
-    create_run(&pool, "run-1", &sid, "idem-1", None, false)
+    create_run(&pool, "run-1", &sid, "idem-1", None, &disabled_reasoning())
         .await
         .unwrap();
     insert_message(&pool, &sid, Some("run-1"), "user", "hello", None, None)
@@ -191,7 +202,7 @@ async fn clear_session_preserves_other_sessions(pool: SqlitePool) {
         &target_session_id,
         "idem-target",
         None,
-        false,
+        &disabled_reasoning(),
     )
     .await
     .unwrap();
@@ -201,7 +212,7 @@ async fn clear_session_preserves_other_sessions(pool: SqlitePool) {
         &other_session_id,
         "idem-keep",
         None,
-        false,
+        &disabled_reasoning(),
     )
     .await
     .unwrap();
@@ -288,17 +299,20 @@ async fn create_and_finish_run(pool: SqlitePool) {
         .unwrap();
 
     let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
-    create_run(&pool, "run-1", &sid, "idem-1", None, false)
+    create_run(&pool, "run-1", &sid, "idem-1", None, &disabled_reasoning())
         .await
         .unwrap();
 
-    let (status, thinking): (String, i64) =
-        sqlx::query_as("SELECT status, thinking FROM runs WHERE id = 'run-1'")
+    let (status, reasoning): (String, String) =
+        sqlx::query_as("SELECT status, reasoning FROM runs WHERE id = 'run-1'")
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(status, "accepted");
-    assert_eq!(thinking, 0);
+    assert_eq!(
+        crate::agent::persistence::decode_reasoning_json(&reasoning).unwrap(),
+        disabled_reasoning()
+    );
 
     finish_run(
         &pool,
@@ -338,7 +352,7 @@ async fn stop_run_marks_run_cancelled(pool: SqlitePool) {
         .unwrap();
 
     let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
-    create_run(&pool, "run-1", &sid, "idem-1", None, false)
+    create_run(&pool, "run-1", &sid, "idem-1", None, &disabled_reasoning())
         .await
         .unwrap();
 
@@ -359,7 +373,7 @@ async fn append_run_instructions_persists_system_message(pool: SqlitePool) {
         .unwrap();
 
     let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
-    create_run(&pool, "run-1", &sid, "idem-1", None, false)
+    create_run(&pool, "run-1", &sid, "idem-1", None, &disabled_reasoning())
         .await
         .unwrap();
 
@@ -391,9 +405,16 @@ async fn round_trace_and_summary_records_persist(pool: SqlitePool) {
         .unwrap();
 
     let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
-    create_run(&pool, "run-1", &sid, "idem-1", Some("gemma"), true)
-        .await
-        .unwrap();
+    create_run(
+        &pool,
+        "run-1",
+        &sid,
+        "idem-1",
+        Some("gemma"),
+        &enabled_reasoning(),
+    )
+    .await
+    .unwrap();
     let round_id = create_round(&pool, "run-1", 1, Some("gemma"))
         .await
         .unwrap();
@@ -407,21 +428,33 @@ async fn round_trace_and_summary_records_persist(pool: SqlitePool) {
     )
     .await
     .unwrap();
-    finish_tool_trace(&pool, &trace_id, true, Some("hello"), None)
-        .await
-        .unwrap();
+    finish_tool_trace(
+        &pool,
+        &trace_id,
+        ToolTraceStatus::Completed,
+        Some("hello"),
+        None,
+    )
+    .await
+    .unwrap();
     finish_round(
         &pool,
         &round_id,
-        "completed",
+        RoundStatus::Completed,
         Some("Reasoning"),
         Some("node-1"),
     )
     .await
     .unwrap();
-    store_run_summary(&pool, "run-1", Some(&round_id), "final_response", "hello")
-        .await
-        .unwrap();
+    store_run_summary(
+        &pool,
+        "run-1",
+        Some(&round_id),
+        RunSummaryKind::FinalResponse,
+        "hello",
+    )
+    .await
+    .unwrap();
 
     let (round_status, rationale, selected_peer_id): (String, Option<String>, Option<String>) =
         sqlx::query_as("SELECT status, rationale, selected_peer_id FROM run_rounds WHERE id = ?")
@@ -455,9 +488,16 @@ async fn next_round_index_starts_after_existing_rounds(pool: SqlitePool) {
         .unwrap();
 
     let (sid, _) = create_session(&pool, "u1", None, None).await.unwrap();
-    create_run(&pool, "run-1", &sid, "idem-1", Some("gemma"), false)
-        .await
-        .unwrap();
+    create_run(
+        &pool,
+        "run-1",
+        &sid,
+        "idem-1",
+        Some("gemma"),
+        &disabled_reasoning(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(next_round_index(&pool, "run-1").await.unwrap(), 1);
 

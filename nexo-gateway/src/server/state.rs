@@ -1,5 +1,5 @@
 use crate::memory::git::GitStorage;
-use nexo_core::{ModelCapability, ModelDescriptor, ToolRegistry};
+use nexo_core::{ModelDescriptor, ToolRegistry};
 use nexo_ws_schema::{ConnectionRole, Frame, Scope, ToolEntry, ToolSpecEntry};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -89,22 +89,6 @@ impl GatewayState {
         }
     }
 
-    fn find_node_peer(
-        &self,
-        mut matches: impl FnMut(&PeerId, &PeerInfo) -> bool,
-    ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.peers.iter().find_map(|(peer_id, peer)| {
-            if peer.role != ConnectionRole::Node || !matches(peer_id, peer) {
-                return None;
-            }
-
-            self.peer_senders
-                .get(peer_id)
-                .cloned()
-                .map(|sender| (peer_id.clone(), sender))
-        })
-    }
-
     /// Register a newly connected peer and its directed sender channel.
     pub fn add_peer(&mut self, info: PeerInfo, sender: mpsc::Sender<Frame>) {
         tracing::info!(
@@ -143,55 +127,6 @@ impl GatewayState {
         self.model_ready_notify.notify_waiters();
     }
 
-    /// Find the first node that has `model_id` loaded in VRAM.
-    pub fn find_loaded_llm_peer(&self, model_id: &str) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_peer(|peer_id, _| {
-            self.loaded_models
-                .get(peer_id)
-                .is_some_and(|models| models.iter().any(|model| model.id.as_str() == model_id))
-        })
-    }
-
-    /// Find the first node that has `model_id` available on disk (not necessarily loaded).
-    pub fn find_capable_peer_for_model(
-        &self,
-        model_id: &str,
-    ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_peer(|peer_id, _| {
-            self.available_models.get(peer_id).is_some_and(|models| {
-                models
-                    .iter()
-                    .any(|available_model| available_model == model_id)
-            })
-        })
-    }
-
-    /// Find the first node that has a loaded model matching the given category predicate.
-    fn find_node_with_loaded_capability(
-        &self,
-        pred: impl Fn(ModelCapability) -> bool,
-    ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_peer(|peer_id, _| {
-            self.loaded_models.get(peer_id).is_some_and(|models| {
-                models
-                    .iter()
-                    .any(|model| model.capabilities.iter().copied().any(&pred))
-            })
-        })
-    }
-
-    /// Find any connected node with a Chat or Tool model loaded.
-    pub fn find_any_llm_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_with_loaded_capability(is_llm_capability)
-    }
-
-    /// Find any connected node with an Image model loaded.
-    pub fn find_image_analyze_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_with_loaded_capability(|capability| {
-            matches!(capability, ModelCapability::ImageInput)
-        })
-    }
-
     /// Find all connected user peers for a routing identity, excluding the origin peer.
     pub fn find_user_peers_by_client_id(
         &self,
@@ -214,11 +149,6 @@ impl GatewayState {
                     .map(|sender| (peer_id.clone(), sender))
             })
             .collect()
-    }
-
-    /// Returns true if any node has a Chat or Tool model loaded.
-    pub fn has_llm_peer(&self) -> bool {
-        self.find_any_llm_peer().is_some()
     }
 
     /// Register tools provided by a node. Returns the number of tools registered.
@@ -257,11 +187,6 @@ impl GatewayState {
         if removed > 0 {
             tracing::info!("Deregistered {removed} tool(s) for peer {peer_id}");
         }
-    }
-
-    /// Look up a registered tool by name.
-    pub fn find_tool(&self, name: &str) -> Option<&RegisteredTool> {
-        self.tool_registry.get(name)
     }
 
     /// Build tool catalog entries from the registry (node tools + gateway-native tools).
@@ -329,13 +254,6 @@ impl GatewayState {
 /// Shared, asynchronously mutable gateway state handle.
 pub type SharedState = Arc<RwLock<GatewayState>>;
 
-fn is_llm_capability(capability: ModelCapability) -> bool {
-    matches!(
-        capability,
-        ModelCapability::TextGeneration | ModelCapability::ToolCalling
-    )
-}
-
 #[cfg(test)]
 pub(crate) fn dummy_sender() -> mpsc::Sender<Frame> {
     let (tx, _rx) = mpsc::channel(1);
@@ -345,26 +263,9 @@ pub(crate) fn dummy_sender() -> mpsc::Sender<Frame> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
-    use nexo_core::{MetadataMap, ModelId, ModelModalities, RoleStrategy, SupportedModality};
+    use nexo_ws_schema::Scope;
 
     use super::*;
-
-    fn make_loaded_model(model_id: &str, capabilities: Vec<ModelCapability>) -> ModelDescriptor {
-        ModelDescriptor {
-            id: ModelId::from(model_id),
-            display_name: model_id.into(),
-            provider: Some("test".into()),
-            capabilities,
-            modalities: ModelModalities {
-                input: vec![SupportedModality::Text],
-                output: vec![SupportedModality::Text],
-            },
-            role_strategy: RoleStrategy::Default,
-            context_window_tokens: Some(4096),
-            max_output_tokens: Some(1024),
-            metadata: MetadataMap::new(),
-        }
-    }
 
     fn make_user_peer(id: &str) -> PeerInfo {
         PeerInfo {
@@ -468,76 +369,6 @@ mod tests {
     }
 
     #[test]
-    fn peer_selection_finds_loaded_model_peer() {
-        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
-        state.add_peer(make_user_peer("u1"), dummy_sender());
-        state.add_peer(make_node_peer("n1", vec![]), dummy_sender());
-        state.add_peer(make_node_peer("n2", vec![]), dummy_sender());
-        state.set_loaded_models(
-            "n1",
-            vec![make_loaded_model(
-                "gemma-3n",
-                vec![ModelCapability::TextGeneration],
-            )],
-        );
-        state.set_loaded_models(
-            "n2",
-            vec![make_loaded_model(
-                "qwen-image",
-                vec![ModelCapability::ImageInput],
-            )],
-        );
-
-        let (peer_id, _sender) = state.find_loaded_llm_peer("gemma-3n").unwrap();
-        assert_eq!(peer_id, "n1");
-        assert!(state.find_loaded_llm_peer("missing-model").is_none());
-    }
-
-    #[test]
-    fn peer_selection_finds_available_model_peer() {
-        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
-        state.add_peer(make_node_peer("n1", vec![]), dummy_sender());
-        state.add_peer(make_node_peer("n2", vec![]), dummy_sender());
-        state.set_available_models("n1", vec!["chat-a".into()]);
-        state.set_available_models("n2", vec!["image-b".into(), "chat-b".into()]);
-
-        let (peer_id, _sender) = state.find_capable_peer_for_model("chat-b").unwrap();
-        assert_eq!(peer_id, "n2");
-        assert!(state.find_capable_peer_for_model("unknown").is_none());
-    }
-
-    #[test]
-    fn peer_selection_matches_loaded_categories() {
-        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
-        state.add_peer(make_node_peer("n-chat", vec![]), dummy_sender());
-        state.add_peer(make_node_peer("n-image", vec![]), dummy_sender());
-        state.set_loaded_models(
-            "n-chat",
-            vec![make_loaded_model(
-                "chatty",
-                vec![
-                    ModelCapability::ToolCalling,
-                    ModelCapability::TextGeneration,
-                ],
-            )],
-        );
-        state.set_loaded_models(
-            "n-image",
-            vec![make_loaded_model(
-                "vision",
-                vec![ModelCapability::ImageInput],
-            )],
-        );
-
-        let (llm_peer_id, _sender) = state.find_any_llm_peer().unwrap();
-        assert_eq!(llm_peer_id, "n-chat");
-
-        let (image_peer_id, _sender) = state.find_image_analyze_peer().unwrap();
-        assert_eq!(image_peer_id, "n-image");
-        assert!(state.has_llm_peer());
-    }
-
-    #[test]
     fn uptime_is_non_negative() {
         let state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         assert!(state.uptime_secs() < 2);
@@ -569,8 +400,8 @@ mod tests {
         let count = state.register_tools("n1", tools);
         assert_eq!(count, 2);
         assert_eq!(state.tool_registry.len(), 2);
-        assert!(state.find_tool("echo.run").is_some());
-        assert!(state.find_tool("echo.ping").is_some());
+        assert!(state.tool_registry.contains_key("echo.run"));
+        assert!(state.tool_registry.contains_key("echo.ping"));
 
         // Remove peer should deregister tools
         state.remove_peer("n1");

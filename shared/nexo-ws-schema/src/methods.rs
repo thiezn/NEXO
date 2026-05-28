@@ -1,5 +1,5 @@
 use nexo_core::message::ConversationMessage;
-use nexo_core::{ModelDescriptor, ToolCall, ToolDefinition};
+use nexo_core::{ModelDescriptor, ReasoningSettings, ToolCall, ToolDefinition};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -153,11 +153,10 @@ pub struct RunStartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
     pub model_id: Option<String>,
-    /// Enable thinking mode (Gemma 4). When true the model emits reasoning
-    /// tokens that are returned in the event but not persisted in history.
+    /// Optional reasoning controls for the run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
-    pub thinking: Option<bool>,
+    pub reasoning: Option<ReasoningSettings>,
 }
 
 /// Parameters for the `run.stop` method.
@@ -274,6 +273,9 @@ pub struct RunRoundRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     /// Field value.
     pub tools: Vec<ToolSpecEntry>,
+    #[serde(default)]
+    /// Reasoning controls for the round.
+    pub reasoning: ReasoningSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
     pub model_id: Option<String>,
@@ -855,7 +857,10 @@ mod tests {
             session_id: Some("sess-1".into()),
             instructions: Some(serde_json::json!({"files": ["a.rs"]})),
             model_id: None,
-            thinking: None,
+            reasoning: Some(nexo_core::ReasoningSettings {
+                thinking: nexo_core::ThinkingMode::Enabled,
+                effort: Some(nexo_core::ReasoningEffort::High),
+            }),
         };
         let json = serde_json::to_string(&params).unwrap();
         let decoded: RunStartParams = serde_json::from_str(&json).unwrap();
@@ -870,7 +875,7 @@ mod tests {
             session_id: None,
             instructions: None,
             model_id: None,
-            thinking: None,
+            reasoning: None,
         };
         let json = serde_json::to_value(&params).unwrap();
         assert!(!json.as_object().unwrap().contains_key("sessionId"));
@@ -1094,6 +1099,7 @@ mod tests {
                 execution: ToolExecutionConstraints::default(),
                 metadata: BTreeMap::new(),
             }],
+            reasoning: nexo_core::ReasoningSettings::default(),
             model_id: Some("gemma-4-e4b-it".into()),
         };
 

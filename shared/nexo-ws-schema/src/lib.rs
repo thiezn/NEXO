@@ -45,6 +45,7 @@ pub use methods::{
 pub use nexo_core::message::{ContentPart, ConversationMessage, MessageRole, TextPart};
 pub use nexo_core::model::ModelDescriptor;
 pub use nexo_core::tools::{ToolCall, ToolDefinition};
+pub use nexo_core::{ReasoningEffort, ReasoningSettings, ThinkingMode};
 pub use schema::{SchemaSection, generate_schema, schema_json};
 pub use types::{ClientInfo, ConnectionRole, DeviceInfo, Platform, Scope};
 

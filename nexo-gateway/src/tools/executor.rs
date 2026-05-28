@@ -29,7 +29,8 @@ pub async fn execute_tool(
     let (node_sender, forwarded_id) = {
         let state_read = state.read().await;
         let tool = state_read
-            .find_tool(&tool_name)
+            .tool_registry
+            .get(&tool_name)
             .ok_or_else(|| format!("Tool '{tool_name}' not found"))?;
         let sender = state_read
             .peer_senders

@@ -51,14 +51,14 @@ pub(super) async fn handle_run_start(
     };
 
     let run_id = Frame::new_id();
-    let thinking = run_params.thinking.unwrap_or(false);
+    let reasoning = run_params.reasoning.unwrap_or_default();
     if let Err(e) = crate::agent::persistence::create_run(
         db,
         &run_id,
         &session_id,
         &run_params.idempotency_key,
         run_params.model_id.as_deref(),
-        thinking,
+        &reasoning,
     )
     .await
     {
@@ -70,10 +70,9 @@ pub(super) async fn handle_run_start(
         session_id: session_id.clone(),
         input: run_params.input,
         instructions: run_params.instructions,
-        peer_id: peer_id.to_string(),
         model_id: run_params.model_id,
         prompt_collection_id,
-        thinking,
+        reasoning,
     };
     if let Err(e) = run_handle.submit(cmd).await {
         tracing::error!("Failed to submit run command: {e}");

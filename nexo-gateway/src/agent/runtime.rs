@@ -1,6 +1,7 @@
 //! Background run task spawning and command transport.
 
 use crate::server::state::SharedState;
+use nexo_core::ReasoningSettings;
 use nexo_ws_schema::Frame;
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
@@ -17,14 +18,12 @@ pub enum RunCommand {
         input: String,
         /// Optional structured instructions appended to the request.
         instructions: Option<serde_json::Value>,
-        /// Originating peer that submitted the run.
-        peer_id: String,
         /// Explicit model requested for the run, if any.
         model_id: Option<String>,
         /// Optional stored prompt collection selected for the run.
         prompt_collection_id: Option<String>,
-        /// Whether the model should expose thinking output.
-        thinking: bool,
+        /// Typed reasoning controls for the run.
+        reasoning: ReasoningSettings,
     },
     /// Drain queued runs when a compatible node becomes available.
     DrainQueue,
@@ -57,7 +56,7 @@ async fn run_task(
     state: SharedState,
     event_tx: broadcast::Sender<Frame>,
 ) {
-    tracing::info!("Scheduler started");
+    tracing::info!("Agent Loop started");
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             RunCommand::StartRun {
@@ -65,24 +64,24 @@ async fn run_task(
                 session_id,
                 input,
                 instructions,
-                peer_id,
                 model_id,
                 prompt_collection_id,
-                thinking,
+                reasoning,
             } => {
-                tracing::info!("Starting run {run_id} (session={session_id}, thinking={thinking})");
+                tracing::info!(
+                    "Starting run {run_id} (session={session_id}, reasoning={reasoning:?})"
+                );
                 super::r#loop::start_run(
                     &run_id,
                     &session_id,
                     &input,
                     instructions.as_ref(),
-                    &peer_id,
                     &db,
                     &state,
                     &event_tx,
                     model_id.as_deref(),
                     prompt_collection_id.as_deref(),
-                    thinking,
+                    reasoning,
                 )
                 .await;
             }
@@ -92,5 +91,5 @@ async fn run_task(
             }
         }
     }
-    tracing::info!("Scheduler shut down");
+    tracing::info!("Agent Loop shut down");
 }

@@ -1,5 +1,7 @@
 //! Run, round, and tool-trace persistence helpers.
 
+use super::db_types::{RoundStatus, RunSummaryKind, ToolTraceStatus, run_status_to_db};
+use nexo_core::ReasoningSettings;
 use nexo_ws_schema::{Frame, RunStatus};
 use sqlx::SqlitePool;
 
@@ -10,20 +12,32 @@ pub async fn create_run(
     session_id: &str,
     idempotency_key: &str,
     model_id: Option<&str>,
-    thinking: bool,
+    reasoning: &ReasoningSettings,
 ) -> Result<(), sqlx::Error> {
+    let reasoning_json = encode_reasoning_json(reasoning)?;
     sqlx::query(
-        "INSERT INTO runs (id, session_id, idempotency_key, model_id, thinking)
+        "INSERT INTO runs (id, session_id, idempotency_key, model_id, reasoning)
          VALUES (?, ?, ?, ?, ?)",
     )
     .bind(run_id)
     .bind(session_id)
     .bind(idempotency_key)
     .bind(model_id)
-    .bind(if thinking { 1 } else { 0 })
+    .bind(reasoning_json)
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Decode serialized reasoning settings read from SQLite.
+pub(crate) fn decode_reasoning_json(
+    reasoning_json: &str,
+) -> Result<ReasoningSettings, sqlx::Error> {
+    serde_json::from_str(reasoning_json).map_err(|error| sqlx::Error::Decode(Box::new(error)))
+}
+
+fn encode_reasoning_json(reasoning: &ReasoningSettings) -> Result<String, sqlx::Error> {
+    serde_json::to_string(reasoning).map_err(|error| sqlx::Error::Encode(Box::new(error)))
 }
 
 /// Return the next round index that should be used for a run.
@@ -45,13 +59,16 @@ pub async fn create_round(
     model_id: Option<&str>,
 ) -> Result<String, sqlx::Error> {
     let round_id = Frame::new_id();
-    sqlx::query("INSERT INTO run_rounds (id, run_id, round_index, model_id) VALUES (?, ?, ?, ?)")
-        .bind(&round_id)
-        .bind(run_id)
-        .bind(round_index as i64)
-        .bind(model_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO run_rounds (id, run_id, round_index, status, model_id) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&round_id)
+    .bind(run_id)
+    .bind(round_index as i64)
+    .bind(RoundStatus::Started.as_str())
+    .bind(model_id)
+    .execute(pool)
+    .await?;
     Ok(round_id)
 }
 
@@ -59,7 +76,7 @@ pub async fn create_round(
 pub async fn finish_round(
     pool: &SqlitePool,
     round_id: &str,
-    status: &str,
+    status: RoundStatus,
     rationale: Option<&str>,
     selected_peer_id: Option<&str>,
 ) -> Result<(), sqlx::Error> {
@@ -68,7 +85,7 @@ pub async fn finish_round(
          SET status = ?, rationale = ?, selected_peer_id = ?, finished_at = datetime('now')
          WHERE id = ?",
     )
-    .bind(status)
+    .bind(status.as_str())
     .bind(rationale)
     .bind(selected_peer_id)
     .bind(round_id)
@@ -89,8 +106,8 @@ pub async fn create_tool_trace(
     let trace_id = Frame::new_id();
     let arguments_json = serde_json::to_string(arguments).unwrap_or_default();
     sqlx::query(
-        "INSERT INTO tool_traces (id, run_id, round_id, tool_call_id, tool_name, arguments)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tool_traces (id, run_id, round_id, tool_call_id, tool_name, arguments, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&trace_id)
     .bind(run_id)
@@ -98,6 +115,7 @@ pub async fn create_tool_trace(
     .bind(tool_call_id)
     .bind(tool_name)
     .bind(arguments_json)
+    .bind(ToolTraceStatus::Started.as_str())
     .execute(pool)
     .await?;
     Ok(trace_id)
@@ -107,17 +125,16 @@ pub async fn create_tool_trace(
 pub async fn finish_tool_trace(
     pool: &SqlitePool,
     trace_id: &str,
-    success: bool,
+    status: ToolTraceStatus,
     output: Option<&str>,
     error: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    let status = if success { "completed" } else { "failed" };
     sqlx::query(
         "UPDATE tool_traces
          SET status = ?, output = ?, error = ?, finished_at = datetime('now')
          WHERE id = ?",
     )
-    .bind(status)
+    .bind(status.as_str())
     .bind(output)
     .bind(error)
     .bind(trace_id)
@@ -131,7 +148,7 @@ pub async fn store_run_summary(
     pool: &SqlitePool,
     run_id: &str,
     round_id: Option<&str>,
-    kind: &str,
+    kind: RunSummaryKind,
     content: &str,
 ) -> Result<String, sqlx::Error> {
     let summary_id = Frame::new_id();
@@ -142,7 +159,7 @@ pub async fn store_run_summary(
     .bind(&summary_id)
     .bind(run_id)
     .bind(round_id)
-    .bind(kind)
+    .bind(kind.as_str())
     .bind(content)
     .execute(pool)
     .await?;
@@ -161,15 +178,11 @@ pub async fn stop_run(pool: &SqlitePool, run_id: &str) -> Result<Option<String>,
         return Ok(None);
     };
 
-    let status = serde_json::to_value(RunStatus::Cancelled)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .unwrap_or_else(|| "cancelled".to_string());
     let result = sqlx::query(
         "UPDATE runs SET status = ?, finished_at = datetime('now') \
          WHERE id = ? AND finished_at IS NULL",
     )
-    .bind(status)
+    .bind(run_status_to_db(RunStatus::Cancelled))
     .bind(run_id)
     .execute(pool)
     .await?;
@@ -190,16 +203,17 @@ pub async fn is_run_cancelled(pool: &SqlitePool, run_id: &str) -> Result<bool, s
 
     Ok(matches!(
         row.as_ref().map(|(status,)| status.as_str()),
-        Some("cancelled")
+        Some(status) if status == run_status_to_db(RunStatus::Cancelled)
     ))
 }
 
 /// Mark a run as queued while it waits for an inference-capable node.
 pub async fn mark_run_queued(pool: &SqlitePool, run_id: &str) {
     if let Err(error) = sqlx::query(
-        "UPDATE runs SET status = 'queued', queued_at = datetime('now') \
+        "UPDATE runs SET status = ?, queued_at = datetime('now') \
          WHERE id = ? AND finished_at IS NULL",
     )
+    .bind(run_status_to_db(RunStatus::Queued))
     .bind(run_id)
     .execute(pool)
     .await
@@ -217,14 +231,11 @@ pub async fn finish_run(
     status: RunStatus,
     summary: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    let status_str = serde_json::to_value(status)
-        .ok()
-        .and_then(|value| value.as_str().map(String::from));
     let result = sqlx::query(
         "UPDATE runs SET status = ?, finished_at = datetime('now') \
          WHERE id = ? AND finished_at IS NULL",
     )
-    .bind(status_str.as_deref().unwrap_or("failed"))
+    .bind(run_status_to_db(status))
     .bind(run_id)
     .execute(pool)
     .await?;
@@ -232,12 +243,7 @@ pub async fn finish_run(
     if result.rows_affected() == 1
         && let Some(summary_text) = summary
     {
-        let kind = match status {
-            RunStatus::Completed => "final_response",
-            RunStatus::Failed => "failure",
-            RunStatus::Cancelled => "cancelled",
-            _ => "terminal_state",
-        };
+        let kind = RunSummaryKind::from_terminal_run_status(status);
         let _ = store_run_summary(pool, run_id, None, kind, summary_text).await;
     }
 
