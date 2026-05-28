@@ -4,7 +4,7 @@ use crate::common::MetadataMap;
 
 use super::{ContentPart, MessageRole};
 
-/// A single message in a conversation transcript.
+/// A single message in a conversation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ConversationMessage {

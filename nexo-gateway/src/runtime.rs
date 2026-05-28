@@ -4,7 +4,7 @@ use crate::agent::RunHandle;
 use crate::config::GatewayConfig;
 use crate::memory::git::GitStorage;
 use crate::server::state::{GatewayState, SharedState};
-use crate::tools::GatewayToolExecutor;
+use nexo_core::{ToolDefinition, ToolExecutor, ToolRegistry};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
@@ -31,11 +31,11 @@ pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
 
     info!(
         "Registered {} gateway tool(s)",
-        gateway_tools.tool_entries().len(),
+        gateway_tools.definitions().len(),
     );
 
     let mut gateway_state = GatewayState::new(storage_root);
-    gateway_state.gateway_tools = gateway_tools;
+    gateway_state.gateway_tools = Arc::new(gateway_tools);
     gateway_state.git_storage = git_storage;
     let event_tx = gateway_state.event_tx.clone();
     let state: SharedState = Arc::new(RwLock::new(gateway_state));
@@ -48,7 +48,7 @@ pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
     let addr = config.bind_addr();
     let listener = TcpListener::bind(&addr)
         .await
-        .map_err(|error| cli_helpers::Error::Network(format!("Failed to bind {addr}: {error}")))?;
+        .map_err(|error| cli_helpers::Error::Other(format!("Failed to bind {addr}: {error}")))?;
 
     info!("NEXO Gateway listening on ws://{addr}");
 
@@ -58,7 +58,7 @@ pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
         let (stream, peer_addr) = listener
             .accept()
             .await
-            .map_err(|error| cli_helpers::Error::Network(format!("Accept failed: {error}")))?;
+            .map_err(|error| cli_helpers::Error::Other(format!("Accept failed: {error}")))?;
 
         debug!("New TCP connection from {peer_addr}");
 
@@ -133,19 +133,37 @@ async fn open_git_storage(config: &GatewayConfig) -> Option<Arc<GitStorage>> {
 }
 
 /// Build the registry of tools that run directly inside the gateway process.
-fn build_gateway_tools(git_storage: Option<&Arc<GitStorage>>) -> GatewayToolExecutor {
-    let mut gateway_tools = GatewayToolExecutor::new();
+fn build_gateway_tools(git_storage: Option<&Arc<GitStorage>>) -> ToolRegistry {
+    let mut gateway_tools = ToolRegistry::new();
     if let Some(storage) = git_storage {
-        for tool in nexo_notes::tools::all_tools(storage.clone()) {
-            gateway_tools.register(tool);
+        for definition in nexo_notes::tools::all_tools(storage.clone()) {
+            register_gateway_tool(
+                &mut gateway_tools,
+                definition,
+                nexo_notes::tools::NotesToolExecutor::new(storage.clone()),
+            );
         }
     }
 
-    for tool in nexo_io::tools::all_tools() {
-        gateway_tools.register(tool);
+    for definition in nexo_io::tools::all_tools() {
+        register_gateway_tool(
+            &mut gateway_tools,
+            definition,
+            nexo_io::tools::IoToolExecutor::new(),
+        );
     }
 
     gateway_tools
+}
+
+fn register_gateway_tool<T>(registry: &mut ToolRegistry, definition: ToolDefinition, executor: T)
+where
+    T: ToolExecutor + 'static,
+{
+    let name = definition.name.clone();
+    if let Err(error) = registry.register(definition, executor) {
+        warn!("Failed to register gateway tool '{name}': {error}");
+    }
 }
 
 /// Seed any default cron jobs that should exist for a fresh gateway instance.

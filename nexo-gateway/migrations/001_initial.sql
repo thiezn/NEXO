@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS run_rounds (
     UNIQUE (run_id, round_index)
 );
 
-CREATE TABLE IF NOT EXISTS transcript_entries (
+CREATE TABLE IF NOT EXISTS conversation_entries (
     id           TEXT PRIMARY KEY,
     session_id   TEXT NOT NULL REFERENCES sessions(id),
     run_id       TEXT REFERENCES runs(id),
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS node_models (
 
 -- Indexes
 
-CREATE INDEX IF NOT EXISTS idx_transcript_entries_session ON transcript_entries(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_conversation_entries_session ON conversation_entries(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_run_rounds_run ON run_rounds(run_id, round_index);
 CREATE INDEX IF NOT EXISTS idx_tool_traces_run ON tool_traces(run_id, round_id);
 CREATE INDEX IF NOT EXISTS idx_run_summaries_run ON run_summaries(run_id, created_at);

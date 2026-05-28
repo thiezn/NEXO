@@ -1,7 +1,7 @@
 //! CRUD helpers for stored prompt markdown documents.
 
 use crate::memory::git::GitStorage;
-use nexo_spec::prompt::PromptDocument;
+use nexo_ws_schema::PromptDocument;
 
 const PROMPTS_DIR: &str = "PROMPTS/";
 

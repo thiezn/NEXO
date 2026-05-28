@@ -11,6 +11,7 @@ path = "src/main.rs"
 nexo-ws-schema = { workspace = true, features = ["clap"] }
 nexo-core = { workspace = true, features = ["schema"] }
 cli-helpers = { workspace = true, features = [
+    "clap",
     "config",
     "interactive",
     "paths",

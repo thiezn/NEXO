@@ -1,6 +1,5 @@
 use crate::memory::git::GitStorage;
-use crate::tools::GatewayToolExecutor;
-use nexo_spec::model::{LoadedModelInfo, ModelCategory};
+use nexo_core::{ModelCapability, ModelDescriptor, ToolRegistry};
 use nexo_ws_schema::{ConnectionRole, Frame, Scope, ToolEntry, ToolSpecEntry};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -56,8 +55,8 @@ pub struct GatewayState {
     pub event_tx: broadcast::Sender<Frame>,
     /// Timestamp at which the gateway state was initialized.
     pub started_at: chrono::DateTime<chrono::Utc>,
-    /// Models currently loaded in VRAM per node with their categories.
-    pub loaded_models: HashMap<PeerId, Vec<LoadedModelInfo>>,
+    /// Models currently loaded in VRAM per node.
+    pub loaded_models: HashMap<PeerId, Vec<ModelDescriptor>>,
     /// Model IDs available on disk per node (declared at connect time).
     pub available_models: HashMap<PeerId, Vec<String>>,
     /// Notified whenever a node's loaded model changes (used to wake the queue drain watcher).
@@ -65,7 +64,7 @@ pub struct GatewayState {
     /// Resolved path to the storage root (~/.nexo/storage).
     pub storage_root: PathBuf,
     /// Tools that execute locally on the gateway (e.g., notes).
-    pub gateway_tools: GatewayToolExecutor,
+    pub gateway_tools: Arc<ToolRegistry>,
     /// Git-backed storage for persistent data such as notes and prompt documents.
     pub git_storage: Option<Arc<GitStorage>>,
 }
@@ -85,7 +84,7 @@ impl GatewayState {
             available_models: HashMap::new(),
             model_ready_notify: Arc::new(Notify::new()),
             storage_root,
-            gateway_tools: GatewayToolExecutor::new(),
+            gateway_tools: Arc::new(ToolRegistry::new()),
             git_storage: None,
         }
     }
@@ -109,10 +108,14 @@ impl GatewayState {
     /// Register a newly connected peer and its directed sender channel.
     pub fn add_peer(&mut self, info: PeerInfo, sender: mpsc::Sender<Frame>) {
         tracing::info!(
-            "Peer connected: {} (role={:?}, client={})",
+            "Peer connected: {} (role={:?}, client={}, device={:?}, scopes={}, connected_at={}, storage_root={})",
             info.id,
             info.role,
-            info.client_id
+            info.client_id,
+            info.device_id,
+            info.scopes.len(),
+            info.connected_at,
+            self.storage_root.display()
         );
         self.peer_senders.insert(info.id.clone(), sender);
         self.peers.insert(info.id.clone(), info);
@@ -135,7 +138,7 @@ impl GatewayState {
     }
 
     /// Update the loaded models for a node. Notifies queue drain waiters.
-    pub fn set_loaded_models(&mut self, peer_id: &str, models: Vec<LoadedModelInfo>) {
+    pub fn set_loaded_models(&mut self, peer_id: &str, models: Vec<ModelDescriptor>) {
         self.loaded_models.insert(peer_id.to_string(), models);
         self.model_ready_notify.notify_waiters();
     }
@@ -145,7 +148,7 @@ impl GatewayState {
         self.find_node_peer(|peer_id, _| {
             self.loaded_models
                 .get(peer_id)
-                .is_some_and(|models| models.iter().any(|model| model.model_id == model_id))
+                .is_some_and(|models| models.iter().any(|model| model.id.as_str() == model_id))
         })
     }
 
@@ -164,27 +167,29 @@ impl GatewayState {
     }
 
     /// Find the first node that has a loaded model matching the given category predicate.
-    fn find_node_with_loaded_category(
+    fn find_node_with_loaded_capability(
         &self,
-        pred: impl Fn(&ModelCategory) -> bool,
+        pred: impl Fn(ModelCapability) -> bool,
     ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
         self.find_node_peer(|peer_id, _| {
             self.loaded_models.get(peer_id).is_some_and(|models| {
                 models
                     .iter()
-                    .any(|model| model.categories.iter().any(&pred))
+                    .any(|model| model.capabilities.iter().copied().any(&pred))
             })
         })
     }
 
     /// Find any connected node with a Chat or Tool model loaded.
     pub fn find_any_llm_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_with_loaded_category(is_llm_category)
+        self.find_node_with_loaded_capability(is_llm_capability)
     }
 
     /// Find any connected node with an Image model loaded.
     pub fn find_image_analyze_peer(&self) -> Option<(PeerId, mpsc::Sender<Frame>)> {
-        self.find_node_with_loaded_category(|c| matches!(c, ModelCategory::Image))
+        self.find_node_with_loaded_capability(|capability| {
+            matches!(capability, ModelCapability::ImageInput)
+        })
     }
 
     /// Find all connected user peers for a routing identity, excluding the origin peer.
@@ -239,7 +244,10 @@ impl GatewayState {
         let before = self.tool_registry.len();
         self.tool_registry.retain(|name, tool| {
             if tool.peer_id == peer_id {
-                tracing::debug!("Deregistered tool '{name}' (peer {peer_id} disconnected)");
+                tracing::debug!(
+                    "Deregistered tool '{name}' (peer {peer_id} disconnected, registered_at={})",
+                    tool.registered_at
+                );
                 false
             } else {
                 true
@@ -269,7 +277,12 @@ impl GatewayState {
                 )
             })
             .collect();
-        entries.extend(self.gateway_tools.tool_entries());
+        entries.extend(
+            self.gateway_tools
+                .definitions()
+                .into_iter()
+                .map(|definition| ToolEntry::new(definition, "gateway", true)),
+        );
         entries
     }
 
@@ -316,8 +329,11 @@ impl GatewayState {
 /// Shared, asynchronously mutable gateway state handle.
 pub type SharedState = Arc<RwLock<GatewayState>>;
 
-fn is_llm_category(c: &ModelCategory) -> bool {
-    matches!(c, ModelCategory::Chat | ModelCategory::Tool)
+fn is_llm_capability(capability: ModelCapability) -> bool {
+    matches!(
+        capability,
+        ModelCapability::TextGeneration | ModelCapability::ToolCalling
+    )
 }
 
 #[cfg(test)]
@@ -329,12 +345,24 @@ pub(crate) fn dummy_sender() -> mpsc::Sender<Frame> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+    use nexo_core::{MetadataMap, ModelId, ModelModalities, RoleStrategy, SupportedModality};
+
     use super::*;
 
-    fn make_loaded_model(model_id: &str, categories: Vec<ModelCategory>) -> LoadedModelInfo {
-        LoadedModelInfo {
-            model_id: model_id.into(),
-            categories,
+    fn make_loaded_model(model_id: &str, capabilities: Vec<ModelCapability>) -> ModelDescriptor {
+        ModelDescriptor {
+            id: ModelId::from(model_id),
+            display_name: model_id.into(),
+            provider: Some("test".into()),
+            capabilities,
+            modalities: ModelModalities {
+                input: vec![SupportedModality::Text],
+                output: vec![SupportedModality::Text],
+            },
+            role_strategy: RoleStrategy::Default,
+            context_window_tokens: Some(4096),
+            max_output_tokens: Some(1024),
+            metadata: MetadataMap::new(),
         }
     }
 
@@ -447,11 +475,17 @@ mod tests {
         state.add_peer(make_node_peer("n2", vec![]), dummy_sender());
         state.set_loaded_models(
             "n1",
-            vec![make_loaded_model("gemma-3n", vec![ModelCategory::Chat])],
+            vec![make_loaded_model(
+                "gemma-3n",
+                vec![ModelCapability::TextGeneration],
+            )],
         );
         state.set_loaded_models(
             "n2",
-            vec![make_loaded_model("qwen-image", vec![ModelCategory::Image])],
+            vec![make_loaded_model(
+                "qwen-image",
+                vec![ModelCapability::ImageInput],
+            )],
         );
 
         let (peer_id, _sender) = state.find_loaded_llm_peer("gemma-3n").unwrap();
@@ -481,12 +515,18 @@ mod tests {
             "n-chat",
             vec![make_loaded_model(
                 "chatty",
-                vec![ModelCategory::Tool, ModelCategory::Chat],
+                vec![
+                    ModelCapability::ToolCalling,
+                    ModelCapability::TextGeneration,
+                ],
             )],
         );
         state.set_loaded_models(
             "n-image",
-            vec![make_loaded_model("vision", vec![ModelCategory::Image])],
+            vec![make_loaded_model(
+                "vision",
+                vec![ModelCapability::ImageInput],
+            )],
         );
 
         let (llm_peer_id, _sender) = state.find_any_llm_peer().unwrap();
@@ -515,6 +555,7 @@ mod tests {
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: None,
                 execution: Default::default(),
+                metadata: Default::default(),
             },
             ToolSpecEntry {
                 name: "echo.ping".into(),
@@ -522,6 +563,7 @@ mod tests {
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: None,
                 execution: Default::default(),
+                metadata: Default::default(),
             },
         ];
         let count = state.register_tools("n1", tools);
@@ -547,6 +589,7 @@ mod tests {
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: Some("2026-05-22".into()),
                 execution: Default::default(),
+                metadata: Default::default(),
             }],
         );
 
@@ -571,6 +614,7 @@ mod tests {
                     parameters: serde_json::json!({}),
                     contract_version: None,
                     execution: Default::default(),
+                    metadata: Default::default(),
                 },
                 peer_id: "gone".into(),
                 registered_at: chrono::Utc::now(),

@@ -348,7 +348,7 @@ async fn stop_run_marks_run_cancelled(pool: SqlitePool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
-async fn append_run_context_persists_system_message(pool: SqlitePool) {
+async fn append_run_instructions_persists_system_message(pool: SqlitePool) {
     sqlx::query("INSERT INTO devices (id, role) VALUES ('dev-1', 'user')")
         .execute(&pool)
         .await
@@ -363,9 +363,10 @@ async fn append_run_context_persists_system_message(pool: SqlitePool) {
         .await
         .unwrap();
 
-    let message_id = append_run_context(&pool, "run-1", &serde_json::json!({"hint": "use notes"}))
-        .await
-        .unwrap();
+    let message_id =
+        append_run_instructions(&pool, "run-1", &serde_json::json!({"hint": "use notes"}))
+            .await
+            .unwrap();
     assert!(message_id.is_some());
 
     let row: (String, String) = sqlx::query_as(

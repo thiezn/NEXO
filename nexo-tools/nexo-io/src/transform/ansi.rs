@@ -1,12 +1,15 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-static ANSI_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").expect("valid ANSI regex"));
+static ANSI_RE: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]"));
 
 /// Strip ANSI escape codes (colors, styles) from a string.
 pub fn strip_ansi(text: &str) -> String {
-    ANSI_RE.replace_all(text, "").into_owned()
+    match &*ANSI_RE {
+        Ok(regex) => regex.replace_all(text, "").into_owned(),
+        Err(_) => text.to_string(),
+    }
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ use crate::ids::ToolCallId;
 /// A concrete tool call emitted by a model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
 pub struct ToolCall {
     /// The unique identifier assigned to the tool call.
     pub id: ToolCallId,
@@ -22,6 +23,7 @@ pub struct ToolCall {
 /// A partial streamed update for a tool call under construction.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
 pub struct ToolCallDelta {
     /// The zero-based order of the call within the response.
     pub index: usize,
@@ -33,5 +35,6 @@ pub struct ToolCallDelta {
     pub name: Option<String>,
 
     /// The incremental JSON argument text received so far.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arguments_delta: Option<String>,
 }

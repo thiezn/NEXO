@@ -39,7 +39,7 @@ pub async fn run_init() -> cli_helpers::Result {
     let storage_root = cli_helpers::resolve_path_str(&config.storage_root)?;
     let markdown_dir = storage_root.join("markdown");
     std::fs::create_dir_all(&markdown_dir).map_err(|e| {
-        cli_helpers::Error::Io(format!(
+        cli_helpers::Error::Other(format!(
             "Failed to create markdown dir '{}': {e}",
             markdown_dir.display()
         ))

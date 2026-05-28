@@ -1,12 +1,12 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-static SCRIPT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<script[^>]*>.*?</script>").expect("valid script regex"));
-static STYLE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>.*?</style>").expect("valid style regex"));
-static HTML_TAG_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<[^>]+>").expect("valid html-tag regex"));
+static SCRIPT_RE: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r"(?is)<script[^>]*>.*?</script>"));
+static STYLE_RE: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>.*?</style>"));
+static HTML_TAG_RE: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r"<[^>]+>"));
 
 /// Convert HTML to readable markdown using async streaming.
 ///
@@ -54,10 +54,10 @@ fn post_process(text: &str) -> String {
 /// Fallback: strip HTML tags and decode common entities.
 fn fallback_strip_tags(html: &str) -> String {
     // Remove script and style blocks first
-    let no_scripts = SCRIPT_RE.replace_all(html, "");
-    let no_scripts = STYLE_RE.replace_all(&no_scripts, "");
+    let no_scripts = replace_all(&SCRIPT_RE, html, "");
+    let no_scripts = replace_all(&STYLE_RE, &no_scripts, "");
     // Strip remaining tags
-    let no_tags = HTML_TAG_RE.replace_all(&no_scripts, "");
+    let no_tags = replace_all(&HTML_TAG_RE, &no_scripts, "");
     // Decode common HTML entities
     let decoded = no_tags
         .replace("&amp;", "&")
@@ -67,6 +67,17 @@ fn fallback_strip_tags(html: &str) -> String {
         .replace("&#39;", "'")
         .replace("&nbsp;", " ");
     post_process(&decoded)
+}
+
+fn replace_all(
+    regex: &LazyLock<Result<Regex, regex::Error>>,
+    text: &str,
+    replacement: &str,
+) -> String {
+    match &**regex {
+        Ok(regex) => regex.replace_all(text, replacement).into_owned(),
+        Err(_) => text.to_string(),
+    }
 }
 
 #[cfg(test)]

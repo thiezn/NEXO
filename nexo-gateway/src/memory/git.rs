@@ -59,10 +59,10 @@ impl GitStorage {
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let ft = entry.file_type()?;
-            if ft.is_file() {
-                if let Some(name) = entry.file_name().to_str() {
-                    files.push(name.to_string());
-                }
+            if ft.is_file()
+                && let Some(name) = entry.file_name().to_str()
+            {
+                files.push(name.to_string());
             }
         }
         files.sort();
@@ -148,7 +148,6 @@ impl GitStorage {
 }
 
 /// Bridge `GitStorage` into the `nexo_notes::NoteStorage` trait.
-
 impl nexo_notes::NoteStorage for GitStorage {
     fn write_note(&self, filename: &str, content: &str) -> anyhow::Result<()> {
         self.write_and_sync(
@@ -192,7 +191,6 @@ impl nexo_notes::NoteStorage for GitStorage {
 }
 
 /// Pull remote changes into the repository when a fast-forward update is available.
-
 fn pull_impl(repo: &Repository) -> anyhow::Result<()> {
     // Check if remote exists
     let mut remote = match repo.find_remote("origin") {

@@ -1,7 +1,6 @@
 //! Prompt assembly helpers for runs.
 
-use nexo_spec::prompt::SystemPrompt;
-use nexo_ws_schema::ToolEntry;
+use nexo_ws_schema::{SystemPrompt, ToolEntry};
 
 use crate::memory::git::GitStorage;
 use crate::server::state::SharedState;
@@ -106,6 +105,7 @@ mod tests {
                     parameters: serde_json::json!({"type": "object"}),
                     contract_version: Some("2026-05-22".into()),
                     execution: Default::default(),
+                    metadata: Default::default(),
                 },
                 "node",
                 true,
@@ -117,6 +117,7 @@ mod tests {
                     parameters: serde_json::json!({"type": "object"}),
                     contract_version: None,
                     execution: Default::default(),
+                    metadata: Default::default(),
                 },
                 "node",
                 false,

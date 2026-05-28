@@ -176,17 +176,17 @@ pub fn minimal_filter(content: &str, lang: &Language) -> String {
         }
 
         // Skip single-line comments (but keep doc comments)
-        if let Some(line_comment) = patterns.line {
-            if trimmed.starts_with(line_comment) {
-                // Keep doc comments (e.g. /// in Rust)
-                if let Some(doc) = patterns.doc_line {
-                    if trimmed.starts_with(doc) {
-                        result.push_str(line);
-                        result.push('\n');
-                    }
-                }
-                continue;
+        if let Some(line_comment) = patterns.line
+            && trimmed.starts_with(line_comment)
+        {
+            // Keep doc comments (e.g. /// in Rust)
+            if let Some(doc) = patterns.doc_line
+                && trimmed.starts_with(doc)
+            {
+                result.push_str(line);
+                result.push('\n');
             }
+            continue;
         }
 
         // Blank lines pass through (normalized later)

@@ -14,7 +14,7 @@ pub async fn initialize(db_path: &Path) -> cli_helpers::Result {
 pub async fn connect(db_path: &Path) -> cli_helpers::Result<SqlitePool> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            cli_helpers::Error::Io(format!(
+            cli_helpers::Error::Other(format!(
                 "Failed to create DB directory '{}': {e}",
                 parent.display()
             ))

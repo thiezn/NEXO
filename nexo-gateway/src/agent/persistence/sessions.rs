@@ -75,7 +75,7 @@ pub async fn get_session(
         return Ok(None);
     };
 
-    let messages = crate::agent::context::load_conversation_messages(pool, session_id).await?;
+    let messages = super::load_conversation_messages(pool, session_id).await?;
 
     Ok(Some(SessionGetResponse {
         session_id: id,

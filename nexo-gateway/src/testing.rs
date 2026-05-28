@@ -1,5 +1,7 @@
 //! Test helpers for integration tests. Not intended for production use.
 
+#![allow(clippy::expect_used, clippy::result_large_err)]
+
 use crate::agent::RunHandle;
 use crate::server::auth;
 use crate::server::handler;

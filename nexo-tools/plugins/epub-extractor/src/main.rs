@@ -11,7 +11,7 @@ use std::path::Path;
 
 fn main() {
     let cli = Cli::parse();
-    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli.common.init_tracing()?;
 
     if let Err(e) = run(&cli) {
         tracing::error!("{e}");
@@ -53,13 +53,7 @@ fn process_directory(
     output_dir: &Path,
     image_mode: ImageMode,
 ) -> cli_helpers::Result {
-    let epub_files: Vec<_> = std::fs::read_dir(input_dir)
-        .map_err(|e| {
-            cli_helpers::Error::Io(format!(
-                "Failed to read directory '{}': {e}",
-                input_dir.display()
-            ))
-        })?
+    let epub_files: Vec<_> = std::fs::read_dir(input_dir)?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
         .filter(|p| {

@@ -18,9 +18,7 @@ use network::{NetworkCommand, NetworkEvent};
 use update::Effect;
 
 pub async fn run_start(options: StartOptions) -> cli_helpers::Result {
-    let workspace_root = std::env::current_dir().map_err(|e| {
-        cli_helpers::Error::Io(format!("Failed to determine working directory: {e}"))
-    })?;
+    let workspace_root = std::env::current_dir()?;
 
     let (connection, mut network_tx, mut network_rx) =
         network::connect(options.url_override.as_deref()).await?;
@@ -39,10 +37,10 @@ pub async fn run_start(options: StartOptions) -> cli_helpers::Result {
         terminal.draw(|frame| view::render(&mut model, frame))?;
 
         if event::poll(Duration::from_millis(50))
-            .map_err(|e| cli_helpers::Error::Io(format!("Terminal event poll failed: {e}")))?
+            .map_err(|e| cli_helpers::Error::Other(format!("Terminal event poll failed: {e}")))?
         {
-            let event = event::read()
-                .map_err(|e| cli_helpers::Error::Io(format!("Terminal event read failed: {e}")))?;
+            let event = event::read()?;
+
             match event {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     if let Some(message) = message::from_key_event(key) {

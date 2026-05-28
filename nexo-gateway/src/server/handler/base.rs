@@ -3,7 +3,6 @@ use nexo_ws_schema::{ErrorPayload, Frame, Method};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-pub(super) const TOOL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(180);
 pub(super) const IMAGE_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Build an ok response, falling back to an internal_error response on serialization failure.

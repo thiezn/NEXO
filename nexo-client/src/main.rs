@@ -8,7 +8,7 @@ use cli::base::Cli;
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli.common.init_tracing()?;
 
     if let Err(e) = cli::commands::dispatch(cli.command).await {
         tracing::error!("{e}");

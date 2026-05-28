@@ -34,7 +34,7 @@ pub struct TickPayload {
 
 /// Payload for `run` streaming events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunEventPayload {
     /// Run identifier.
     pub run_id: String,
@@ -61,7 +61,7 @@ pub struct RunEventPayload {
 
 /// Payload for `presence` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct PresencePayload {
     /// Client identifier whose status changed.
     pub client_id: String,
@@ -73,7 +73,7 @@ pub struct PresencePayload {
 
 /// Payload for `message` events delivered by the gateway.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct MessagePayload {
     /// Message identifier.
     pub message_id: String,
@@ -98,7 +98,7 @@ pub struct HeartbeatPayload {}
 
 /// Payload for `cron` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct CronPayload {
     /// Cron job identifier.
     pub job_id: String,

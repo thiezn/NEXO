@@ -1,1 +1,1 @@
-// Integration test support crate — no library code, only tests.
+//! Integration test support crate with no library code.

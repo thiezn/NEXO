@@ -1,38 +1,35 @@
 //! Tool execution helpers for the run loop.
 
 use crate::server::state::SharedState;
+use nexo_core::{ToolCall, ToolResult, ToolResultContent, ToolResultStatus};
 use nexo_ws_schema::{Frame, Method, ToolsExecuteParams, ToolsExecuteResponse};
 
-/// Execute a tool by preferring gateway-local tools before forwarding to a node.
+/// Execute a tool call by preferring gateway-local tools before forwarding to a node.
 ///
 /// # Errors
 ///
 /// Returns an error when the tool is unknown, the hosting node disconnects, the
 /// forwarded request times out, or the gateway-local executor fails.
 pub async fn execute_tool(
-    tool_name: &str,
-    args: &serde_json::Value,
+    call: ToolCall,
     state: &SharedState,
 ) -> Result<ToolsExecuteResponse, String> {
-    let gateway_tool = {
+    let tool_name = call.name.clone();
+    let gateway_tools = {
         let state_read = state.read().await;
-        state_read.gateway_tools.get_tool(tool_name).cloned()
+        state_read.gateway_tools.clone()
     };
-    if let Some(tool) = gateway_tool {
-        return match tool.execute(args.clone()).await {
-            Ok(result) => Ok(ToolsExecuteResponse {
-                success: result.success,
-                output: result.output,
-                error: result.error,
-            }),
-            Err(error) => Err(format!("Gateway tool error: {error}")),
-        };
+
+    match gateway_tools.try_execute(call.clone()).await {
+        Ok(Some(result)) => return Ok(response_from_tool_result(result)),
+        Ok(None) => {}
+        Err(error) => return Err(format!("Gateway tool error: {error}")),
     }
 
     let (node_sender, forwarded_id) = {
         let state_read = state.read().await;
         let tool = state_read
-            .find_tool(tool_name)
+            .find_tool(&tool_name)
             .ok_or_else(|| format!("Tool '{tool_name}' not found"))?;
         let sender = state_read
             .peer_senders
@@ -44,8 +41,8 @@ pub async fn execute_tool(
 
     let exec_params = ToolsExecuteParams {
         tool: tool_name.to_string(),
-        args: args.clone(),
-        idempotency_key: Frame::new_id(),
+        args: call.arguments.clone(),
+        idempotency_key: call.id.to_string(),
     };
 
     let forwarded_frame = match Frame::request(Method::ToolsExecute, &exec_params) {
@@ -97,6 +94,26 @@ pub async fn execute_tool(
             state_write.pending_requests.remove(&forwarded_id);
             Err("Tool execution timed out (30s)".into())
         }
+    }
+}
+
+fn response_from_tool_result(result: ToolResult) -> ToolsExecuteResponse {
+    let content = match result.content {
+        ToolResultContent::Text(text) => text,
+        ToolResultContent::Json(value) => value.to_string(),
+    };
+
+    match result.status {
+        ToolResultStatus::Success => ToolsExecuteResponse {
+            success: true,
+            output: content,
+            error: None,
+        },
+        ToolResultStatus::Failure => ToolsExecuteResponse {
+            success: false,
+            output: String::new(),
+            error: Some(content),
+        },
     }
 }
 

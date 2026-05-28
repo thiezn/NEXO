@@ -14,10 +14,13 @@ pub mod json;
 /// Output truncation helpers for large payloads.
 pub mod truncate;
 
-static MULTIPLE_BLANK_LINES: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\n{3,}").expect("valid blank-lines regex"));
+static MULTIPLE_BLANK_LINES: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r"\n{3,}"));
 
 /// Normalize runs of 3+ blank lines down to 2.
 pub fn normalize_blank_lines(text: &str) -> String {
-    MULTIPLE_BLANK_LINES.replace_all(text, "\n\n").to_string()
+    match &*MULTIPLE_BLANK_LINES {
+        Ok(regex) => regex.replace_all(text, "\n\n").to_string(),
+        Err(_) => text.to_string(),
+    }
 }

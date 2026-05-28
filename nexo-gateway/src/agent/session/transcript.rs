@@ -1,27 +1,37 @@
-//! Transcript persistence helpers for sessions and runs.
+//! Conversation persistence helpers for sessions and runs.
 
-use nexo_spec::transcript::TranscriptEntryKind;
 use sqlx::SqlitePool;
 
 use crate::agent::session;
 use nexo_ws_schema::Frame;
 
-/// Insert a transcript entry and update the session's last-active timestamp.
+/// Persisted conversation kind for user-authored input.
+pub const ENTRY_USER_INPUT: &str = "user_input";
+/// Persisted conversation kind for system/developer instructions.
+pub const ENTRY_INSTRUCTION: &str = "instruction";
+/// Persisted conversation kind for assistant-authored final text.
+pub const ENTRY_ASSISTANT_RESPONSE: &str = "assistant_response";
+/// Persisted conversation kind for assistant-emitted tool calls.
+pub const ENTRY_TOOL_CALL_INTENT: &str = "tool_call_intent";
+/// Persisted conversation kind for tool execution results.
+pub const ENTRY_TOOL_RESULT: &str = "tool_result";
+
+/// Insert a conversation entry and update the session's last-active timestamp.
 #[expect(clippy::too_many_arguments)]
-pub async fn insert_transcript_entry(
+pub async fn insert_conversation_entry(
     pool: &SqlitePool,
     session_id: &str,
     run_id: Option<&str>,
     round_id: Option<&str>,
     role: &str,
     content: &str,
-    entry_kind: TranscriptEntryKind,
+    entry_kind: &str,
     tool_call_id: Option<&str>,
     tool_name: Option<&str>,
 ) -> Result<String, sqlx::Error> {
     let id = Frame::new_id();
     sqlx::query(
-        "INSERT INTO transcript_entries (
+        "INSERT INTO conversation_entries (
             id, session_id, run_id, round_id, role, content, entry_kind, tool_call_id, tool_name
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
@@ -31,7 +41,7 @@ pub async fn insert_transcript_entry(
     .bind(round_id)
     .bind(role)
     .bind(content)
-    .bind(entry_kind.as_str())
+    .bind(entry_kind)
     .bind(tool_call_id)
     .bind(tool_name)
     .execute(pool)
@@ -45,7 +55,7 @@ pub async fn insert_transcript_entry(
     Ok(id)
 }
 
-/// Insert a transcript message and bump the session activity timestamp.
+/// Insert a conversation message and bump the session activity timestamp.
 #[cfg(test)]
 pub async fn insert_message(
     pool: &SqlitePool,
@@ -57,14 +67,14 @@ pub async fn insert_message(
     tool_name: Option<&str>,
 ) -> Result<String, sqlx::Error> {
     let entry_kind = match role {
-        "user" => TranscriptEntryKind::UserInput,
-        "assistant" => TranscriptEntryKind::AssistantResponse,
-        "system" => TranscriptEntryKind::Instruction,
-        "tool" => TranscriptEntryKind::ToolResult,
-        _ => TranscriptEntryKind::AssistantResponse,
+        "user" => ENTRY_USER_INPUT,
+        "assistant" => ENTRY_ASSISTANT_RESPONSE,
+        "system" => ENTRY_INSTRUCTION,
+        "tool" => ENTRY_TOOL_RESULT,
+        _ => ENTRY_ASSISTANT_RESPONSE,
     };
 
-    insert_transcript_entry(
+    insert_conversation_entry(
         pool,
         session_id,
         run_id,
@@ -95,14 +105,14 @@ pub async fn append_run_context(
     };
 
     let content = serde_json::to_string(context).unwrap_or_default();
-    let message_id = session::insert_transcript_entry(
+    let message_id = session::insert_conversation_entry(
         pool,
         &session_id,
         Some(run_id),
         None,
         "system",
         &content,
-        TranscriptEntryKind::Instruction,
+        ENTRY_INSTRUCTION,
         None,
         None,
     )

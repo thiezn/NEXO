@@ -1,32 +1,23 @@
-use crate::{
-    agent::{
-        context::{self},
-        session,
-    },
-    server::state::SharedState,
-    tools,
-};
-use nexo_spec::message::{MessageRole, TranscriptMessage};
-use nexo_spec::model::LoadedModelInfo;
-use nexo_spec::transcript::TranscriptEntryKind;
+use crate::{agent::persistence, server::state::SharedState, tools};
+use nexo_core::{ConversationMessage, ToolCall};
 use nexo_ws_schema::{
     Frame, Method, ModelLoadParams, ModelLoadResponse, ModelUnloadParams, RunRoundRequest,
-    RunRoundResponse, RunRoundToolCall, RunStatus, ToolEntry,
+    RunRoundResponse, RunStatus, ToolEntry,
 };
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
 
-use super::{events, queue};
+use super::{context_manager::ContextManager, events};
 
 /// Maximum number of rounds before the engine stops a run.
 const MAX_ITERATIONS: usize = 20;
 /// Timeout for model load operations.
 const MODEL_LOAD_TIMEOUT_SECS: u64 = 300;
-const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
+pub(super) const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
 
 // TODO: The think tokens and thinking block are hardcoded here but they relate specifically to gemma4.
 // We should pull this from model definition instead.
-const THINK_TOKEN: &str = "<|think|>";
+pub(super) const THINK_TOKEN: &str = "<|think|>";
 const THINKING_BLOCK_OPEN: &str = "<|channel>thought\n";
 const THINKING_BLOCK_CLOSE: &str = "<channel|>";
 
@@ -35,7 +26,7 @@ const THINKING_BLOCK_CLOSE: &str = "<channel|>";
 /// Database lookup failures are logged and treated as not-cancelled so the loop
 /// can fail through its normal execution path.
 async fn run_cancelled(db: &SqlitePool, run_id: &str) -> bool {
-    match session::is_run_cancelled(db, run_id).await {
+    match persistence::is_run_cancelled(db, run_id).await {
         Ok(cancelled) => cancelled,
         Err(error) => {
             tracing::error!("Failed to load run status for {run_id}: {error}");
@@ -59,14 +50,14 @@ pub async fn start_run(
     prompt_collection_id: Option<&str>,
     thinking: bool,
 ) {
-    if let Err(error) = session::insert_transcript_entry(
+    if let Err(error) = persistence::insert_conversation_entry(
         db,
         session_id,
         Some(run_id),
         None,
         "user",
         input,
-        TranscriptEntryKind::UserInput,
+        persistence::ENTRY_USER_INPUT,
         None,
         None,
     )
@@ -78,14 +69,14 @@ pub async fn start_run(
 
     if let Some(extra_instructions) = instructions {
         let instructions_string = serde_json::to_string(extra_instructions).unwrap_or_default();
-        let _ = session::insert_transcript_entry(
+        let _ = persistence::insert_conversation_entry(
             db,
             session_id,
             Some(run_id),
             None,
             "system",
             &instructions_string,
-            TranscriptEntryKind::Instruction,
+            persistence::ENTRY_INSTRUCTION,
             None,
             None,
         )
@@ -106,7 +97,7 @@ pub async fn start_run(
     .await;
 }
 
-/// Resume a queued run without replaying its original transcript input.
+/// Resume a queued run without replaying its original conversation input.
 #[expect(clippy::too_many_arguments)]
 pub async fn resume_run(
     run_id: &str,
@@ -148,9 +139,9 @@ async fn run_engine(
 ) {
     let _ = crate::agent::locks::reap_expired(db).await;
 
-    let system_prompt = context::load_system_prompt(state, prompt_collection_id).await;
+    let context_manager = ContextManager::new(state, prompt_collection_id, thinking).await;
 
-    let starting_round_index = match session::next_round_index(db, run_id).await {
+    let starting_round_index = match persistence::next_round_index(db, run_id).await {
         Ok(index) => index,
         Err(error) => {
             events::fail_run(event_tx, db, run_id, session_id, &error.to_string()).await;
@@ -166,7 +157,7 @@ async fn run_engine(
             return;
         }
 
-        let round_id = match session::create_round(db, run_id, round_index, model_id).await {
+        let round_id = match persistence::create_round(db, run_id, round_index, model_id).await {
             Ok(round_id) => round_id,
             Err(error) => {
                 events::fail_run(event_tx, db, run_id, session_id, &error.to_string()).await;
@@ -183,24 +174,27 @@ async fn run_engine(
             None,
         );
 
-        let transcript_context = match context::load_transcript_messages(db, session_id).await {
-            Ok(messages) => messages,
+        let tool_entries = {
+            let state_read = state.read().await;
+            state_read.all_tool_entries()
+        };
+
+        let prepared_context = match context_manager
+            .prepare_round_context(db, session_id, &tool_entries)
+            .await
+        {
+            Ok(context) => context,
             Err(error) => {
-                let _ = session::finish_round(db, &round_id, "failed", None, None).await;
+                let _ = persistence::finish_round(db, &round_id, "failed", None, None).await;
                 events::fail_run(event_tx, db, run_id, session_id, &error.to_string()).await;
                 return;
             }
         };
 
-        let tool_entries = {
-            let state_read = state.read().await;
-            state_read.all_tool_entries()
-        };
-        let tool_prompt_section = context::build_tool_prompt_section(&tool_entries);
         tracing::info!(
             "Run {run_id} entering round {} (round_id={round_id}, messages={}, tools={}, model={:?}, thinking={thinking})",
             round_index,
-            transcript_context.len(),
+            prepared_context.persisted_message_count,
             tool_entries.iter().filter(|tool| tool.available).count(),
             model_id,
         );
@@ -208,19 +202,16 @@ async fn run_engine(
         let inference = run_inference(
             run_id,
             &round_id,
-            &transcript_context,
-            &tool_prompt_section,
+            prepared_context.round_messages,
             &tool_entries,
             model_id,
-            system_prompt.as_ref(),
             state,
-            thinking,
             session_id,
         )
         .await;
 
         if run_cancelled(db, run_id).await {
-            let _ = session::finish_round(db, &round_id, "cancelled", None, None).await;
+            let _ = persistence::finish_round(db, &round_id, "cancelled", None, None).await;
             crate::agent::locks::release_all_for_run(db, run_id)
                 .await
                 .ok();
@@ -241,19 +232,19 @@ async fn run_engine(
                     reply.rationale.as_deref().map_or(0, str::len),
                 );
 
-                let _ = session::insert_transcript_entry(
+                let _ = persistence::insert_conversation_entry(
                     db,
                     session_id,
                     Some(run_id),
                     Some(&round_id),
                     "assistant",
                     &visible_text,
-                    TranscriptEntryKind::AssistantResponse,
+                    persistence::ENTRY_ASSISTANT_RESPONSE,
                     None,
                     None,
                 )
                 .await;
-                let _ = session::finish_round(
+                let _ = persistence::finish_round(
                     db,
                     &round_id,
                     "completed",
@@ -280,8 +271,9 @@ async fn run_engine(
                     None,
                 );
 
-                let _ = session::finish_run(db, run_id, RunStatus::Completed, Some(&visible_text))
-                    .await;
+                let _ =
+                    persistence::finish_run(db, run_id, RunStatus::Completed, Some(&visible_text))
+                        .await;
                 crate::agent::locks::release_all_for_run(db, run_id)
                     .await
                     .ok();
@@ -294,14 +286,14 @@ async fn run_engine(
                     outcome.selected_peer_id,
                 );
                 let assistant_tool_history = serialize_tool_calls_for_history(&outcome.calls);
-                let _ = session::insert_transcript_entry(
+                let _ = persistence::insert_conversation_entry(
                     db,
                     session_id,
                     Some(run_id),
                     Some(&round_id),
                     "assistant",
                     &assistant_tool_history,
-                    TranscriptEntryKind::ToolCallIntent,
+                    persistence::ENTRY_TOOL_CALL_INTENT,
                     None,
                     None,
                 )
@@ -309,7 +301,7 @@ async fn run_engine(
 
                 for call in &outcome.calls {
                     if run_cancelled(db, run_id).await {
-                        let _ = session::finish_round(
+                        let _ = persistence::finish_round(
                             db,
                             &round_id,
                             "cancelled",
@@ -323,11 +315,11 @@ async fn run_engine(
                         return;
                     }
 
-                    let trace_id = session::create_tool_trace(
+                    let trace_id = persistence::create_tool_trace(
                         db,
                         run_id,
                         &round_id,
-                        &call.id,
+                        call.id.as_str(),
                         &call.name,
                         &call.arguments,
                     )
@@ -339,7 +331,13 @@ async fn run_engine(
                         call.name,
                         call.id,
                     );
-                    events::emit_tool_started(event_tx, run_id, session_id, &call.name, &call.id);
+                    events::emit_tool_started(
+                        event_tx,
+                        run_id,
+                        session_id,
+                        &call.name,
+                        call.id.as_str(),
+                    );
 
                     let capability = tools::tool_capability(&call.name);
                     match crate::agent::locks::acquire(db, &capability, run_id).await {
@@ -347,7 +345,7 @@ async fn run_engine(
                         Ok(false) => {
                             let output = format!("Error: capability '{capability}' is busy");
                             if let Some(trace_id) = trace_id.as_deref() {
-                                let _ = session::finish_tool_trace(
+                                let _ = persistence::finish_tool_trace(
                                     db,
                                     trace_id,
                                     false,
@@ -356,26 +354,31 @@ async fn run_engine(
                                 )
                                 .await;
                             }
-                            let _ = session::insert_transcript_entry(
+                            let _ = persistence::insert_conversation_entry(
                                 db,
                                 session_id,
                                 Some(run_id),
                                 Some(&round_id),
                                 "tool",
                                 &output,
-                                TranscriptEntryKind::ToolResult,
-                                Some(&call.id),
+                                persistence::ENTRY_TOOL_RESULT,
+                                Some(call.id.as_str()),
                                 Some(&call.name),
                             )
                             .await;
                             events::emit_tool_result(
-                                event_tx, run_id, session_id, &call.name, &call.id, &output,
+                                event_tx,
+                                run_id,
+                                session_id,
+                                &call.name,
+                                call.id.as_str(),
+                                &output,
                             );
                             continue;
                         }
                         Err(error) => {
                             if let Some(trace_id) = trace_id.as_deref() {
-                                let _ = session::finish_tool_trace(
+                                let _ = persistence::finish_tool_trace(
                                     db,
                                     trace_id,
                                     false,
@@ -389,7 +392,7 @@ async fn run_engine(
                         }
                     }
 
-                    let tool_result = tools::execute_tool(&call.name, &call.arguments, state).await;
+                    let tool_result = tools::execute_tool(call.clone(), state).await;
                     crate::agent::locks::release(db, &capability).await.ok();
 
                     let (success, output, error_message) = match &tool_result {
@@ -409,7 +412,7 @@ async fn run_engine(
                     };
 
                     if let Some(trace_id) = trace_id.as_deref() {
-                        let _ = session::finish_tool_trace(
+                        let _ = persistence::finish_tool_trace(
                             db,
                             trace_id,
                             success,
@@ -419,15 +422,15 @@ async fn run_engine(
                         .await;
                     }
 
-                    let _ = session::insert_transcript_entry(
+                    let _ = persistence::insert_conversation_entry(
                         db,
                         session_id,
                         Some(run_id),
                         Some(&round_id),
                         "tool",
                         &output,
-                        TranscriptEntryKind::ToolResult,
-                        Some(&call.id),
+                        persistence::ENTRY_TOOL_RESULT,
+                        Some(call.id.as_str()),
                         Some(&call.name),
                     )
                     .await;
@@ -439,11 +442,16 @@ async fn run_engine(
                         output.len(),
                     );
                     events::emit_tool_result(
-                        event_tx, run_id, session_id, &call.name, &call.id, &output,
+                        event_tx,
+                        run_id,
+                        session_id,
+                        &call.name,
+                        call.id.as_str(),
+                        &output,
                     );
                 }
 
-                let _ = session::finish_round(
+                let _ = persistence::finish_round(
                     db,
                     &round_id,
                     "completed",
@@ -455,7 +463,7 @@ async fn run_engine(
             }
             InferenceOutcome::Error(error) => {
                 tracing::info!("Run {run_id} round {round_id} failed: {error}");
-                let _ = session::finish_round(db, &round_id, "failed", None, None).await;
+                let _ = persistence::finish_round(db, &round_id, "failed", None, None).await;
                 events::fail_run(event_tx, db, run_id, session_id, &error).await;
                 return;
             }
@@ -463,8 +471,8 @@ async fn run_engine(
                 tracing::info!(
                     "Run {run_id} round {round_id} queued (no inference node available)"
                 );
-                let _ = session::finish_round(db, &round_id, "queued", None, None).await;
-                queue::mark_run_queued(db, run_id).await;
+                let _ = persistence::finish_round(db, &round_id, "queued", None, None).await;
+                persistence::mark_run_queued(db, run_id).await;
                 events::emit_queued_event(event_tx, run_id, session_id);
                 return;
             }
@@ -498,26 +506,9 @@ struct ReplyOutcome {
 
 /// Tool-call plan returned for a round.
 struct ToolCallOutcome {
-    calls: Vec<ToolCallInfo>,
+    calls: Vec<ToolCall>,
     rationale: Option<String>,
     selected_peer_id: String,
-}
-
-/// Internal representation of a single tool call emitted by the model.
-struct ToolCallInfo {
-    id: String,
-    name: String,
-    arguments: serde_json::Value,
-}
-
-impl From<RunRoundToolCall> for ToolCallInfo {
-    fn from(value: RunRoundToolCall) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            arguments: value.arguments,
-        }
-    }
 }
 
 /// Ensure the requested model is loaded and return the selected node.
@@ -548,8 +539,8 @@ async fn ensure_model_loaded(
         .map(|models| {
             models
                 .iter()
-                .filter(|model| model.model_id != model_id)
-                .map(|model| model.model_id.clone())
+                .filter(|model| model.id.as_str() != model_id)
+                .map(|model| model.id.to_string())
                 .collect()
         })
         .unwrap_or_default();
@@ -582,10 +573,7 @@ async fn ensure_model_loaded(
     }
 
     if !models_to_unload.is_empty() {
-        state
-            .write()
-            .await
-            .set_loaded_models(&peer_id, Vec::<LoadedModelInfo>::new());
+        state.write().await.set_loaded_models(&peer_id, Vec::new());
     }
 
     let load_params = ModelLoadParams {
@@ -633,13 +621,6 @@ async fn ensure_model_loaded(
                 .map(|response| response.loaded)
                 .unwrap_or(true);
             if loaded {
-                state.write().await.set_loaded_models(
-                    &peer_id,
-                    vec![LoadedModelInfo {
-                        model_id: model_id.to_string(),
-                        categories: vec![],
-                    }],
-                );
                 Ok((peer_id, node_sender))
             } else {
                 Err(InferenceOutcome::Error(format!(
@@ -674,43 +655,15 @@ async fn ensure_model_loaded(
 }
 
 /// Execute one typed inference round on a node.
-#[expect(clippy::too_many_arguments)]
 async fn run_inference(
     run_id: &str,
     round_id: &str,
-    transcript_context: &[TranscriptMessage],
-    tool_prompt_section: &str,
+    round_messages: Vec<ConversationMessage>,
     tool_entries: &[ToolEntry],
     model_id: Option<&str>,
-    system_prompt: Option<&nexo_spec::prompt::SystemPrompt>,
     state: &SharedState,
-    thinking: bool,
     session_id: &str,
 ) -> InferenceOutcome {
-    let mut system_parts = Vec::new();
-    if thinking {
-        system_parts.push(THINK_TOKEN.to_string());
-    }
-    if let Some(system_prompt) = system_prompt
-        && !system_prompt.content.is_empty()
-    {
-        system_parts.push(system_prompt.content.clone());
-    }
-    if !tool_prompt_section.is_empty() {
-        system_parts.push(tool_prompt_section.to_string());
-    }
-
-    let system_prompt = if system_parts.is_empty() {
-        DEFAULT_SYSTEM_PROMPT.to_string()
-    } else {
-        system_parts.join("\n\n")
-    };
-
-    let round_messages: Vec<TranscriptMessage> =
-        std::iter::once(TranscriptMessage::new(MessageRole::System, system_prompt))
-            .chain(transcript_context.iter().cloned())
-            .collect();
-
     let tools: Vec<_> = tool_entries
         .iter()
         .filter(|tool| tool.available)
@@ -800,7 +753,11 @@ fn parse_inference_response(
 
     if !response.tool_calls.is_empty() {
         return InferenceOutcome::ToolCalls(ToolCallOutcome {
-            calls: response.tool_calls.into_iter().map(Into::into).collect(),
+            calls: response
+                .tool_calls
+                .into_iter()
+                .map(|tool_call| tool_call.call)
+                .collect(),
             rationale: response.rationale,
             selected_peer_id,
         });
@@ -851,78 +808,9 @@ fn strip_thinking_content(raw: &str) -> (String, Option<String>) {
     (visible, thinking)
 }
 
-/// Serialize tool calls into the native history format used in transcripts.
-fn serialize_tool_calls_for_history(calls: &[ToolCallInfo]) -> String {
-    calls.iter().map(serialize_tool_call).collect()
-}
-
-/// Serialize one tool call into the native history format.
-fn serialize_tool_call(call: &ToolCallInfo) -> String {
-    let mut out = String::from("<|tool_call>call:");
-    out.push_str(&call.name);
-    out.push('{');
-    serialize_tool_arguments(&mut out, &call.arguments);
-    out.push('}');
-    out.push_str("<tool_call|>");
-    out
-}
-
-/// Serialize tool-call arguments into the native history format.
-fn serialize_tool_arguments(out: &mut String, value: &serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => serialize_tool_object(out, map),
-        other => serialize_tool_value(out, other),
-    }
-}
-
-/// Serialize an object value with stable key ordering.
-fn serialize_tool_object(out: &mut String, map: &serde_json::Map<String, serde_json::Value>) {
-    let mut entries: Vec<_> = map.iter().collect();
-    entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-
-    for (index, (key, value)) in entries.into_iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push_str(key);
-        out.push(':');
-        serialize_tool_value(out, value);
-    }
-}
-
-/// Serialize a single JSON value for transcript history.
-fn serialize_tool_value(out: &mut String, value: &serde_json::Value) {
-    match value {
-        serde_json::Value::Null => out.push_str("null"),
-        serde_json::Value::Bool(boolean) => {
-            if *boolean {
-                out.push_str("true");
-            } else {
-                out.push_str("false");
-            }
-        }
-        serde_json::Value::Number(number) => out.push_str(&number.to_string()),
-        serde_json::Value::String(string) => {
-            out.push_str("<|\"|>");
-            out.push_str(string);
-            out.push_str("<|\"|>");
-        }
-        serde_json::Value::Array(items) => {
-            out.push('[');
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    out.push(',');
-                }
-                serialize_tool_value(out, item);
-            }
-            out.push(']');
-        }
-        serde_json::Value::Object(map) => {
-            out.push('{');
-            serialize_tool_object(out, map);
-            out.push('}');
-        }
-    }
+/// Serialize tool calls into the conversation format used for structured replay.
+fn serialize_tool_calls_for_history(calls: &[ToolCall]) -> String {
+    serde_json::to_string(calls).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -931,15 +819,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serialize_tool_calls_for_history_uses_native_blocks() {
+    fn serialize_tool_calls_for_history_uses_core_tool_calls() {
         let calls = vec![
-            ToolCallInfo {
+            ToolCall {
                 id: "call-1".into(),
+                index: 0,
                 name: "notes.list".into(),
                 arguments: serde_json::json!({}),
             },
-            ToolCallInfo {
+            ToolCall {
                 id: "call-2".into(),
+                index: 1,
                 name: "echo.run".into(),
                 arguments: serde_json::json!({
                     "message": "hello",
@@ -954,20 +844,9 @@ mod tests {
         ];
 
         let serialized = serialize_tool_calls_for_history(&calls);
+        let reparsed: Vec<ToolCall> = serde_json::from_str(&serialized).unwrap();
 
-        assert_eq!(
-            serialized,
-            concat!(
-                "<|tool_call>call:notes.list{}<tool_call|>",
-                "<|tool_call>call:echo.run{",
-                "count:2,",
-                "message:<|\"|>hello<|\"|>,",
-                "meta:{source:<|\"|>test<|\"|>},",
-                "tags:[<|\"|>a<|\"|>,<|\"|>b<|\"|>],",
-                "verbose:true",
-                "}<tool_call|>"
-            )
-        );
+        assert_eq!(reparsed, calls);
     }
 
     #[test]
@@ -992,6 +871,7 @@ mod tests {
             "toolCalls": [
                 {
                     "id": "call-1",
+                    "index": 0,
                     "name": "notes.list",
                     "arguments": {"limit": 5}
                 }

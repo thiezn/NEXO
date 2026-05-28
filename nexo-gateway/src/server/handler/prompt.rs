@@ -25,7 +25,7 @@ pub(super) async fn handle_document_create(
         content: p.content,
     };
     match git_blocking(request_id, state, move |git| {
-        crate::agent::context::create_prompt_document(&git, &document)
+        crate::agent::persistence::create_prompt_document(&git, &document)
     })
     .await
     {
@@ -40,7 +40,7 @@ pub(super) async fn handle_document_create(
 /// Handle `prompt.document.list` requests.
 pub(super) async fn handle_document_list(request_id: &str, state: &SharedState) -> Frame {
     match git_blocking(request_id, state, |git| {
-        crate::agent::context::list_prompt_documents(&git)
+        crate::agent::persistence::list_prompt_documents(&git)
     })
     .await
     {
@@ -69,7 +69,7 @@ pub(super) async fn handle_document_delete(
             Err(f) => return f,
         };
     match git_blocking(request_id, state, move |git| {
-        crate::agent::context::delete_prompt_document(&git, &p.id)
+        crate::agent::persistence::delete_prompt_document(&git, &p.id)
     })
     .await
     {
@@ -100,7 +100,7 @@ pub(super) async fn handle_collection_create(
         documents: p.documents,
     };
     match git_blocking(request_id, state, move |git| {
-        crate::agent::context::upsert_prompt_collection(&git, &collection)
+        crate::agent::persistence::upsert_prompt_collection(&git, &collection)
     })
     .await
     {
@@ -115,7 +115,7 @@ pub(super) async fn handle_collection_create(
 /// Handle `prompt.collection.list` requests.
 pub(super) async fn handle_collection_list(request_id: &str, state: &SharedState) -> Frame {
     match git_blocking(request_id, state, |git| {
-        crate::agent::context::list_prompt_collections(&git)
+        crate::agent::persistence::list_prompt_collections(&git)
     })
     .await
     {
@@ -139,7 +139,7 @@ pub(super) async fn handle_collection_delete(
             Err(f) => return f,
         };
     match git_blocking(request_id, state, move |git| {
-        crate::agent::context::delete_prompt_collection(&git, &p.id)
+        crate::agent::persistence::delete_prompt_collection(&git, &p.id)
     })
     .await
     {

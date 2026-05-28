@@ -6,7 +6,7 @@ use crate::contracts::ToolExecutor;
 use crate::error::{Error, Result};
 use crate::tools::{ToolCall, ToolDefinition, ToolResult};
 
-type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<ToolResult>> + 'a>>;
+type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<ToolResult>> + Send + 'a>>;
 
 trait RegisteredTool: Send + Sync {
     fn definition(&self) -> &ToolDefinition;

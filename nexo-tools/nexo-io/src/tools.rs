@@ -132,13 +132,13 @@ impl IoToolExecutor {
     /// The internal client uses a 30-second timeout and a `nexo-io/0.1`
     /// user-agent string for remote fetch operations.
     pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .user_agent("nexo-io/0.1")
-                .build()
-                .expect("valid HTTP client config"),
-        }
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent("nexo-io/0.1")
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        Self { client }
     }
 
     async fn execute_read(&self, call: ToolCall) -> nexo_core::Result<ToolResult> {

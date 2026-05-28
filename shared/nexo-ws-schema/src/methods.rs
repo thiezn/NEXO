@@ -125,7 +125,7 @@ pub struct StatusParams {}
 
 /// Parameters for the `send` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct SendParams {
     /// Field value.
     pub target: String,
@@ -137,7 +137,7 @@ pub struct SendParams {
 
 /// Parameters for the `run.start` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunStartParams {
     /// Field value.
     pub input: String,
@@ -162,7 +162,7 @@ pub struct RunStartParams {
 
 /// Parameters for the `run.stop` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunStopParams {
     /// The active run to stop.
     pub run_id: String,
@@ -170,7 +170,7 @@ pub struct RunStopParams {
 
 /// Response payload for the `run.stop` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunStopResponse {
     /// Whether the run was still active and has now been stopped.
     pub stopped: bool,
@@ -178,17 +178,17 @@ pub struct RunStopResponse {
 
 /// Parameters for the `run.instructions.append` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunInstructionsAppendParams {
     /// The active run that should observe the new context on its next round.
     pub run_id: String,
-    /// Arbitrary structured instructions to append to the transcript.
+    /// Arbitrary structured instructions to append to the conversation.
     pub instructions: serde_json::Value,
 }
 
 /// Response payload for the `run.instructions.append` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunInstructionsAppendResponse {
     /// Whether the instructions were accepted for the active run.
     pub queued: bool,
@@ -217,7 +217,7 @@ pub struct ToolsCatalogParams {
 
 /// Response payload for `health`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct HealthResponse {
     /// Field value.
     pub status: String,
@@ -227,7 +227,7 @@ pub struct HealthResponse {
 
 /// Response payload for `status`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct StatusResponse {
     /// Field value.
     pub connected_users: u32,
@@ -246,7 +246,7 @@ pub struct SendResponse {
 
 /// Response payload for `run.start` (initial ack and final result).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunStartResponse {
     /// Field value.
     pub run_id: String,
@@ -261,7 +261,7 @@ pub struct RunStartResponse {
 
 /// Gateway-to-node payload for a single run round inference.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunRoundRequest {
     /// Field value.
     pub run_id: String,
@@ -281,7 +281,7 @@ pub struct RunRoundRequest {
 
 /// A single tool call returned from a node for a round.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunRoundToolCall {
     #[serde(flatten)]
     /// Field value.
@@ -290,7 +290,7 @@ pub struct RunRoundToolCall {
 
 /// Node-to-gateway response payload for a single run round inference.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct RunRoundResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
@@ -357,7 +357,7 @@ pub struct ToolsRegisterResponse {
 
 /// Parameters for the `tools.execute` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct ToolsExecuteParams {
     /// Field value.
     pub tool: String,
@@ -383,7 +383,7 @@ pub struct ToolsExecuteResponse {
 
 /// Parameters for the `session.create` method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct SessionCreateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
@@ -396,7 +396,7 @@ pub struct SessionCreateParams {
 
 /// Response payload for `session.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct SessionCreateResponse {
     /// Field value.
     pub session_id: String,
@@ -414,7 +414,7 @@ pub struct SessionListParams {}
 
 /// A single session entry in a session list response.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct SessionEntry {
     /// Field value.
     pub session_id: String,
@@ -443,7 +443,7 @@ pub struct SessionListResponse {
 
 /// Parameters for the `session.get` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct SessionGetParams {
     /// Field value.
     pub session_id: String,
@@ -451,7 +451,7 @@ pub struct SessionGetParams {
 
 /// Response payload for `session.get`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct SessionGetResponse {
     /// Field value.
     pub session_id: String,
@@ -471,7 +471,7 @@ pub struct SessionGetResponse {
 
 /// Parameters for the `session.clear` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct SessionClearParams {
     /// Field value.
     pub session_id: String,
@@ -488,7 +488,7 @@ pub struct SessionClearResponse {
 
 /// Parameters for the `cron.create` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct CronCreateParams {
     /// Field value.
     pub name: String,
@@ -503,7 +503,7 @@ pub struct CronCreateParams {
 
 /// Response payload for `cron.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct CronCreateResponse {
     /// Field value.
     pub job_id: String,
@@ -517,7 +517,7 @@ pub struct CronListParams {}
 
 /// A single cron job entry.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct CronEntry {
     /// Field value.
     pub job_id: String,
@@ -546,7 +546,7 @@ pub struct CronListResponse {
 
 /// Parameters for the `cron.delete` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct CronDeleteParams {
     /// Field value.
     pub job_id: String,
@@ -563,7 +563,7 @@ pub struct CronDeleteResponse {
 
 /// Parameters for `model.load` (gateway → node).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct ModelLoadParams {
     /// Field value.
     pub model_id: String,
@@ -571,7 +571,7 @@ pub struct ModelLoadParams {
 
 /// Response payload for `model.load`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct ModelLoadResponse {
     /// Field value.
     pub model_id: String,
@@ -586,7 +586,7 @@ pub struct ModelLoadResponse {
 
 /// Parameters for `model.unload` (gateway → node).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct ModelUnloadParams {
     /// Field value.
     pub model_id: String,
@@ -603,7 +603,7 @@ pub struct ModelUnloadResponse {
 
 /// Sent by a node to report its model state.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct ModelStatusParams {
     /// Models currently loaded with their categories.
     #[serde(default)]
@@ -706,7 +706,7 @@ pub struct PromptDocumentDeleteResponse {
 
 /// Parameters for `prompt.collection.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct PromptCollectionCreateParams {
     /// Unique ID for the collection.
     pub id: String,
@@ -759,7 +759,7 @@ pub struct PromptCollectionDeleteResponse {
 
 /// Parameters for `image.analyze`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct ImageAnalyzeParams {
     /// Base64-encoded image data.
     pub image_data: String,
@@ -789,7 +789,7 @@ fn default_image_analyze_temperature() -> f64 {
 
 /// Response payload for `image.analyze`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub struct ImageAnalyzeResponse {
     /// Field value.
     pub text: String,

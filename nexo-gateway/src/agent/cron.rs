@@ -2,6 +2,9 @@ use nexo_ws_schema::{CronEntry, CronPayload, EventKind, Frame};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 
+type CronRow = (String, String, String, bool, Option<String>, Option<String>);
+type DueCronRow = (String, String, String, Option<String>);
+
 /// Create a new cron job. Returns the job ID.
 pub async fn create_job(
     pool: &SqlitePool,
@@ -26,7 +29,7 @@ pub async fn create_job(
 
 /// List all cron jobs.
 pub async fn list_jobs(pool: &SqlitePool) -> Result<Vec<CronEntry>, sqlx::Error> {
-    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>)> = sqlx::query_as(
+    let rows: Vec<CronRow> = sqlx::query_as(
         "SELECT id, name, schedule, enabled, last_run_at, next_run_at
             FROM cron_jobs ORDER BY created_at",
     )
@@ -70,7 +73,7 @@ pub async fn run_scheduler(
         // Periodically reap expired capability locks
         let _ = super::locks::reap_expired(&pool).await;
 
-        let due_jobs: Result<Vec<(String, String, String, Option<String>)>, _> = sqlx::query_as(
+        let due_jobs: Result<Vec<DueCronRow>, _> = sqlx::query_as(
             "SELECT id, name, input, session_id FROM cron_jobs
              WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= datetime('now')",
         )
@@ -111,7 +114,8 @@ pub async fn run_scheduler(
             let run_session_id = match session_id {
                 Some(sid) => sid,
                 None => {
-                    match super::session::create_session(&pool, "cron", Some(&name), None).await {
+                    match super::persistence::create_session(&pool, "cron", Some(&name), None).await
+                    {
                         Ok((sid, _)) => sid,
                         Err(e) => {
                             tracing::warn!("Failed to create cron session: {e}");
@@ -125,9 +129,15 @@ pub async fn run_scheduler(
             let run_id = Frame::new_id();
             let idem_key = format!("cron-{job_id}-{}", chrono::Utc::now().timestamp());
 
-            if let Err(e) =
-                super::session::create_run(&pool, &run_id, &run_session_id, &idem_key, None, false)
-                    .await
+            if let Err(e) = super::persistence::create_run(
+                &pool,
+                &run_id,
+                &run_session_id,
+                &idem_key,
+                None,
+                false,
+            )
+            .await
             {
                 tracing::warn!("Failed to create cron run: {e}");
                 update_timestamps().await;

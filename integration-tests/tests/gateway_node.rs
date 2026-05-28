@@ -1,7 +1,12 @@
+//! Gateway/node websocket integration tests.
+
 #![allow(clippy::unwrap_used)]
 
+use nexo_core::{
+    MetadataMap, ModelCapability, ModelDescriptor, ModelId, ModelModalities, RoleStrategy,
+    SupportedModality,
+};
 use nexo_gateway::testing::start_test_gateway;
-use nexo_spec::model::{LoadedModelInfo, ModelCategory};
 use nexo_ws_client::{
     NexoConnection, default_node_connect_params, default_user_connect_params, perform_handshake,
 };
@@ -53,12 +58,8 @@ async fn connect_user_with_id(
         .await
         .expect("user connect failed");
 
-    let params = default_user_connect_params(
-        client_id,
-        "0.0.0-test",
-        Platform::current(),
-        device_id,
-    );
+    let params =
+        default_user_connect_params(client_id, "0.0.0-test", Platform::current(), device_id);
     perform_handshake(&mut conn, params)
         .await
         .expect("user handshake failed");
@@ -93,7 +94,7 @@ async fn register_tools(conn: &mut NexoConnection, tools: Vec<ToolSpecEntry>) ->
 
 async fn push_model_status(
     conn: &mut NexoConnection,
-    loaded: Vec<LoadedModelInfo>,
+    loaded: Vec<ModelDescriptor>,
     available: Vec<String>,
 ) {
     let status = ModelStatusParams {
@@ -115,6 +116,23 @@ async fn push_model_status(
             Frame::Event { .. } => continue,
             other => panic!("unexpected frame during model status: {other:?}"),
         }
+    }
+}
+
+fn model_descriptor(id: &str, capabilities: Vec<ModelCapability>) -> ModelDescriptor {
+    ModelDescriptor {
+        id: ModelId::from(id),
+        display_name: id.to_string(),
+        provider: Some("test".to_string()),
+        capabilities,
+        modalities: ModelModalities {
+            input: vec![SupportedModality::Text],
+            output: vec![SupportedModality::Text],
+        },
+        role_strategy: RoleStrategy::Default,
+        context_window_tokens: Some(4096),
+        max_output_tokens: Some(1024),
+        metadata: MetadataMap::new(),
     }
 }
 
@@ -219,6 +237,7 @@ async fn node_connects_with_tools_and_models() {
             parameters: serde_json::json!({"type": "object"}),
             contract_version: None,
             execution: Default::default(),
+            metadata: Default::default(),
         },
         ToolSpecEntry {
             name: "ping".into(),
@@ -226,6 +245,7 @@ async fn node_connects_with_tools_and_models() {
             parameters: serde_json::json!({"type": "object"}),
             contract_version: None,
             execution: Default::default(),
+            metadata: Default::default(),
         },
     ];
     let registered = register_tools(&mut node, tools).await;
@@ -262,6 +282,7 @@ async fn node_connects_with_tools_only() {
         parameters: serde_json::json!({"type": "object"}),
         contract_version: None,
         execution: Default::default(),
+        metadata: Default::default(),
     }];
     let registered = register_tools(&mut node, tools).await;
     assert_eq!(registered, 1);
@@ -329,14 +350,14 @@ async fn model_status_advertisement_makes_llm_available() {
     // Now push status with a loaded model that has Chat + Tool categories
     push_model_status(
         &mut node,
-        vec![LoadedModelInfo {
-            model_id: "gemma-4-e4b-it".into(),
-            categories: vec![
-                ModelCategory::Chat,
-                ModelCategory::Tool,
-                ModelCategory::Image,
+        vec![model_descriptor(
+            "gemma-4-e4b-it",
+            vec![
+                ModelCapability::TextGeneration,
+                ModelCapability::ToolCalling,
+                ModelCapability::ImageInput,
             ],
-        }],
+        )],
         vec!["gemma-4-e4b-it".into()],
     )
     .await;
@@ -345,10 +366,22 @@ async fn model_status_advertisement_makes_llm_available() {
     assert!(state.has_llm_peer());
     let loaded = state.loaded_models.values().next().unwrap();
     assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0].model_id, "gemma-4-e4b-it");
-    assert!(loaded[0].categories.contains(&ModelCategory::Chat));
-    assert!(loaded[0].categories.contains(&ModelCategory::Tool));
-    assert!(loaded[0].categories.contains(&ModelCategory::Image));
+    assert_eq!(loaded[0].id.as_str(), "gemma-4-e4b-it");
+    assert!(
+        loaded[0]
+            .capabilities
+            .contains(&ModelCapability::TextGeneration)
+    );
+    assert!(
+        loaded[0]
+            .capabilities
+            .contains(&ModelCapability::ToolCalling)
+    );
+    assert!(
+        loaded[0]
+            .capabilities
+            .contains(&ModelCapability::ImageInput)
+    );
 }
 
 #[tokio::test]
@@ -371,6 +404,7 @@ async fn multiple_nodes_tracked_independently() {
             parameters: serde_json::json!({"type": "object"}),
             contract_version: None,
             execution: Default::default(),
+            metadata: Default::default(),
         }],
     )
     .await;
@@ -380,10 +414,13 @@ async fn multiple_nodes_tracked_independently() {
     let mut node2 = connect_node(gw.addr, vec![], vec![], vec!["gemma-4-e4b-it".into()]).await;
     push_model_status(
         &mut node2,
-        vec![LoadedModelInfo {
-            model_id: "gemma-4-e4b-it".into(),
-            categories: vec![ModelCategory::Chat, ModelCategory::Tool],
-        }],
+        vec![model_descriptor(
+            "gemma-4-e4b-it",
+            vec![
+                ModelCapability::TextGeneration,
+                ModelCapability::ToolCalling,
+            ],
+        )],
         vec!["gemma-4-e4b-it".into()],
     )
     .await;
@@ -405,8 +442,7 @@ async fn user_can_send_message_to_other_user_via_gateway() {
     let mut bob = connect_user_with_id(gw.addr, "bob", "bob-device").await;
 
     let delivered =
-        send_client_message(&mut alice, "bob", serde_json::json!({"text": "hello bob"}))
-            .await;
+        send_client_message(&mut alice, "bob", serde_json::json!({"text": "hello bob"})).await;
 
     assert!(delivered);
 

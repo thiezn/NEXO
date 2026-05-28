@@ -125,7 +125,8 @@ pub async fn fail_run(
     if let Ok(frame) = Frame::event(EventKind::Run, &payload) {
         let _ = event_tx.send(frame);
     }
-    let _ = crate::agent::session::finish_run(pool, run_id, RunStatus::Failed, Some(error)).await;
+    let _ =
+        crate::agent::persistence::finish_run(pool, run_id, RunStatus::Failed, Some(error)).await;
     crate::agent::locks::release_all_for_run(pool, run_id)
         .await
         .ok();

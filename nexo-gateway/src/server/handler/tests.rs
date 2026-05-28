@@ -651,7 +651,7 @@ async fn dispatch_run_instructions_append_persists_message(pool: SqlitePool) {
     }
 
     let (role, content): (String, String) = sqlx::query_as(
-        "SELECT role, content FROM transcript_entries WHERE run_id = 'run-1' ORDER BY created_at DESC LIMIT 1",
+        "SELECT role, content FROM conversation_entries WHERE run_id = 'run-1' ORDER BY created_at DESC LIMIT 1",
     )
     .fetch_one(&pool)
     .await

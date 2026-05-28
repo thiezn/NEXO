@@ -28,12 +28,11 @@ pub async fn create_run(
 
 /// Return the next round index that should be used for a run.
 pub async fn next_round_index(pool: &SqlitePool, run_id: &str) -> Result<usize, sqlx::Error> {
-    let (next_index,): (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(round_index), 0) + 1 FROM run_rounds WHERE run_id = ?",
-    )
-    .bind(run_id)
-    .fetch_one(pool)
-    .await?;
+    let (next_index,): (i64,) =
+        sqlx::query_as("SELECT COALESCE(MAX(round_index), 0) + 1 FROM run_rounds WHERE run_id = ?")
+            .bind(run_id)
+            .fetch_one(pool)
+            .await?;
 
     Ok(next_index.max(1) as usize)
 }
@@ -193,6 +192,22 @@ pub async fn is_run_cancelled(pool: &SqlitePool, run_id: &str) -> Result<bool, s
         row.as_ref().map(|(status,)| status.as_str()),
         Some("cancelled")
     ))
+}
+
+/// Mark a run as queued while it waits for an inference-capable node.
+pub async fn mark_run_queued(pool: &SqlitePool, run_id: &str) {
+    if let Err(error) = sqlx::query(
+        "UPDATE runs SET status = 'queued', queued_at = datetime('now') \
+         WHERE id = ? AND finished_at IS NULL",
+    )
+    .bind(run_id)
+    .execute(pool)
+    .await
+    {
+        tracing::error!("Failed to queue run {run_id}: {error}");
+    } else {
+        tracing::info!("Run {run_id} queued (no LLM available)");
+    }
 }
 
 /// Mark a run as finished with a status and optional summary.

@@ -62,7 +62,8 @@ struct ExtractArgs {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli.common.init_tracing()?;
+
     match cli.command {
         Command::Extract(args) => run_extract(args).await,
         Command::Analyze(args) => analyze::run(&args).await,

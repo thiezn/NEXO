@@ -29,6 +29,7 @@ pub enum ToolResultContent {
 /// A tool execution result that can be fed back into a conversation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
 pub struct ToolResult {
     /// The identifier of the tool call this result satisfies.
     pub tool_call_id: ToolCallId,

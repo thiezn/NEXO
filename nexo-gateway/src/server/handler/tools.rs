@@ -1,13 +1,13 @@
 //! WebSocket handlers for tool registration and execution.
 
 use crate::server::state::SharedState;
+use nexo_core::{ToolCall, ToolCallId};
 use nexo_ws_schema::{
-    ConnectionRole, ErrorPayload, Frame, Method, ToolsRegisterParams, ToolsRegisterResponse,
+    ConnectionRole, ErrorPayload, Frame, ToolsExecuteParams, ToolsRegisterParams,
+    ToolsRegisterResponse,
 };
 
-use super::base::{
-    ForwardErrorCodes, TOOL_EXECUTION_TIMEOUT, forward_to_node, ok_or_internal_error, parse_params,
-};
+use super::base::{ok_or_internal_error, parse_params};
 
 /// Handle `tools.register` requests from node peers.
 pub(super) async fn handle_register(
@@ -70,60 +70,39 @@ pub(super) async fn handle_execute(
     peer_id: &str,
     state: &SharedState,
 ) -> Frame {
-    let tool_name = match params.get("tool").and_then(|v| v.as_str()) {
-        Some(name) => name.to_owned(),
-        None => {
-            return Frame::error_response(
-                request_id,
-                ErrorPayload {
-                    code: "invalid_params".into(),
-                    message: "Missing 'tool' field in tools.execute params".into(),
-                },
-            );
-        }
+    let exec_params: ToolsExecuteParams = match parse_params(request_id, params, "tools.execute") {
+        Ok(params) => params,
+        Err(frame) => return frame,
     };
 
-    tracing::info!("Routing tools.execute for '{tool_name}' (requested by peer {peer_id})");
+    tracing::info!(
+        "Routing tools.execute for '{}' (requested by peer {peer_id})",
+        exec_params.tool
+    );
 
-    let node_sender = {
-        let state_read = state.read().await;
-        let tool = match state_read.find_tool(&tool_name) {
-            Some(t) => t,
-            None => {
-                return Frame::error_response(
-                    request_id,
-                    ErrorPayload {
-                        code: "tool_not_found".into(),
-                        message: format!("Tool '{tool_name}' is not registered"),
-                    },
-                );
-            }
-        };
-        match state_read.peer_senders.get(&tool.peer_id) {
-            Some(s) => s.clone(),
-            None => {
-                return Frame::error_response(
-                    request_id,
-                    ErrorPayload {
-                        code: "tool_unavailable".into(),
-                        message: format!("Node hosting tool '{tool_name}' is not connected"),
-                    },
-                );
-            }
-        }
+    let call = ToolCall {
+        id: ToolCallId::from(exec_params.idempotency_key),
+        index: 0,
+        name: exec_params.tool,
+        arguments: exec_params.args,
     };
 
-    forward_to_node(
-        request_id,
-        Method::ToolsExecute,
-        params,
-        node_sender,
-        state,
-        TOOL_EXECUTION_TIMEOUT,
-        ForwardErrorCodes {
-            error_code: "tool_unavailable",
-            label: "Tool execution",
-        },
-    )
-    .await
+    match crate::tools::execute_tool(call, state).await {
+        Ok(response) => ok_or_internal_error(request_id, response),
+        Err(message) => Frame::error_response(
+            request_id,
+            ErrorPayload {
+                code: tool_error_code(&message).into(),
+                message,
+            },
+        ),
+    }
+}
+
+fn tool_error_code(message: &str) -> &'static str {
+    if message.starts_with("Tool '") && message.ends_with("' not found") {
+        "tool_not_found"
+    } else {
+        "tool_unavailable"
+    }
 }

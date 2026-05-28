@@ -5,7 +5,7 @@ use crate::server::state::SharedState;
 use nexo_ws_schema::{ErrorPayload, Frame, Method};
 use sqlx::SqlitePool;
 
-use super::{base, cron, image_analyze, prompt, run, send, status, tools};
+use super::{base, cron, image_analyze, prompt, run, send, session, status, tools};
 
 /// Dispatch a method request from a connected peer.
 pub(crate) async fn dispatch_method(
@@ -36,11 +36,11 @@ pub(crate) async fn dispatch_method(
             run::handle_run_instructions_append(request_id, params, db).await
         }
         Method::SessionCreate => {
-            run::handle_session_create(request_id, params, peer_id, state, db).await
+            session::handle_create(request_id, params, peer_id, state, db).await
         }
-        Method::SessionList => run::handle_session_list(request_id, peer_id, state, db).await,
-        Method::SessionGet => run::handle_session_get(request_id, params, db).await,
-        Method::SessionClear => run::handle_session_clear(request_id, params, db).await,
+        Method::SessionList => session::handle_list(request_id, peer_id, state, db).await,
+        Method::SessionGet => session::handle_get(request_id, params, db).await,
+        Method::SessionClear => session::handle_clear(request_id, params, db).await,
         Method::CronCreate => cron::handle_create(request_id, params, db).await,
         Method::CronList => cron::handle_list(request_id, db).await,
         Method::CronDelete => cron::handle_delete(request_id, params, db).await,

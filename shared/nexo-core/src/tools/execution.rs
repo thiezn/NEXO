@@ -32,6 +32,7 @@ pub enum ToolParallelism {
 /// Execution constraints used by orchestrators when scheduling a tool.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
 pub struct ToolExecutionConstraints {
     /// The declared side-effect level of the tool.
     pub side_effect_level: ToolSideEffectLevel,
@@ -40,5 +41,6 @@ pub struct ToolExecutionConstraints {
     pub parallelism: ToolParallelism,
 
     /// An optional timeout budget, expressed in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
 }

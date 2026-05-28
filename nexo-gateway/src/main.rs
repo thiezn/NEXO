@@ -16,7 +16,9 @@ use cli::{Cli, Command};
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    if let Err(error) = cli_helpers::init_tracing(cli.log_level, cli.no_color) {
+        eprintln!("Failed to initialize tracing: {error}");
+    }
 
     if let Err(e) = run(cli.command).await {
         tracing::error!("{e}");
