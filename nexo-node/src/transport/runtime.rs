@@ -1,23 +1,18 @@
-use super::{push_model_status, send_busy_error};
-use crate::config::NodeConfig;
-use crate::inference::{
-    SessionCacheManager, dispatch_image_analyze, dispatch_run_round, handle_model_load,
-    handle_model_unload,
+use super::inference::{
+    InferenceResult, InferenceSender, SharedModels, handle_model_load, handle_model_unload,
+    load_startup_models, push_model_status, queue_image_analyze, queue_run_round, shared_models,
 };
-use crate::tools::{ToolRegistry, handle_tool_execute, register_tools};
+use super::protocol::{send, send_busy_error};
+use crate::config::NodeConfig;
+use crate::tools::{handle_tool_execute, register_tools};
 use cli_helpers::Error;
-use nexo_ai::coordinator::Coordinator;
+use nexo_ai::RegisteredModelConfig;
+use nexo_core::ToolRegistry;
 use nexo_ws_client::{
     NexoConnection, ReadHalf, WriteHalf, default_node_connect_params, perform_handshake,
 };
 use nexo_ws_schema::{ErrorPayload, EventKind, Frame, Method};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
-
-type InferenceResult = Result<serde_json::Value, String>;
-type InferenceSender = tokio::sync::mpsc::Sender<(String, InferenceResult)>;
-type SharedCacheManager = Arc<Mutex<SessionCacheManager>>;
 
 enum MessageLoopAction {
     Continue,
@@ -25,18 +20,10 @@ enum MessageLoopAction {
 }
 
 struct GatewayFrameContext<'a> {
-    available_models: &'a [String],
     registry: &'a ToolRegistry,
-    coordinator: &'a Arc<Mutex<Coordinator>>,
-    cache_manager: &'a SharedCacheManager,
+    models: &'a SharedModels,
     inference_tx: &'a InferenceSender,
     inference_busy: &'a mut bool,
-}
-
-fn lock_mutex<'a, T>(mutex: &'a Mutex<T>, name: &str) -> Result<MutexGuard<'a, T>, String> {
-    mutex
-        .lock()
-        .map_err(|error| format!("Failed to lock {name}: {error}"))
 }
 
 /// Run the node, connecting to the gateway and reconnecting on disconnect.
@@ -44,19 +31,20 @@ fn lock_mutex<'a, T>(mutex: &'a Mutex<T>, name: &str) -> Result<MutexGuard<'a, T
 /// # Arguments
 ///
 /// * `config` - Node-level gateway and runtime configuration.
-/// * `available_models` - Downloaded models that can be advertised to the gateway.
 /// * `registry` - Local tool registry exposed by this node.
-/// * `coordinator` - Shared model coordinator used to execute requests.
+/// * `available_models` - Downloaded models that `nexo-ai` can load for this node.
 ///
 /// # Errors
 ///
 /// Returns an error if the node cannot maintain a healthy connection to the gateway.
 pub async fn run_node(
     config: &NodeConfig,
-    available_models: &[String],
     registry: &ToolRegistry,
-    coordinator: Arc<Mutex<Coordinator>>,
+    available_models: Vec<RegisteredModelConfig>,
 ) -> cli_helpers::Result {
+    let models = shared_models(config.runtime.clone(), available_models);
+    load_startup_models(&models, config).await;
+
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -65,7 +53,7 @@ pub async fn run_node(
             config.gateway_url
         );
 
-        match connect_and_run(config, available_models, registry, coordinator.clone()).await {
+        match connect_and_run(config, registry, models.clone()).await {
             Ok(()) => {
                 tracing::info!("Node disconnected gracefully");
                 break;
@@ -85,17 +73,21 @@ pub async fn run_node(
 /// Connect to the gateway, initialize the node session, and process frames until disconnect.
 async fn connect_gateway(
     config: &NodeConfig,
-    available_models: &[String],
     registry: &ToolRegistry,
+    models: &SharedModels,
 ) -> cli_helpers::Result<NexoConnection> {
     let mut conn = NexoConnection::connect(&config.gateway_url, &config.auth_token)
         .await
-        .map_err(|error| Error::Network(format!("Connection failed: {error}")))?;
+        .map_err(|error| Error::Other(format!("Connection failed: {error}")))?;
 
     tracing::info!("Connected to gateway");
 
     let (capabilities, commands) = registry.capabilities_and_commands();
     tracing::debug!("Handshaking with capabilities={capabilities:?}, commands={commands:?}");
+    let available_models = {
+        let models = models.lock().await;
+        models.available_model_ids()
+    };
 
     let params = default_node_connect_params(
         &config.node_id,
@@ -104,12 +96,12 @@ async fn connect_gateway(
         &config.device_id,
         capabilities,
         commands,
-        available_models.to_vec(),
+        available_models,
     );
 
     let hello = perform_handshake(&mut conn, params)
         .await
-        .map_err(|error| Error::Network(format!("Handshake failed: {error}")))?;
+        .map_err(|error| Error::Other(format!("Handshake failed: {error}")))?;
 
     tracing::info!(
         "Handshake complete: protocol v{}, tick interval {}ms",
@@ -120,39 +112,20 @@ async fn connect_gateway(
     Ok(conn)
 }
 
-fn default_cache_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".nexo")
-        .join("kv_cache")
-}
-
 async fn connect_and_run(
     config: &NodeConfig,
-    available_models: &[String],
     registry: &ToolRegistry,
-    coordinator: Arc<Mutex<Coordinator>>,
+    models: SharedModels,
 ) -> cli_helpers::Result {
-    let mut conn = connect_gateway(config, available_models, registry).await?;
+    let mut conn = connect_gateway(config, registry, &models).await?;
     register_tools(&mut conn, registry).await?;
 
     tracing::info!("Node ready, listening for requests");
 
     let (mut writer, mut reader) = conn.into_split();
-    push_model_status(&mut writer, &coordinator, available_models).await;
+    push_model_status(&mut writer, &models).await;
 
-    let cache_manager: SharedCacheManager =
-        Arc::new(Mutex::new(SessionCacheManager::new(default_cache_dir())));
-
-    run_message_loop(
-        &mut writer,
-        &mut reader,
-        available_models,
-        registry,
-        &coordinator,
-        &cache_manager,
-    )
-    .await?;
+    run_message_loop(&mut writer, &mut reader, registry, &models).await?;
 
     if let Err(error) = writer.close().await {
         tracing::debug!("Close error (non-fatal): {error}");
@@ -164,10 +137,8 @@ async fn connect_and_run(
 async fn run_message_loop(
     writer: &mut WriteHalf,
     reader: &mut ReadHalf,
-    available_models: &[String],
     registry: &ToolRegistry,
-    coordinator: &Arc<Mutex<Coordinator>>,
-    cache_manager: &SharedCacheManager,
+    models: &SharedModels,
 ) -> cli_helpers::Result {
     let (inference_tx, mut inference_rx) =
         tokio::sync::mpsc::channel::<(String, InferenceResult)>(1);
@@ -177,12 +148,10 @@ async fn run_message_loop(
         tokio::select! {
             frame = reader.recv_frame() => {
                 let frame = frame
-                    .map_err(|error| Error::Network(format!("Receive error: {error}")))?;
+                    .map_err(|error| Error::Other(format!("Receive error: {error}")))?;
                 let context = GatewayFrameContext {
-                    available_models,
                     registry,
-                    coordinator,
-                    cache_manager,
+                    models,
                     inference_tx: &inference_tx,
                     inference_busy: &mut inference_busy,
                 };
@@ -195,7 +164,7 @@ async fn run_message_loop(
 
             Some((request_id, result)) = inference_rx.recv() => {
                 inference_busy = false;
-                handle_inference_result(writer, &request_id, result, cache_manager).await?;
+                handle_inference_result(writer, &request_id, result).await?;
             }
         }
     }
@@ -226,14 +195,7 @@ async fn handle_gateway_frame(
                 send_busy_error(writer, &id).await?;
             } else {
                 *context.inference_busy = true;
-                dispatch_run_round(
-                    &id,
-                    params,
-                    context.coordinator,
-                    context.inference_tx,
-                    context.cache_manager,
-                )
-                .await?;
+                queue_run_round(&id, params, context.models, context.inference_tx).await?;
             }
             Ok(MessageLoopAction::Continue)
         }
@@ -246,8 +208,7 @@ async fn handle_gateway_frame(
                 send_busy_error(writer, &id).await?;
             } else {
                 *context.inference_busy = true;
-                dispatch_image_analyze(&id, params, context.coordinator, context.inference_tx)
-                    .await?;
+                queue_image_analyze(&id, params, context.models, context.inference_tx).await?;
             }
             Ok(MessageLoopAction::Continue)
         }
@@ -256,14 +217,7 @@ async fn handle_gateway_frame(
             method: Method::ModelLoad,
             params,
         }) => {
-            handle_model_load(
-                writer,
-                &id,
-                params,
-                context.coordinator,
-                context.available_models,
-            )
-            .await?;
+            handle_model_load(writer, &id, params, context.models).await?;
             Ok(MessageLoopAction::Continue)
         }
         Some(Frame::Request {
@@ -271,15 +225,7 @@ async fn handle_gateway_frame(
             method: Method::ModelUnload,
             params,
         }) => {
-            handle_model_unload(
-                writer,
-                &id,
-                params,
-                context.coordinator,
-                context.available_models,
-                context.cache_manager,
-            )
-            .await?;
+            handle_model_unload(writer, &id, params, context.models).await?;
             Ok(MessageLoopAction::Continue)
         }
         Some(Frame::Event {
@@ -309,7 +255,7 @@ async fn handle_gateway_frame(
             tracing::debug!("Received unexpected frame: {frame:?}");
             Ok(MessageLoopAction::Continue)
         }
-        None => Err(Error::Network("Connection closed by gateway".into())),
+        None => Err(Error::Other("Connection closed by gateway".into())),
     }
 }
 
@@ -317,17 +263,7 @@ async fn handle_inference_result(
     writer: &mut WriteHalf,
     request_id: &str,
     result: InferenceResult,
-    cache_manager: &SharedCacheManager,
 ) -> cli_helpers::Result {
-    match lock_mutex(cache_manager.as_ref(), "session cache manager") {
-        Ok(mut manager) => {
-            if let Err(error) = manager.maybe_expire() {
-                tracing::warn!("KV cache expiry failed: {error}");
-            }
-        }
-        Err(error) => tracing::warn!("{error}"),
-    }
-
     let response = match result {
         Ok(payload) => Frame::ok_response(request_id, &payload).unwrap_or_else(|error| {
             Frame::error_response(
@@ -347,5 +283,5 @@ async fn handle_inference_result(
         ),
     };
 
-    super::send(writer, &response).await
+    send(writer, &response).await
 }

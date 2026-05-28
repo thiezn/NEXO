@@ -54,5 +54,5 @@ pub use run::{
 };
 pub use tools::{
     ToolCall, ToolCallDelta, ToolChoice, ToolDefinition, ToolExecutionConstraints, ToolParallelism,
-    ToolResult, ToolResultContent, ToolResultStatus, ToolSideEffectLevel,
+    ToolRegistry, ToolResult, ToolResultContent, ToolResultStatus, ToolSideEffectLevel,
 };

@@ -11,25 +11,19 @@ path = "src/main.rs"
 nexo-ws-schema = { workspace = true }
 nexo-ws-client = { workspace = true }
 nexo-core = { workspace = true }
+nexo-model-mgmt = { path = "../shared/nexo-model-mgmt" }
+nexo-echo = { path = "../nexo-tools/nexo-echo" }
 nexo-ai = { path = "../nexo-ai", default-features = false, features = [
     "metal",
     "download",
 ] }
-cli-helpers = { workspace = true, features = ["config", "tracing"] }
+cli-helpers = { workspace = true, features = ["clap", "config", "tracing"] }
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 dirs = { workspace = true }
-anyhow = { workspace = true }
-async-trait = { workspace = true }
-base64 = { workspace = true }
-indicatif = { workspace = true }
-console = { workspace = true }
-sha2 = { workspace = true }
-candle-core = { workspace = true }
-thiserror = { workspace = true }
 futures-util = { workspace = true }
 
 [lints]

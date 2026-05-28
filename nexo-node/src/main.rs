@@ -1,21 +1,19 @@
 //! Command-line entry point for the `nexo-node` binary.
 
 mod cli;
-mod config;
-mod inference;
-mod tools;
-mod transport;
+
+use std::error::Error as StdError;
+use std::process::ExitCode;
 
 use clap::Parser;
 use cli::base::Cli;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<ExitCode, Box<dyn StdError>> {
     let cli = Cli::parse();
-    cli_helpers::setup_tracing_from_level(cli.log_level, cli.no_color);
+    cli.common.init_tracing()?;
 
-    if let Err(e) = cli::base::dispatch(cli.command).await {
-        tracing::error!("{e}");
-        std::process::exit(1);
-    }
+    let mut context = cli.common.command_context()?;
+    let exit_code = cli::base::dispatch(cli.command, &mut context).await?;
+    Ok(exit_code)
 }

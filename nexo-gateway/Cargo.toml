@@ -39,7 +39,7 @@ http = { workspace = true }
 sha2 = { workspace = true }
 git2 = { version = "0", features = ["https", "ssh"] }
 anyhow = { workspace = true }
-nexo-notes = { path = "../nexo-tools/core/nexo-notes" }
+nexo-notes = { path = "../nexo-tools/nexo-notes" }
 nexo-io = { path = "../nexo-tools/nexo-io" }
 
 [dev-dependencies]

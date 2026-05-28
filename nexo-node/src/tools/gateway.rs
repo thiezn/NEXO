@@ -1,6 +1,8 @@
-use crate::tools::ToolRegistry;
 use crate::transport::send;
 use cli_helpers::Error;
+use nexo_core::{
+    ToolCall, ToolCallId, ToolRegistry, ToolResult, ToolResultContent, ToolResultStatus,
+};
 use nexo_ws_client::{NexoConnection, WriteHalf};
 use nexo_ws_schema::{
     ErrorPayload, Frame, Method, ToolsExecuteParams, ToolsExecuteResponse, ToolsRegisterParams,
@@ -11,7 +13,7 @@ pub(crate) async fn register_tools(
     conn: &mut NexoConnection,
     registry: &ToolRegistry,
 ) -> cli_helpers::Result {
-    let specs = registry.specs();
+    let specs = registry.definitions();
     let tool_count = specs.len();
     tracing::info!("Registering {tool_count} tool(s) with gateway");
 
@@ -21,7 +23,7 @@ pub(crate) async fn register_tools(
 
     conn.send_frame(&register_frame)
         .await
-        .map_err(|error| Error::Network(format!("Failed to send register: {error}")))?;
+        .map_err(|error| Error::Other(format!("Failed to send register: {error}")))?;
 
     await_register_response(conn, tool_count).await
 }
@@ -34,10 +36,8 @@ async fn await_register_response(
         let frame = conn
             .recv_frame()
             .await
-            .map_err(|error| {
-                Error::Network(format!("Failed to receive register response: {error}"))
-            })?
-            .ok_or_else(|| Error::Network("Connection closed during registration".into()))?;
+            .map_err(|error| Error::Other(format!("Failed to receive register response: {error}")))?
+            .ok_or_else(|| Error::Other("Connection closed during registration".into()))?;
 
         match frame {
             Frame::Response {
@@ -57,7 +57,7 @@ async fn await_register_response(
                 let message = error
                     .map(|error| format!("{}: {}", error.code, error.message))
                     .unwrap_or_else(|| "Unknown error".into());
-                return Err(Error::Network(format!(
+                return Err(Error::Other(format!(
                     "Tool registration rejected: {message}"
                 )));
             }
@@ -93,30 +93,30 @@ pub(crate) async fn handle_tool_execute(
     tracing::debug!("Tool '{}' args: {}", exec_params.tool, exec_params.args);
     let start = std::time::Instant::now();
 
-    let response = match registry.execute(&exec_params.tool, exec_params.args).await {
-        Some(result) => {
+    let tool_call = ToolCall {
+        id: ToolCallId::from(exec_params.idempotency_key.clone()),
+        index: 0,
+        name: exec_params.tool.clone(),
+        arguments: exec_params.args,
+    };
+
+    let response = match registry.try_execute(tool_call).await {
+        Ok(Some(result)) => {
             let elapsed = start.elapsed();
+            let tool_response = response_from_tool_result(result);
             tracing::info!(
                 "Tool '{}' completed in {:.2}ms (success={})",
                 exec_params.tool,
                 elapsed.as_secs_f64() * 1000.0,
-                result.success
+                tool_response.success
             );
             tracing::debug!(
                 "Tool '{}' output: {}, error: {:?}",
                 exec_params.tool,
-                result.output,
-                result.error
+                tool_response.output,
+                tool_response.error
             );
-            Frame::ok_response(
-                request_id,
-                &ToolsExecuteResponse {
-                    success: result.success,
-                    output: result.output,
-                    error: result.error,
-                },
-            )
-            .unwrap_or_else(|error| {
+            Frame::ok_response(request_id, &tool_response).unwrap_or_else(|error| {
                 Frame::error_response(
                     request_id,
                     ErrorPayload {
@@ -126,7 +126,7 @@ pub(crate) async fn handle_tool_execute(
                 )
             })
         }
-        None => {
+        Ok(None) => {
             tracing::warn!("Tool '{}' not found locally", exec_params.tool);
             Frame::error_response(
                 request_id,
@@ -136,7 +136,44 @@ pub(crate) async fn handle_tool_execute(
                 },
             )
         }
+        Err(error) => Frame::ok_response(
+            request_id,
+            &ToolsExecuteResponse {
+                success: false,
+                output: String::new(),
+                error: Some(error.to_string()),
+            },
+        )
+        .unwrap_or_else(|error| {
+            Frame::error_response(
+                request_id,
+                ErrorPayload {
+                    code: "internal_error".into(),
+                    message: error.to_string(),
+                },
+            )
+        }),
     };
 
     send(writer, &response).await
+}
+
+fn response_from_tool_result(result: ToolResult) -> ToolsExecuteResponse {
+    let content = match result.content {
+        ToolResultContent::Text(text) => text,
+        ToolResultContent::Json(value) => value.to_string(),
+    };
+
+    match result.status {
+        ToolResultStatus::Success => ToolsExecuteResponse {
+            success: true,
+            output: content,
+            error: None,
+        },
+        ToolResultStatus::Failure => ToolsExecuteResponse {
+            success: false,
+            output: String::new(),
+            error: Some(content),
+        },
+    }
 }

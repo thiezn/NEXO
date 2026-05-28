@@ -8,6 +8,8 @@ pub mod choice;
 pub mod definition;
 /// Tool execution policy types.
 pub mod execution;
+/// Generic tool registry for core tool definitions and executors.
+pub mod registry;
 /// Tool result payload types.
 pub mod result;
 
@@ -15,4 +17,5 @@ pub use call::{ToolCall, ToolCallDelta};
 pub use choice::ToolChoice;
 pub use definition::ToolDefinition;
 pub use execution::{ToolExecutionConstraints, ToolParallelism, ToolSideEffectLevel};
+pub use registry::ToolRegistry;
 pub use result::{ToolResult, ToolResultContent, ToolResultStatus};

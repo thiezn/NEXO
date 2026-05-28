@@ -9,10 +9,11 @@ members = [
     "nexo-gateway",
     "nexo-node",
     "nexo-client",
-    "nexo-tools/core/nexo-notes",
+    "nexo-tools/nexo-notes",
     "nexo-tools/nexo-io",
     "nexo-ai",
     "integration-tests",
+    "nexo-tools/nexo-echo",
 ]
 
 resolver = "3"

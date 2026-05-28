@@ -1,6 +1,6 @@
 //! `init` command implementation.
 
-use crate::config::NodeConfig;
+use nexo_node::config::NodeConfig;
 
 /// Create the default node configuration file on disk.
 ///
