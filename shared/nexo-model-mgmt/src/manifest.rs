@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use nexo_core::ModelDescriptor;
+use serde_json::Value;
 
 /// Component types for files that make up a model artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,12 +140,30 @@ impl ModelManifest {
     pub fn display_name(&self) -> &str {
         &self.descriptor.display_name
     }
+
+    /// Shared local storage key used for downloaded artifacts.
+    #[must_use]
+    pub fn storage_id(&self) -> String {
+        self.descriptor
+            .metadata
+            .get("source_model")
+            .and_then(Value::as_str)
+            .map(base_storage_id)
+            .unwrap_or_else(|| sanitize_model_name(self.id()))
+    }
 }
 
 /// Determine the clean storage path for a remote filename relative to the models directory.
 #[must_use]
 pub fn storage_path(manifest: &ModelManifest, remote_filename: impl AsRef<Path>) -> PathBuf {
-    PathBuf::from(sanitize_model_name(manifest.id())).join(remote_filename)
+    PathBuf::from(manifest.storage_id()).join(remote_filename)
+}
+
+fn base_storage_id(source_model: &str) -> String {
+    let basename = source_model
+        .rsplit_once('/')
+        .map_or(source_model, |(_, name)| name);
+    sanitize_model_name(&basename.to_ascii_lowercase())
 }
 
 /// Sanitize a model name for local directory storage.
@@ -191,5 +210,36 @@ mod tests {
             storage_path(&manifest, file.selector.exact_path().unwrap_or_default()),
             PathBuf::from("org-test-model/subdir/model.gguf")
         );
+    }
+
+    #[test]
+    fn storage_id_uses_source_model_basename() {
+        let mut metadata = nexo_core::MetadataMap::new();
+        metadata.insert(
+            "source_model".to_string(),
+            Value::String("google/gemma-4-E4B-it".to_string()),
+        );
+
+        let manifest = ModelManifest {
+            descriptor: nexo_core::ModelDescriptor {
+                id: "gemma-4-e4b-it-uqff-afq8".into(),
+                display_name: "Gemma 4 E4B IT UQFF AFQ8".to_string(),
+                provider: Some("mistralrs-community".to_string()),
+                capabilities: vec![nexo_core::ModelCapability::TextGeneration],
+                modalities: nexo_core::ModelModalities {
+                    input: vec![nexo_core::SupportedModality::Text],
+                    output: vec![nexo_core::SupportedModality::Text],
+                },
+                role_strategy: nexo_core::RoleStrategy::Default,
+                context_window_tokens: None,
+                max_output_tokens: None,
+                metadata,
+            },
+            backend: "mistralrs-uqff".to_string(),
+            size_gb: 1.0,
+            files: Vec::new(),
+        };
+
+        assert_eq!(manifest.storage_id(), "gemma-4-e4b-it");
     }
 }

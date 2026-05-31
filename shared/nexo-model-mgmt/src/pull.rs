@@ -9,6 +9,7 @@ use hf_hub::{Cache, Repo, RepoType};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use tokio::task::JoinSet;
 use tracing::debug;
 
 use crate::manifest::{ModelComponent, ModelFile, ModelManifest, storage_path};
@@ -72,6 +73,18 @@ struct ResolvedModelFile {
     sha256: Option<&'static str>,
 }
 
+#[derive(Debug, Clone)]
+struct PendingDownload {
+    component: ModelComponent,
+    hf_repo: String,
+    hf_filename: String,
+    clean_path: PathBuf,
+    sha256: Option<&'static str>,
+    bar: ProgressBar,
+}
+
+const MAX_PARALLEL_DOWNLOADS: usize = 4;
+
 /// Download all files for a model manifest with terminal progress bars.
 pub async fn pull_model(
     manifest: &ModelManifest,
@@ -80,9 +93,8 @@ pub async fn pull_model(
     let models_dir = default_models_dir();
     let mut downloads = Vec::new();
 
-    let mut builder = ApiBuilder::from_env()
-        .with_cache_dir(hf_cache_dir())
-        .with_endpoint(hf_endpoint());
+    let mut builder = ApiBuilder::from_env().with_cache_dir(hf_cache_dir());
+    // .with_endpoint(hf_endpoint()); // Skipping default mirror for now.
     if let Some(token) = resolve_hf_token() {
         builder = builder.with_token(Some(token));
     }
@@ -104,7 +116,7 @@ pub async fn pull_model(
             );
             downloads.push((file.component, clean_path));
         } else {
-            files_to_download.push(file);
+            files_to_download.push((file, clean_path));
         }
     }
 
@@ -126,37 +138,72 @@ pub async fn pull_model(
     .unwrap_or_else(|_| ProgressStyle::default_bar())
     .progress_chars("#>-");
 
-    for file in files_to_download {
+    let mut pending = files_to_download.into_iter().map(|(file, clean_path)| {
         let bar = multi.add(ProgressBar::new(file.size_bytes.unwrap_or_default()));
         bar.set_style(bar_style.clone());
         bar.set_message(truncate_filename(&file.hf_filename, msg_width));
 
+        PendingDownload {
+            component: file.component,
+            hf_repo: file.hf_repo,
+            hf_filename: file.hf_filename,
+            clean_path,
+            sha256: file.sha256,
+            bar,
+        }
+    });
+
+    let mut in_flight = JoinSet::new();
+    for _ in 0..MAX_PARALLEL_DOWNLOADS {
+        let Some(task) = pending.next() else {
+            break;
+        };
+        spawn_download_task(&mut in_flight, api.clone(), task, msg_width);
+    }
+
+    while let Some(result) = in_flight.join_next().await {
+        let (component, clean_path) = result
+            .map_err(|error| DownloadError::FilePlacement(format!("download task failed: {error}")))??;
+        downloads.push((component, clean_path));
+
+        if let Some(task) = pending.next() {
+            spawn_download_task(&mut in_flight, api.clone(), task, msg_width);
+        }
+    }
+
+    Ok(downloads)
+}
+
+fn spawn_download_task(
+    join_set: &mut JoinSet<std::result::Result<(ModelComponent, PathBuf), DownloadError>>,
+    api: Api,
+    task: PendingDownload,
+    msg_width: usize,
+) {
+    join_set.spawn(async move {
         let hf_path = download_file(
             &api,
-            &file.hf_repo,
-            &file.hf_filename,
-            DownloadProgress::new(bar, msg_width),
+            &task.hf_repo,
+            &task.hf_filename,
+            DownloadProgress::new(task.bar, msg_width),
         )
         .await?;
 
-        let clean_path = models_dir.join(storage_path(manifest, &file.hf_filename));
-        hardlink_or_copy(&hf_path, &clean_path)?;
+        hardlink_or_copy(&hf_path, &task.clean_path)?;
 
-        if let Some(expected) = file.sha256 {
-            match verify_sha256(&clean_path, expected) {
+        if let Some(expected) = task.sha256 {
+            match verify_sha256(&task.clean_path, expected) {
                 Ok(true) => {}
                 Ok(false) => eprintln!(
                     "warning: SHA-256 mismatch for {} (file may have changed upstream)",
-                    file.hf_filename
+                    task.hf_filename
                 ),
                 Err(error) => eprintln!("warning: {error}"),
             }
         }
 
-        downloads.push((file.component, clean_path));
-    }
-
-    Ok(downloads)
+        Ok((task.component, task.clean_path))
+    });
 }
 
 async fn resolve_model_file(
@@ -265,6 +312,7 @@ fn resolve_hf_token() -> Option<String> {
         .or_else(|| Cache::from_env().token())
 }
 
+#[allow(dead_code)]
 fn hf_endpoint() -> String {
     std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://hf-mirror.com".to_string())
 }

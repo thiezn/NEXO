@@ -65,7 +65,7 @@ fi
 
 # Clean up build artifacts
 echo "Cleaning up previous build artifacts..."
-cargo clean
+# cargo clean
 
 # First test and build the production apps
 # cargo test --release

@@ -40,7 +40,7 @@ pub fn resolve_model_storage_dir(model_or_path: &str) -> PathBuf {
     }
 
     find_manifest_by_source(model_or_path)
-        .map(|manifest| model_storage_dir(manifest.id()))
+        .map(|manifest| default_models_dir().join(manifest.storage_id()))
         .unwrap_or_else(|| model_storage_dir(model_or_path))
 }
 

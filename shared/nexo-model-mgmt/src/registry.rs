@@ -8,9 +8,7 @@ use nexo_core::{
 };
 use serde_json::Value;
 
-use crate::manifest::{
-    ModelComponent, ModelFile, ModelFileSelector, ModelManifest, sanitize_model_name,
-};
+use crate::manifest::{ModelComponent, ModelFile, ModelFileSelector, ModelManifest};
 use crate::paths::default_models_dir;
 
 /// Printable model entry with local download status.
@@ -109,7 +107,7 @@ pub fn list_models() -> Vec<ModelEntry> {
     known_manifests()
         .iter()
         .map(|manifest| {
-            let model_dir = models_dir.join(sanitize_model_name(manifest.id()));
+            let model_dir = models_dir.join(manifest.storage_id());
             ModelEntry {
                 id: manifest.id().to_string(),
                 display_name: manifest.display_name().to_string(),
@@ -143,6 +141,20 @@ static ALL_MANIFESTS: LazyLock<Vec<ModelManifest>> = LazyLock::new(|| {
     manifests.push(embedding_gemma_manifest());
     manifests
 });
+
+const UQFF_VARIANTS: &[(&str, &str)] = &[
+    ("afq2", "AFQ2"),
+    ("afq3", "AFQ3"),
+    ("afq4", "AFQ4"),
+    ("afq6", "AFQ6"),
+    ("afq8", "AFQ8"),
+    ("q2k", "Q2K"),
+    ("q3k", "Q3K"),
+    ("q4k", "Q4K"),
+    ("q5k", "Q5K"),
+    ("q6k", "Q6K"),
+    ("q8_0", "Q8_0"),
+];
 
 fn gemma_4_e2b_it_q5_manifest() -> ModelManifest {
     let gguf_repo = "unsloth/gemma-4-e2b-it-GGUF";
@@ -270,22 +282,10 @@ fn gemma_4_26b_a4b_it_q4_manifest() -> ModelManifest {
 fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
     [
         (
-            "gemma-4-e2b-uqff",
-            "Gemma 4 E2B UQFF",
-            "google/gemma-4-E2B",
-            4.0,
-        ),
-        (
             "gemma-4-e2b-it-uqff",
             "Gemma 4 E2B IT UQFF",
             "google/gemma-4-E2B-it",
             4.0,
-        ),
-        (
-            "gemma-4-e4b-uqff",
-            "Gemma 4 E4B UQFF",
-            "google/gemma-4-E4B",
-            7.0,
         ),
         (
             "gemma-4-e4b-it-uqff",
@@ -293,20 +293,33 @@ fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
             "google/gemma-4-E4B-it",
             7.0,
         ),
+        (
+            "gemma-4-26b-a4b-it-uqff",
+            "Gemma 4 26B-A4B IT UQFF",
+            "google/gemma-4-26B-A4B-it",
+            17.0,
+        ),
+        (
+            "gemma-4-31b-it-uqff",
+            "Gemma 4 31B IT UQFF",
+            "google/gemma-4-31B-it",
+            20.0,
+        ),
     ]
     .into_iter()
-    .map(|(id, display_name, source_model, size_gb)| {
+    .flat_map(|(id, display_name, source_model, size_gb)| {
         let base_name = source_model
             .rsplit_once('/')
             .map_or(source_model, |(_, name)| name);
         let uqff_repo = format!("mistralrs-community/{base_name}-UQFF");
-        ModelManifest {
-            descriptor: descriptor(
-                id,
-                display_name,
-                Some("mistralrs-community"),
-                "gemma4",
-                vec![
+
+        UQFF_VARIANTS.iter().map(move |(variant_id, variant_label)| {
+            uqff_variant_manifest(UqffManifestSpec {
+                id_prefix: id,
+                display_name_prefix: display_name,
+                provider: "mistralrs-community",
+                family: "gemma4",
+                capabilities: vec![
                     ModelCapability::TextGeneration,
                     ModelCapability::ToolCalling,
                     ModelCapability::ImageInput,
@@ -315,22 +328,23 @@ fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
                     ModelCapability::StructuredOutput,
                     ModelCapability::Streaming,
                 ],
-                vec![
+                input_modalities: vec![
                     SupportedModality::Text,
                     SupportedModality::Image,
                     SupportedModality::Video,
                     SupportedModality::Audio,
                 ],
-                vec![SupportedModality::Text],
-                "Mistral UQFF Gemma 4 artifact set with quantized shards and residual tensors.",
+                output_modalities: vec![SupportedModality::Text],
+                description: "Mistral UQFF Gemma 4 artifact set with quantized shards and residual tensors.",
                 source_model,
-                "uqff",
-                None,
-            ),
-            backend: "mistralrs-uqff".to_string(),
-            size_gb,
-            files: files_for_uqff_repo(&uqff_repo, true),
-        }
+                backend: "mistralrs-uqff",
+                size_gb,
+                hf_repo: &uqff_repo,
+                variant_id,
+                variant_label,
+                gated: true,
+            })
+        })
     })
     .collect()
 }
@@ -351,41 +365,82 @@ fn qwen_3_5_apple_metal_manifests() -> Vec<ModelManifest> {
         ),
     ]
     .into_iter()
-    .map(|(id, display_name, source_model, size_gb)| {
+    .flat_map(|(id, display_name, source_model, size_gb)| {
         let base_name = source_model
             .rsplit_once('/')
             .map_or(source_model, |(_, name)| name);
         let uqff_repo = format!("mistralrs-community/{base_name}-UQFF");
-        let mut manifest = ModelManifest {
-            descriptor: descriptor(
-                id,
-                display_name,
-                Some("mistralrs-community"),
-                "qwen3.5",
-                vec![
+
+        UQFF_VARIANTS.iter().map(move |(variant_id, variant_label)| {
+            let mut manifest = uqff_variant_manifest(UqffManifestSpec {
+                id_prefix: id,
+                display_name_prefix: display_name,
+                provider: "mistralrs-community",
+                family: "qwen3.5",
+                capabilities: vec![
                     ModelCapability::TextGeneration,
                     ModelCapability::ToolCalling,
                     ModelCapability::ImageInput,
                     ModelCapability::Streaming,
                 ],
-                vec![SupportedModality::Text, SupportedModality::Image],
-                vec![SupportedModality::Text],
-                "Mistral UQFF Qwen 3.5 artifact set intended for Apple Metal AFQ execution.",
+                input_modalities: vec![SupportedModality::Text, SupportedModality::Image],
+                output_modalities: vec![SupportedModality::Text],
+                description: "Mistral UQFF Qwen 3.5 artifact set intended for Apple Metal AFQ execution.",
                 source_model,
-                "uqff",
-                None,
-            ),
-            backend: "mistralrs-uqff-metal".to_string(),
-            size_gb,
-            files: files_for_uqff_repo(&uqff_repo, false),
-        };
-        manifest.descriptor.metadata.insert(
-            "optimization".to_string(),
-            Value::String("apple-metal-afq".to_string()),
-        );
-        manifest
+                backend: "mistralrs-uqff-metal",
+                size_gb,
+                hf_repo: &uqff_repo,
+                variant_id,
+                variant_label,
+                gated: false,
+            });
+            manifest.descriptor.metadata.insert(
+                "optimization".to_string(),
+                Value::String("apple-metal-afq".to_string()),
+            );
+            manifest
+        })
     })
     .collect()
+}
+
+struct UqffManifestSpec<'a> {
+    id_prefix: &'a str,
+    display_name_prefix: &'a str,
+    provider: &'a str,
+    family: &'a str,
+    capabilities: Vec<ModelCapability>,
+    input_modalities: Vec<SupportedModality>,
+    output_modalities: Vec<SupportedModality>,
+    description: &'a str,
+    source_model: &'a str,
+    backend: &'a str,
+    size_gb: f32,
+    hf_repo: &'a str,
+    variant_id: &'a str,
+    variant_label: &'a str,
+    gated: bool,
+}
+
+fn uqff_variant_manifest(spec: UqffManifestSpec<'_>) -> ModelManifest {
+    ModelManifest {
+        descriptor: descriptor(
+            &format!("{}-{}", spec.id_prefix, spec.variant_id),
+            &format!("{} {}", spec.display_name_prefix, spec.variant_label),
+            Some(spec.provider),
+            spec.family,
+            spec.capabilities,
+            spec.input_modalities,
+            spec.output_modalities,
+            spec.description,
+            spec.source_model,
+            "uqff",
+            None,
+        ),
+        backend: spec.backend.to_string(),
+        size_gb: spec.size_gb,
+        files: files_for_uqff_variant(spec.hf_repo, spec.variant_id, spec.gated),
+    }
 }
 
 fn voxtral_mini_asr_stt_manifest() -> ModelManifest {
@@ -427,6 +482,18 @@ fn flux_2_manifests() -> Vec<ModelManifest> {
             "FLUX.2 Schnell",
             "black-forest-labs/FLUX.2-schnell",
             24.0,
+        ),
+        (
+            "flux.2-klein-4b",
+            "FLUX.2 Klein 4B",
+            "black-forest-labs/FLUX.2-klein-4B",
+            13.0,
+        ),
+        (
+            "flux.2-klein-9b",
+            "FLUX.2 Klein 9B",
+            "black-forest-labs/FLUX.2-klein-9B",
+            29.0,
         ),
     ]
     .into_iter()
@@ -546,9 +613,25 @@ fn file_suffix(component: ModelComponent, hf_repo: &str, suffix: &str, gated: bo
     }
 }
 
-fn files_for_uqff_repo(hf_repo: &str, gated: bool) -> Vec<ModelFile> {
+fn file_prefix(component: ModelComponent, hf_repo: &str, prefix: &str, gated: bool) -> ModelFile {
+    ModelFile {
+        component,
+        hf_repo: hf_repo.to_string(),
+        selector: ModelFileSelector::Prefix(prefix.to_string()),
+        size_bytes: None,
+        gated,
+        sha256: None,
+    }
+}
+
+fn files_for_uqff_variant(hf_repo: &str, variant: &str, gated: bool) -> Vec<ModelFile> {
     vec![
-        file_suffix(ModelComponent::UqffShard, hf_repo, ".uqff", gated),
+        file_prefix(
+            ModelComponent::UqffShard,
+            hf_repo,
+            &format!("{variant}-"),
+            gated,
+        ),
         file_suffix(ModelComponent::UqffResidual, hf_repo, ".safetensors", gated),
         file_suffix(ModelComponent::Config, hf_repo, ".json", gated),
     ]

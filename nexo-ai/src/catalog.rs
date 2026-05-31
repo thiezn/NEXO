@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn uqff_manifest_uses_auto_loader() {
-        let manifest = find_manifest("gemma-4-e2b-it-uqff").unwrap();
+        let manifest = find_manifest("gemma-4-e2b-it-uqff-q4k").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
 
         assert!(matches!(config.loader, ModelLoader::Auto(_)));

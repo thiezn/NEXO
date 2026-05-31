@@ -30,7 +30,10 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Cli(source) => write!(f, "models command failed: {source}"),
-            Self::Download(source) => write!(f, "model download failed: {source}"),
+            Self::Download(source) => write!(
+                f,
+                "model download failed: {source}. Do you have hf_token.txt in .nexo?"
+            ),
             Self::UnknownModel { model, known } => write!(
                 f,
                 "unknown model or category '{model}'. Known models: {}",

@@ -3,6 +3,7 @@
 use std::process::ExitCode;
 
 use cli_helpers::{CommandContext, Runnable};
+use comfy_table::{ContentArrangement, Table, presets::ASCII_MARKDOWN};
 use nexo_core::{ModelCapability, SupportedModality};
 
 use crate::registry::{
@@ -30,7 +31,7 @@ impl ModelsCommand {
     pub async fn run_async(self, context: &mut CommandContext) -> Result<ExitCode> {
         match self.action {
             ModelsAction::List => run_list(context),
-            ModelsAction::Pull { model, force } => run_pull(context, &model, force).await,
+            ModelsAction::Pull { models, force } => run_pull(context, &models, force).await,
         }
     }
 }
@@ -54,9 +55,9 @@ pub enum ModelsAction {
     List,
     /// Pull one model, all models, or every model in a category.
     Pull {
-        /// Model name, category name, or `all`.
-        #[arg(value_name = "MODEL")]
-        model: String,
+        /// Model names, category names, or `all`.
+        #[arg(value_name = "MODEL", required = true, num_args = 1..)]
+        models: Vec<String>,
         /// Replace existing files even when size checks pass.
         #[arg(long)]
         force: bool,
@@ -71,11 +72,18 @@ fn run_list(context: &mut CommandContext) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    context.stdout_line(format!(
-        "{:<34} {:<14} {:<20} {:<26} {:<8} {:<12} DESCRIPTION",
-        "ID", "FAMILY", "BACKEND", "CAPABILITIES", "SIZE", "DOWNLOADED"
-    ))?;
-    context.stdout_line("-".repeat(132))?;
+    let mut table = Table::new();
+    table.load_preset(ASCII_MARKDOWN);
+    table.set_content_arrangement(ContentArrangement::Dynamic);
+    table.set_header([
+        "ID",
+        "FAMILY",
+        "BACKEND",
+        "CAPABILITIES",
+        "SIZE",
+        "DOWNLOADED",
+        "DESCRIPTION",
+    ]);
 
     for entry in entries {
         let capabilities = entry
@@ -85,26 +93,35 @@ fn run_list(context: &mut CommandContext) -> Result<ExitCode> {
             .map(capability_label)
             .collect::<Vec<_>>()
             .join(",");
-        context.stdout_line(format!(
-            "{:<34} {:<14} {:<20} {:<26} {:<8} {:<12} {}",
+        table.add_row([
             entry.id,
             entry.family,
             entry.backend,
             capabilities,
             format!("{:.1}G", entry.size_gb),
-            if entry.is_downloaded { "yes" } else { "no" },
-            entry.description
-        ))?;
+            if entry.is_downloaded {
+                "yes".to_string()
+            } else {
+                "no".to_string()
+            },
+            entry.description,
+        ]);
     }
+
+    context.stdout_line(table.to_string())?;
 
     Ok(ExitCode::SUCCESS)
 }
 
-async fn run_pull(context: &mut CommandContext, model: &str, force: bool) -> Result<ExitCode> {
-    let manifests = manifests_to_pull(model)?;
+async fn run_pull(
+    context: &mut CommandContext,
+    models: &[String],
+    force: bool,
+) -> Result<ExitCode> {
+    let manifests = manifests_to_pull(models)?;
 
     if manifests.is_empty() {
-        context.stdout_line(format!("no models found for '{model}'"))?;
+        context.stdout_line("no models matched the requested pull targets")?;
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -126,7 +143,25 @@ async fn run_pull(context: &mut CommandContext, model: &str, force: bool) -> Res
     Ok(ExitCode::SUCCESS)
 }
 
-fn manifests_to_pull(model: &str) -> Result<Vec<&'static crate::manifest::ModelManifest>> {
+fn manifests_to_pull(models: &[String]) -> Result<Vec<&'static crate::manifest::ModelManifest>> {
+    let mut resolved: Vec<&'static crate::manifest::ModelManifest> = Vec::new();
+
+    for model in models {
+        let manifests = manifests_for_target(model)?;
+        for manifest in manifests {
+            if !resolved
+                .iter()
+                .any(|existing| existing.id() == manifest.id())
+            {
+                resolved.push(manifest);
+            }
+        }
+    }
+
+    Ok(resolved)
+}
+
+fn manifests_for_target(model: &str) -> Result<Vec<&'static crate::manifest::ModelManifest>> {
     if model == "all" {
         return Ok(known_manifests().iter().collect());
     }
@@ -178,4 +213,32 @@ fn merge_manifests(
         }
     }
     left
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manifests_to_pull;
+
+    #[test]
+    fn manifests_to_pull_deduplicates_repeated_targets() {
+        let manifests = manifests_to_pull(&[
+            "gemma-4-e2b-it-uqff-q4k".to_string(),
+            "gemma-4-e2b-it-uqff-q4k".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].id(), "gemma-4-e2b-it-uqff-q4k");
+    }
+
+    #[test]
+    fn manifests_to_pull_deduplicates_category_overlap() {
+        let manifests = manifests_to_pull(&["flux".to_string(), "flux.2-dev".to_string()]).unwrap();
+        let flux_dev_count = manifests
+            .iter()
+            .filter(|manifest| manifest.id() == "flux.2-dev")
+            .count();
+
+        assert_eq!(flux_dev_count, 1);
+    }
 }
