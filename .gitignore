@@ -2,6 +2,9 @@
 hugging_token.txt
 .claude/settings.local.json
 
+scripts/sync_models.sh
+
+
 # mdBook
 docs/book
 mermaid-init.js
