@@ -538,8 +538,8 @@ fn build_auto_model_paths(loader: &AutoModelLoader) -> Result<Box<dyn ModelPaths
         .clone()
         .or_else(|| first_existing(&model_dir, &["tokenizer.json", "tekken.json"]))
         .ok_or_else(|| missing_local_file(&model_dir, "tokenizer.json or tekken.json"))?;
-    let config_filename = first_existing(&model_dir, &["params.json", "config.json"])
-        .ok_or_else(|| missing_local_file(&model_dir, "params.json or config.json"))?;
+    let config_filename = first_existing(&model_dir, &["config.json", "params.json"])
+        .ok_or_else(|| missing_local_file(&model_dir, "config.json or params.json"))?;
     let filenames = collect_weight_files(&model_dir, &[])?;
 
     Ok(Box::new(mistralrs_core::LocalModelPaths {

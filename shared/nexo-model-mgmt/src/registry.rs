@@ -217,6 +217,7 @@ fn gemma_4_e2b_it_q5_manifest() -> ModelManifest {
                 Some(4_954),
                 true,
             ),
+            file_chat_template_jinja(orig_repo, true),
         ],
     }
 }
@@ -275,6 +276,7 @@ fn gemma_4_26b_a4b_it_q4_manifest() -> ModelManifest {
                 Some(4_954),
                 true,
             ),
+            file_chat_template_jinja(orig_repo, true),
         ],
     }
 }
@@ -314,7 +316,7 @@ fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
         let uqff_repo = format!("mistralrs-community/{base_name}-UQFF");
 
         UQFF_VARIANTS.iter().map(move |(variant_id, variant_label)| {
-            uqff_variant_manifest(UqffManifestSpec {
+            let mut manifest = uqff_variant_manifest(UqffManifestSpec {
                 id_prefix: id,
                 display_name_prefix: display_name,
                 provider: "mistralrs-community",
@@ -343,7 +345,11 @@ fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
                 variant_id,
                 variant_label,
                 gated: true,
-            })
+            });
+            manifest
+                .files
+                .push(file_chat_template_jinja(source_model, true));
+            manifest
         })
     })
     .collect()
@@ -398,6 +404,9 @@ fn qwen_3_5_apple_metal_manifests() -> Vec<ModelManifest> {
                 "optimization".to_string(),
                 Value::String("apple-metal-afq".to_string()),
             );
+            manifest
+                .files
+                .push(file_chat_template_tokenizer_config(&uqff_repo, false));
             manifest
         })
     })
@@ -465,7 +474,7 @@ fn voxtral_mini_asr_stt_manifest() -> ModelManifest {
         ),
         backend: "mistralrs-voxtral".to_string(),
         size_gb: 7.0,
-        files: files_for_hf_snapshot(repo, false),
+        files: files_for_chat_snapshot(repo, false),
     }
 }
 
@@ -602,6 +611,25 @@ fn file_exact(
     }
 }
 
+fn file_chat_template_exact(hf_repo: &str, filename: &str, gated: bool) -> ModelFile {
+    ModelFile {
+        component: ModelComponent::ChatTemplate,
+        hf_repo: hf_repo.to_string(),
+        selector: ModelFileSelector::Exact(filename.to_string()),
+        size_bytes: None,
+        gated,
+        sha256: None,
+    }
+}
+
+fn file_chat_template_jinja(hf_repo: &str, gated: bool) -> ModelFile {
+    file_chat_template_exact(hf_repo, "chat_template.jinja", gated)
+}
+
+fn file_chat_template_tokenizer_config(hf_repo: &str, gated: bool) -> ModelFile {
+    file_chat_template_exact(hf_repo, "tokenizer_config.json", gated)
+}
+
 fn file_suffix(component: ModelComponent, hf_repo: &str, suffix: &str, gated: bool) -> ModelFile {
     ModelFile {
         component,
@@ -635,6 +663,12 @@ fn files_for_uqff_variant(hf_repo: &str, variant: &str, gated: bool) -> Vec<Mode
         file_suffix(ModelComponent::UqffResidual, hf_repo, ".safetensors", gated),
         file_suffix(ModelComponent::Config, hf_repo, ".json", gated),
     ]
+}
+
+fn files_for_chat_snapshot(hf_repo: &str, gated: bool) -> Vec<ModelFile> {
+    let mut files = files_for_hf_snapshot(hf_repo, gated);
+    files.push(file_chat_template_tokenizer_config(hf_repo, gated));
+    files
 }
 
 fn files_for_hf_snapshot(hf_repo: &str, gated: bool) -> Vec<ModelFile> {
@@ -685,4 +719,54 @@ fn any_local_file_matches(model_dir: &Path, selector: &ModelFileSelector) -> boo
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_models_include_chat_template_component() {
+        let chat_manifest_ids = [
+            "gemma-4-e2b-it-q5",
+            "gemma-4-26b-a4b-it-q4",
+            "gemma-4-e2b-it-uqff-afq4",
+            "qwen3.5-27b-apple-metal-uqff-afq4",
+            "voxtral-mini-3b-2507-asr-stt",
+        ];
+
+        for id in chat_manifest_ids {
+            let manifest = find_manifest(id).unwrap_or_else(|| panic!("missing manifest {id}"));
+            assert!(
+                manifest
+                    .files
+                    .iter()
+                    .any(|file| file.component == ModelComponent::ChatTemplate),
+                "manifest {id} is missing a chat template component"
+            );
+        }
+    }
+
+    #[test]
+    fn gemma4_models_use_jinja_chat_template() {
+        let gemma_manifest_ids = [
+            "gemma-4-e2b-it-q5",
+            "gemma-4-26b-a4b-it-q4",
+            "gemma-4-e2b-it-uqff-afq4",
+            "gemma-4-e4b-it-uqff-afq4",
+            "gemma-4-26b-a4b-it-uqff-afq4",
+            "gemma-4-31b-it-uqff-afq4",
+        ];
+
+        for id in gemma_manifest_ids {
+            let manifest = find_manifest(id).unwrap_or_else(|| panic!("missing manifest {id}"));
+            assert!(
+                manifest.files.iter().any(|file| {
+                    file.component == ModelComponent::ChatTemplate
+                        && file.selector.exact_path() == Some("chat_template.jinja")
+                }),
+                "manifest {id} is missing chat_template.jinja"
+            );
+        }
+    }
 }

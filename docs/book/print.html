@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-240f1b22.js";
+            window.path_to_searchindex_js = "searchindex-ef2e75da.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-aa7fd050.js"></script>
+        <script src="toc-af1dea89.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -182,160 +182,626 @@
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="gateway-architecture"><a class="header" href="#gateway-architecture">Gateway architecture</a></h1>
 <h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>NEXO is gateway-centric. A single long-lived <strong>Gateway</strong> accepts WebSocket
+connections from user clients and nodes, owns durable state, routes model inference,
+and coordinates tool execution. There is no peer-to-peer client or node transport in
+the current design.</p>
+<p>The current Rust runtime is split across shared contracts and executable actors:</p>
 <ul>
-<li>A single long‑lived <strong>Gateway</strong> is the heart of the system.</li>
-<li>Control-plane clients (macOS/iOS app, CLI) connect to the
-Gateway over <strong>WebSocket</strong> on the configured bind host (default
-<code>127.0.0.1:6969</code>).</li>
-<li><strong>Nodes</strong> (macOS/iOS/headless) also connect over <strong>WebSocket</strong>, but
-declare <code>role: node</code> with explicit capabilities/commands.</li>
-<li>There is no peer-to-peer client transport. Client-to-client messaging is
-routed through the gateway.</li>
+<li><code>nexo-core</code> defines canonical Rust contracts for messages, tools, model
+descriptors, inference requests/responses, runs, and rounds.</li>
+<li><code>nexo-ws-schema</code> defines the JSON WebSocket protocol frames, methods, event
+payloads, and generated schema surface.</li>
+<li><code>nexo-gateway</code> runs the WebSocket daemon, SQLite persistence, prompt storage,
+cron scheduler, run loop, and gateway-native tools.</li>
+<li><code>nexo-node</code> connects to the Gateway, registers tools, loads local models, and
+executes <code>run.round</code> through <code>nexo-ai</code>.</li>
+<li><code>nexo-ai</code> is the library-first local inference runtime that adapts <code>nexo-core</code>
+requests to <code>mistralrs-core</code>.</li>
 </ul>
-<h2 id="components-and-flows"><a class="header" href="#components-and-flows">Components and flows</a></h2>
-<h3 id="gateway-daemon"><a class="header" href="#gateway-daemon">Gateway (daemon)</a></h3>
-<ul>
-<li>Maintains connections to clients and nodes</li>
-<li>Exposes a typed WS API (requests, responses, server‑push events).</li>
-<li>Validates inbound frames against JSON Schema.</li>
-<li>Emits events like <code>run</code>, <code>message</code>, <code>presence</code>, <code>heartbeat</code>, <code>cron</code>, <code>tick</code>, <code>shutdown</code>.</li>
-</ul>
-<h3 id="clients-macos--ios-app--cli"><a class="header" href="#clients-macos--ios-app--cli">Clients (macOS / iOS app / CLI)</a></h3>
-<ul>
-<li>One WS connection per client.</li>
-<li>Provide a user routing identity in <code>connect</code>; today the gateway uses <code>client.id</code> for
-<code>role: "user"</code> connections when routing directed messages and associating sessions.
-Multiple connected peers can share the same <code>client.id</code>, in which case all of them
-receive directed <code>message</code> events. <code>device.id</code> identifies the concrete device.</li>
-<li>Send requests (<code>health</code>, <code>status</code>, <code>send</code>, <code>run.start</code>, <code>run.stop</code>, <code>run.instructions.append</code>, <code>system-presence</code>).</li>
-<li>Subscribe to events (<code>tick</code>, <code>run</code>, <code>message</code>, <code>presence</code>, <code>shutdown</code>).</li>
-</ul>
-<h3 id="nodes-macos--ios--headless"><a class="header" href="#nodes-macos--ios--headless">Nodes (macOS / iOS / headless)</a></h3>
-<ul>
-<li>Connect to the <strong>same WS server</strong> with <code>role: node</code>.</li>
-<li>Provide a device identity in <code>connect</code>; pairing is <strong>device‑based</strong> (role <code>node</code>)</li>
-<li>After handshake, register full tool specs via <code>tools.register</code>.</li>
-<li>Listen for <code>tools.execute</code> requests forwarded by the gateway.</li>
-<li>Handle <code>run.round</code> inference requests from the gateway loop runner.</li>
-<li>Respond to <code>model.load</code> / <code>model.unload</code> commands; push <code>model.status</code> updates.</li>
-<li>Expose commands like <code>epub_extractor.*</code>, <code>echo.*</code>, <code>ping</code>.</li>
-<li>Automatically reconnect and re-register on disconnect.</li>
-<li>On macOS, nexo-node also starts and monitors local inference servers (llama-server, etc.). See <a href="/nexo/model_management.html">Model Management</a> §6.</li>
-</ul>
-<h2 id="connection-lifecycle-single-client"><a class="header" href="#connection-lifecycle-single-client">Connection lifecycle (single client)</a></h2>
-<pre class="mermaid">sequenceDiagram
-    participant Client
-    participant Gateway
-
-    Client-&gt;&gt;Gateway: request:connect
-    Gateway--&gt;&gt;Client: response (ok)
-    Note right of Gateway: or response error + close
-    Note left of Client: payload=hello-ok&lt;br&gt;snapshot: presence + health
-
-    Gateway--&gt;&gt;Client: event:presence
-    Gateway--&gt;&gt;Client: event:tick
-
-    Client-&gt;&gt;Gateway: request:run.start
-    Gateway--&gt;&gt;Client: response:run.start&lt;br&gt;ack {runId, sessionId, status:"accepted"}
-    Gateway--&gt;&gt;Client: event:run&lt;br&gt;(streaming)
-    Gateway--&gt;&gt;Client: event:run&lt;br&gt;{status:"completed"}
+<h2 id="component-view"><a class="header" href="#component-view">Component View</a></h2>
+<pre class="mermaid">graph TD
+    Client[User clients&lt;br/&gt;CLI / macOS / iOS] &lt;--&gt;|WebSocket JSON protocol| Gateway[Gateway daemon&lt;br/&gt;nexo-gateway]
+    Node[Node runtime&lt;br/&gt;nexo-node] &lt;--&gt;|same WebSocket server| Gateway
+    Gateway --&gt; SQLite[(SQLite&lt;br/&gt;identity, sessions, runs, rounds, tools, cron)]
+    Gateway --&gt; GitStorage[(Git-backed storage&lt;br/&gt;PROMPTS and NOTES)]
+    Gateway --&gt; GatewayTools[Gateway-native tools&lt;br/&gt;notes and io]
+    Node --&gt; NexoAi[nexo-ai&lt;br/&gt;mistralrs-core adapter]
+    NexoAi --&gt; Models[(Local model storage&lt;br/&gt;nexo-model-mgmt)]
 </pre>
 
-<h2 id="node-registration--tool-execution"><a class="header" href="#node-registration--tool-execution">Node registration + tool execution</a></h2>
+<h2 id="gateway"><a class="header" href="#gateway">Gateway</a></h2>
+<p>The Gateway daemon binds to the configured host and port, defaulting to
+<code>127.0.0.1:6969</code>, and requires the configured auth header during WebSocket upgrade.</p>
+<p>Current responsibilities:</p>
+<ul>
+<li>Maintain connected user and node peers in memory.</li>
+<li>Persist device and user identity, sessions, runs, run rounds, conversation entries,
+tool traces, run summaries, capability locks, and cron jobs in SQLite.</li>
+<li>Maintain in-memory registries for node-hosted tools, pending forwarded requests,
+loaded models, and available models.</li>
+<li>Expose typed request/response methods from <code>nexo-ws-schema</code>.</li>
+<li>Spawn the serialized run task (<code>RunHandle</code>) and cron scheduler at startup.</li>
+<li>Register gateway-native note and IO tools at startup.</li>
+<li>Route <code>run.round</code>, <code>tools.execute</code>, <code>model.load</code>, <code>model.unload</code>, and
+<code>image.analyze</code> requests to nodes when needed.</li>
+<li>Emit <code>tick</code>, <code>presence</code>, <code>message</code>, <code>run</code>, <code>cron</code>, <code>heartbeat</code>, and <code>shutdown</code>
+events when those flows occur.</li>
+</ul>
+<p>The Gateway deserializes inbound payloads into typed schema structs. Runtime JSON
+Schema files can be generated from <code>nexo-ws-schema</code>; request handling itself is based
+on typed deserialization and handler-level validation.</p>
+<h2 id="clients"><a class="header" href="#clients">Clients</a></h2>
+<p>Clients connect with <code>role: "user"</code>.</p>
+<p>Current behavior:</p>
+<ul>
+<li>One WebSocket connection represents one connected peer.</li>
+<li><code>client.id</code> is the current user routing identity for sessions and directed
+messages.</li>
+<li>Multiple connected peers may share a <code>client.id</code>; all matching peers receive
+directed <code>message</code> events for that target.</li>
+<li><code>device.id</code> identifies the concrete device and is persisted with first/last seen
+timestamps.</li>
+<li>Clients can call <code>health</code>, <code>status</code>, <code>send</code>, <code>session.*</code>, <code>run.*</code>, <code>tools.*</code>,
+<code>cron.*</code>, <code>prompt.*</code>, <code>image.analyze</code>, and <code>system-presence</code> methods according to
+their role and handler support.</li>
+</ul>
+<h2 id="nodes"><a class="header" href="#nodes">Nodes</a></h2>
+<p>Nodes connect to the same WebSocket server with <code>role: "node"</code>.</p>
+<p>Current behavior:</p>
+<ul>
+<li>Nodes provide a device identity, capability labels, command names, and available
+model IDs in <code>connect</code>.</li>
+<li>After handshake, nodes register full <code>nexo-core</code> tool definitions with
+<code>tools.register</code>.</li>
+<li>Nodes publish loaded model descriptors and available model IDs with <code>model.status</code>.</li>
+<li>Nodes handle Gateway-directed <code>tools.execute</code>, <code>run.round</code>, <code>image.analyze</code>,
+<code>model.load</code>, and <code>model.unload</code> requests.</li>
+<li>Nodes execute at most one inference-class request at a time. A second <code>run.round</code> or
+<code>image.analyze</code> receives <code>node_busy</code>.</li>
+<li>Nodes automatically reconnect and must re-register tools and republish model status
+after reconnecting.</li>
+</ul>
+<p>The current local inference path is embedded in the node instead of managed as a
+separate external model-server process. <code>nexo-node</code> embeds <code>nexo-ai</code>, which builds a
+local <code>NexoAi</code> service from downloaded model configs and submits shared <code>nexo-core</code>
+inference requests to <code>mistralrs-core</code>.</p>
+<h2 id="connection-lifecycle"><a class="header" href="#connection-lifecycle">Connection Lifecycle</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant Peer as Client or Node
+    participant Gateway
+    participant DB as SQLite
+
+    Peer-&gt;&gt;Gateway: request connect {role, client, device?, models?}
+    Gateway-&gt;&gt;Gateway: protocol/auth/typed payload checks
+    Gateway-&gt;&gt;DB: upsert device; upsert user when role=user
+    Gateway--&gt;&gt;Peer: response hello-ok {protocol, policy}
+    Gateway--&gt;&gt;Peer: event presence {status: online}
+    Gateway--&gt;&gt;Peer: event tick ...
+
+    alt peer disconnects
+        Gateway--&gt;&gt;Peer: close
+        Gateway-&gt;&gt;Gateway: remove peer, deregister node tools, forget loaded/available models
+        Gateway--&gt;&gt;Peer: event presence {status: offline}
+    end
+</pre>
+
+<h2 id="node-registration-and-tool-routing"><a class="header" href="#node-registration-and-tool-routing">Node Registration and Tool Routing</a></h2>
 <pre class="mermaid">sequenceDiagram
     participant Node
     participant Gateway
     participant User
 
-    Node-&gt;&gt;Gateway: request:connect (role=node, capabilities)
-    Gateway--&gt;&gt;Node: response:hello-ok
-    Node-&gt;&gt;Gateway: request:tools.register (full specs)
-    Gateway--&gt;&gt;Node: response {registered: N}
-    Note right of Gateway: Tools stored in memory registry
+    Node-&gt;&gt;Gateway: request connect {role: node, capabilities, commands, models}
+    Gateway--&gt;&gt;Node: response hello-ok
+    Node-&gt;&gt;Gateway: request tools.register {tools: [ToolDefinition...]}
+    Gateway--&gt;&gt;Node: response {registered}
+    Node-&gt;&gt;Gateway: request model.status {loadedModels, availableModels}
+    Gateway--&gt;&gt;Node: response {acknowledged: true}
 
-    User-&gt;&gt;Gateway: request:tools.catalog
-    Gateway--&gt;&gt;User: response {tools: [...]}
+    User-&gt;&gt;Gateway: request tools.catalog
+    Gateway--&gt;&gt;User: response {tools: [gateway + node tools]}
 
-    User-&gt;&gt;Gateway: request:tools.execute {tool, args}
-    Gateway-&gt;&gt;Node: forwarded:tools.execute {tool, args}
-    Node--&gt;&gt;Gateway: response {success, output}
-    Gateway--&gt;&gt;User: relayed response {success, output}
-
-    Note over Node,Gateway: On disconnect: gateway deregisters&lt;br&gt;all tools from this node
+    User-&gt;&gt;Gateway: request tools.execute {tool, args, idempotencyKey}
+    alt gateway-native tool exists
+        Gateway-&gt;&gt;Gateway: execute local ToolRegistry
+    else node-hosted tool exists
+        Gateway-&gt;&gt;Node: forwarded request tools.execute
+        Node--&gt;&gt;Gateway: response {success, output, error?}
+    end
+    Gateway--&gt;&gt;User: response {success, output, error?}
 </pre>
 
-<h2 id="client-to-client-messaging"><a class="header" href="#client-to-client-messaging">Client-to-client messaging</a></h2>
+<h2 id="run-loop"><a class="header" href="#run-loop">Run Loop</a></h2>
+<p>The Gateway spawns a single <strong>RunHandle</strong> at startup. Request handlers submit run
+commands to this background task over an mpsc channel. The task processes commands
+sequentially.</p>
+<p>When a client sends <code>run.start</code>:</p>
+<ol>
+<li>The handler creates or resolves a session and creates a <code>runs</code> row.</li>
+<li>The handler submits <code>RunCommand::StartRun</code> with input, optional instructions,
+optional model ID, prompt collection, and typed reasoning settings.</li>
+<li>The run task persists transcript entries and executes rounds.</li>
+<li>Each round assembles context, routes inference, sends one <code>run.round</code>, handles
+either final content or tool calls, and repeats until terminal status or queueing.</li>
+<li>Run lifecycle events are broadcast to connected clients.</li>
+</ol>
+<p>Details: <a href="#nexo-run-loop-architecture">Run Loop</a></p>
+<pre class="mermaid">flowchart TD
+    Start[Client run.start] --&gt; Persist[Create session/run and persist input]
+    Persist --&gt; Round[Create round and build context]
+    Round --&gt; Route{Inference route?}
+    Route --&gt;|loaded model| Infer[Send run.round]
+    Route --&gt;|requested model available| Load[Send model.load]
+    Load --&gt; Infer
+    Route --&gt;|none| Queue[Mark run queued]
+    Infer --&gt; Decision{Response type}
+    Decision --&gt;|final content| Complete[Persist assistant response and complete run]
+    Decision --&gt;|tool calls| Tools[Execute tools sequentially today]
+    Tools --&gt; Round
+    Decision --&gt;|error| Fail[Mark run failed]
+</pre>
+
+<h2 id="model-loading-and-local-inference"><a class="header" href="#model-loading-and-local-inference">Model Loading and Local Inference</a></h2>
+<p><code>nexo-model-mgmt</code> owns model manifests, local storage paths, downloads, and reusable
+<code>models</code> CLI commands. <code>nexo-ai</code> converts downloaded manifests into
+<code>RegisteredModelConfig</code> values and builds a runtime from those configs. <code>nexo-node</code>
+uses those configs; it should not construct loader configs itself.</p>
+<p>Current model flow:</p>
+<ol>
+<li>A node discovers downloaded models and includes their IDs in the <code>connect</code> payload.</li>
+<li>The node may auto-load startup models based on configured startup capabilities.</li>
+<li>The node sends <code>model.status</code> with loaded <code>ModelDescriptor</code> values and available
+model IDs.</li>
+<li>If a run requests a model that is available but not loaded, the Gateway sends
+<code>model.unload</code> for other loaded models on that node, then <code>model.load</code> for the
+requested model.</li>
+<li><code>nexo-node</code> rebuilds its embedded <code>NexoAi</code> service when loaded model state changes
+and sends a fresh <code>model.status</code>.</li>
+</ol>
+<h2 id="sessions-and-prompt-collections"><a class="header" href="#sessions-and-prompt-collections">Sessions and Prompt Collections</a></h2>
+<p>Sessions are durable conversation containers owned by a user identity.</p>
+<ul>
+<li>Sessions are created explicitly with <code>session.create</code> or implicitly by <code>run.start</code>.</li>
+<li><code>session.list</code> returns prior sessions for the calling user’s <code>client.id</code>.</li>
+<li><code>session.get</code> returns the persisted conversation messages for a session.</li>
+<li><code>session.clear</code> clears session data.</li>
+<li>A session may reference <code>prompt_collection_id</code>.</li>
+<li>Prompt documents live in git-backed <code>PROMPTS/</code>.</li>
+<li>Prompt collection metadata lives in git-backed <code>PROMPTS/collections.json</code> as a bare
+JSON array. The loader still accepts the old wrapped shape for existing storage.</li>
+</ul>
+<h2 id="gateway-native-tools"><a class="header" href="#gateway-native-tools">Gateway-Native Tools</a></h2>
+<p>Gateway-native tools execute inside the Gateway process and appear in <code>tools.catalog</code>
+with <code>source: "gateway"</code>. They are tried before node forwarding.</p>
+<p>Current gateway-native tool families:</p>
+<ul>
+<li><code>notes.*</code> from <code>nexo-notes</code>, backed by git storage.</li>
+<li><code>io.*</code> from <code>nexo-io</code>, covering filesystem, shell, and web-fetch style operations.</li>
+</ul>
+<p>Node tools are deregistered when the hosting peer disconnects. Gateway-native tools
+remain available for the life of the Gateway process.</p>
+<h2 id="capability-locks"><a class="header" href="#capability-locks">Capability Locks</a></h2>
+<p>The run loop currently uses advisory SQLite locks for tool capability families. The
+capability is the prefix before the first <code>.</code> in the tool name. Locks expire after 5
+minutes for crash recovery and are released after each tool call or when a run reaches
+a terminal state.</p>
+<p>The current implementation executes tool calls sequentially. Future scheduling should
+use <code>ToolExecutionConstraints</code> from <code>nexo-core</code> to parallelize read-only or explicitly
+parallel-safe tools.</p>
+<h2 id="cron-scheduler"><a class="header" href="#cron-scheduler">Cron Scheduler</a></h2>
+<p>A background scheduler runs every 60 seconds. When a due cron job fires, the Gateway:</p>
+<ol>
+<li>emits a <code>cron</code> event;</li>
+<li>creates or resolves a session;</li>
+<li>creates a run with thinking disabled;</li>
+<li>submits <code>RunCommand::StartRun</code> to the same serialized run task;</li>
+<li>updates cron timestamps to avoid retry storms.</li>
+</ol>
+<h2 id="client-to-client-messaging"><a class="header" href="#client-to-client-messaging">Client-to-Client Messaging</a></h2>
 <pre class="mermaid">sequenceDiagram
     participant Alice as Client A
     participant Gateway
     participant Bob as Client B
 
-    Alice-&gt;&gt;Gateway: request:send {target:"bob", payload:{...}}
-    Gateway--&gt;&gt;Alice: response {delivered:true}
-    Gateway--&gt;&gt;Bob: event:message {from:"alice", target:"bob", payload:{...}}
+    Alice-&gt;&gt;Gateway: request send {target: "bob", payload, idempotencyKey}
+    Gateway--&gt;&gt;Alice: response {delivered: true}
+    Gateway--&gt;&gt;Bob: event message {from: "alice", target: "bob", payload}
 </pre>
 
-<h2 id="run-loop"><a class="header" href="#run-loop">Run loop</a></h2>
-<p>The gateway spawns a <strong>RunHandle</strong> at startup — a background task that processes
-run commands sequentially. When a client sends a <code>run.start</code> request:</p>
+<p><code>send</code> routes to connected user peers whose <code>client.id</code> matches the target, excluding
+the origin peer. The current <code>send</code> handler reports whether at least one matching peer
+was reached.</p>
+<h2 id="wire-protocol-summary"><a class="header" href="#wire-protocol-summary">Wire Protocol Summary</a></h2>
+<ul>
+<li>Transport is WebSocket text frames containing JSON.</li>
+<li>The first frame <strong>MUST</strong> be <code>connect</code>.</li>
+<li>After handshake, requests use <code>{type: "request", id, method, params}</code>.</li>
+<li>Responses use <code>{type: "response", id, ok, payload | error}</code>.</li>
+<li>Events use <code>{type: "event", event, payload, seq?}</code>.</li>
+<li>Multiword fields use camelCase on the wire, such as <code>sessionId</code>, <code>modelId</code>,
+<code>toolCalls</code>, <code>thinkingContent</code>, and <code>idempotencyKey</code>.</li>
+<li>Nodes <strong>MUST</strong> connect with <code>role: "node"</code> and should advertise tools, commands,
+and available model IDs.</li>
+</ul>
+<p>Idempotency keys are part of the public shape for side-effecting requests such as
+<code>run.start</code>, <code>send</code>, and <code>tools.execute</code>. Today <code>run.start</code> stores a unique
+idempotency key on the <code>runs</code> row; broader replay/dedupe behavior is still an open
+implementation area.</p>
+<h2 id="pairing-and-identity"><a class="header" href="#pairing-and-identity">Pairing and Identity</a></h2>
+<p>All WebSocket peers may include a device identity on <code>connect</code>.</p>
+<ul>
+<li>For nodes, the Gateway stores the device identity and role.</li>
+<li>For users, the Gateway stores both the user identity (<code>client.id</code>) and the concrete
+<code>device.id</code>.</li>
+<li>The persistent identity store tracks first-seen and last-seen timestamps.</li>
+</ul>
+<p>Details: <a href="/nexo/gateway_protocol.html">Gateway Protocol</a></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nexo-run-loop-architecture"><a class="header" href="#nexo-run-loop-architecture">NEXO Run Loop Architecture</a></h1>
+<h2 id="1-scope"><a class="header" href="#1-scope">1. Scope</a></h2>
+<p>This document describes the current NEXO run loop and the selected planned contracts
+that should remain visible for later implementation. Current behavior is stated as
+current behavior. Planned behavior is isolated in section 7 and should not be read as
+implemented yet.</p>
+<p>Transport details such as HTTP upgrade auth, frame envelopes, protocol versioning,
+and connect handshakes are defined in the gateway protocol documentation.</p>
+<h2 id="2-actors"><a class="header" href="#2-actors">2. Actors</a></h2>
+<h3 id="21-client"><a class="header" href="#21-client">2.1 Client</a></h3>
+<p>The client starts and steers runs, then consumes run events.</p>
+<p>Current responsibilities:</p>
+<ul>
+<li>A client <strong>MUST</strong> connect to the gateway with <code>role: "user"</code> before sending other
+requests.</li>
+<li>A client <strong>MAY</strong> create or resume a session with <code>session.create</code>, <code>session.list</code>,
+and <code>session.get</code>.</li>
+<li>A client <strong>MUST</strong> start a run with <code>run.start</code>; the gateway responds once the run
+has been durably accepted, not when inference has finished.</li>
+<li>A client <strong>MAY</strong> append structured instructions to an active run with
+<code>run.instructions.append</code>; those instructions are persisted and observed by the
+next round that rebuilds context.</li>
+<li>A client <strong>MAY</strong> cancel an active run with <code>run.stop</code>. Cancellation is currently
+cooperative: the gateway marks the run cancelled and the run loop checks that state
+between local phases.</li>
+<li>A client consumes <code>run</code> events for <code>thinking</code>, <code>tool_call</code>, <code>streaming</code>,
+<code>completed</code>, <code>failed</code>, <code>queued</code>, and <code>cancelled</code> statuses.</li>
+</ul>
+<h3 id="22-gateway"><a class="header" href="#22-gateway">2.2 Gateway</a></h3>
+<p>The gateway is the authoritative run coordinator and durable state owner. The Rust
+module namespace is still <code>agent</code>, but the public protocol and database model are
+run/round based.</p>
+<p>Current responsibilities:</p>
+<ul>
+<li>The gateway <strong>MUST</strong> maintain durable SQLite state for devices, users, sessions,
+runs, run rounds, conversation entries, tool traces, run summaries, capability
+locks, and cron jobs.</li>
+<li>The gateway <strong>MUST</strong> treat the connecting user’s <code>client.id</code> as the current user
+routing identity for sessions and directed messages.</li>
+<li>The gateway <strong>MUST</strong> assemble model-facing context from the selected prompt
+collection, persisted session transcript, and currently available tool inventory.</li>
+<li>The gateway <strong>MUST</strong> route each inference round to a connected node with a loaded
+compatible model, or to a node that has the explicitly requested model available
+and can receive <code>model.load</code>.</li>
+<li>The gateway <strong>MUST</strong> queue a run when no suitable LLM node is available.</li>
+<li>The gateway <strong>MUST</strong> parse node <code>run.round</code> responses into either a final assistant
+reply or one or more tool calls.</li>
+<li>The gateway <strong>MUST</strong> execute gateway-native tools before forwarding unknown tools to
+node-hosted tools.</li>
+<li>The gateway <strong>MUST</strong> persist tool-call intent, tool traces, tool results, assistant
+replies, per-round rationale, and terminal run summaries.</li>
+<li>The gateway <strong>MUST</strong> release all capability locks held by a run when that run
+completes, fails, or is cancelled.</li>
+<li>The gateway <strong>MUST</strong> emit run lifecycle and tool activity events through the shared
+event channel.</li>
+</ul>
+<h3 id="23-node"><a class="header" href="#23-node">2.3 Node</a></h3>
+<p>Nodes provide inference and tools. Nodes are not authoritative for run state.</p>
+<p>Current responsibilities:</p>
+<ul>
+<li>A node <strong>MUST</strong> connect to the same gateway WebSocket endpoint with <code>role: "node"</code>.</li>
+<li>A node <strong>MUST</strong> advertise locally available model IDs during <code>connect</code> and publish
+loaded model descriptors with <code>model.status</code>.</li>
+<li>A node <strong>MUST</strong> register full <code>nexo-core</code> tool definitions with <code>tools.register</code>
+after handshake.</li>
+<li>A node <strong>MUST</strong> execute <code>tools.execute</code> requests against its local <code>ToolRegistry</code>.</li>
+<li>A node <strong>MUST</strong> handle gateway-directed <code>model.load</code> and <code>model.unload</code> requests.</li>
+<li>A node <strong>MUST</strong> handle <code>run.round</code> by converting the request into a <code>nexo-core</code>
+<code>InferenceRequest</code> and submitting it to <code>nexo-ai</code>.</li>
+<li>A node currently allows only one concurrent inference-class request
+(<code>run.round</code> or <code>image.analyze</code>). If busy, it returns a <code>node_busy</code> error.</li>
+<li>A node <strong>MAY</strong> reconnect after disconnect; on reconnect it must repeat handshake,
+tool registration, and model status publication.</li>
+</ul>
+<h3 id="24-local-inference-runtime"><a class="header" href="#24-local-inference-runtime">2.4 Local Inference Runtime</a></h3>
+<p><code>nexo-ai</code> is a library runtime used by <code>nexo-node</code>. It adapts <code>nexo-core</code> inference
+contracts to <code>mistralrs-core</code>, resolves models through a static registry, maps
+reasoning/tool settings to the underlying runtime, and streams normalized
+<code>InferenceResponse</code> values back to the node transport layer.</p>
+<h2 id="3-core-concepts"><a class="header" href="#3-core-concepts">3. Core Concepts</a></h2>
+<ul>
+<li><strong>Request</strong>: a client submission that starts or modifies work, such as <code>run.start</code>
+or <code>run.instructions.append</code>.</li>
+<li><strong>Run</strong>: one gateway-owned execution for a user input. A run belongs to one
+session and contains one or more rounds.</li>
+<li><strong>Round</strong>: one context assembly -&gt; inference -&gt; optional tool execution cycle.</li>
+<li><strong>Conversation entry</strong>: a durable transcript row. Current entry kinds are
+<code>user_input</code>, <code>instruction</code>, <code>assistant_response</code>, <code>tool_call_intent</code>, and
+<code>tool_result</code>.</li>
+<li><strong>Tool trace</strong>: a durable record of one tool call’s arguments, status, output, and
+error.</li>
+</ul>
+<p>Current wire run statuses are <code>accepted</code>, <code>queued</code>, <code>thinking</code>, <code>tool_call</code>,
+<code>streaming</code>, <code>completed</code>, <code>failed</code>, and <code>cancelled</code>. Current round database statuses
+are <code>started</code>, <code>completed</code>, <code>failed</code>, <code>queued</code>, and <code>cancelled</code>.</p>
+<h2 id="4-current-execution"><a class="header" href="#4-current-execution">4. Current Execution</a></h2>
+<h3 id="41-start"><a class="header" href="#41-start">4.1 Start</a></h3>
+<p>When the gateway handles <code>run.start</code>:</p>
 <ol>
-<li>The handler creates (or resumes) a session and a run row in SQLite</li>
-<li>It submits a <code>RunCommand::StartRun</code> to the run task via an mpsc channel</li>
-<li>The run task executes the loop: transcript assembly → inference → tool calls → repeat</li>
-<li>Lifecycle events (<code>thinking</code>, <code>tool_call</code>, <code>streaming</code>, <code>completed</code>) are broadcast
-to all connected clients via the event channel</li>
+<li>It resolves the user ID from the connected peer’s <code>client.id</code>.</li>
+<li>It creates a session when no <code>sessionId</code> was supplied, otherwise it reads the
+existing session’s <code>prompt_collection_id</code>.</li>
+<li>It creates a row in <code>runs</code> with the idempotency key, optional model ID, and typed
+<code>ReasoningSettings</code>.</li>
+<li>It submits <code>RunCommand::StartRun</code> to a single background <code>RunHandle</code> task.</li>
+<li>It returns <code>RunStartResponse { status: accepted }</code> to the client.</li>
 </ol>
-<p>Details: <a href="/nexo/agent_loop.html">Run Loop</a></p>
-<h3 id="capability-locking"><a class="header" href="#capability-locking">Capability locking</a></h3>
-<p>When the run loop invokes a node capability (inference or tool execution), it acquires
-an advisory lock in the <code>capability_locks</code> SQLite table. This prevents concurrent
-run executions from using the same capability. Locks expire after 5 minutes for crash
-recovery.</p>
-<h3 id="cron-scheduler"><a class="header" href="#cron-scheduler">Cron scheduler</a></h3>
-<p>A background scheduler task runs alongside the run loop, checking every 60 seconds for
-due cron jobs. When a job fires, it emits a <code>cron</code> event and submits a run command
-to the run task.</p>
-<h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
-<p>A client can have multiple sessions and maintains a <code>sessionId</code> locally. Sessions are
-created explicitly via <code>session.create</code> or implicitly when a <code>run.start</code> request is sent
-without a <code>sessionId</code>. After a client restart, it can query <code>session.list</code> to resume
-previous transcript sessions.</p>
-<h2 id="wire-protocol-summary"><a class="header" href="#wire-protocol-summary">Wire protocol (summary)</a></h2>
+<p>The background task processes run commands sequentially. This currently serializes
+run execution inside one gateway process.</p>
+<h3 id="42-context-assembly"><a class="header" href="#42-context-assembly">4.2 Context Assembly</a></h3>
+<p>At the start of each round, the gateway builds a <code>Vec&lt;ConversationMessage&gt;</code> for the
+node:</p>
+<ol>
+<li>It loads all persisted conversation entries for the session in chronological order.</li>
+<li>It loads the selected prompt collection from git-backed <code>PROMPTS/collections.json</code>
+and concatenates the referenced prompt documents from <code>PROMPTS/</code>.</li>
+<li>It appends a generated <code># Available Tools</code> section containing currently available
+gateway and node tool definitions.</li>
+<li>It creates a system message from the prompt collection plus tool section. If both
+are empty, it uses <code>You are a helpful assistant.</code>.</li>
+<li>It prepends that system message to the persisted conversation messages.</li>
+</ol>
+<p>The current context builder does not yet retrieve memory, load skills, count tokens,
+or summarize over-limit transcripts.</p>
+<h3 id="43-routing-and-model-loading"><a class="header" href="#43-routing-and-model-loading">4.3 Routing and Model Loading</a></h3>
+<p>Current routing is intentionally simple:</p>
 <ul>
-<li>
-<p>Transport: WebSocket, text frames with JSON payloads.</p>
-</li>
-<li>
-<p>First frame <strong>must</strong> be <code>connect</code>.</p>
-</li>
-<li>
-<p>After handshake:</p>
+<li>If <code>run.start</code> specified <code>modelId</code>, the gateway first looks for a connected node
+with that model already loaded.</li>
+<li>If no node has it loaded, the gateway looks for a connected node that advertised the
+model as available on disk.</li>
+<li>If the model is available but not loaded, the gateway asks that node to unload other
+loaded models, then sends <code>model.load</code> and waits up to 300 seconds.</li>
+<li>If no <code>modelId</code> was specified, the gateway selects the first connected node with a
+loaded model that advertises text-generation or tool-calling capability.</li>
+<li>If no suitable node exists, the round is marked queued and the run status becomes
+<code>queued</code>.</li>
+</ul>
+<p>Queued runs are resumed by <code>RunCommand::DrainQueue</code>, which is submitted when a node
+publishes a <code>model.status</code> update containing at least one loaded model.</p>
+<h3 id="44-inference"><a class="header" href="#44-inference">4.4 Inference</a></h3>
+<p>For each round, the gateway sends one <code>run.round</code> request to the selected node. The
+payload contains the run ID, round ID, session ID, assembled messages, available tool
+definitions, optional model ID, and typed reasoning settings.</p>
+<p>The node maps the request into a <code>nexo-core</code> <code>GenerateRequest</code>:</p>
 <ul>
-<li>Requests: <code>{type:"request", id, method, params}</code> → <code>{type:"response", id, ok, payload|error}</code></li>
-<li>Events: <code>{type:"event", event, payload, seq?, stateVersion?}</code></li>
+<li>Text generation is required.</li>
+<li>Tool calling is preferred when tools were provided.</li>
+<li>Tool choice is <code>Automatic</code> when tools exist and <code>Disabled</code> otherwise.</li>
+<li>Reasoning settings are forwarded to <code>mistralrs-core</code> as thinking and effort hints.</li>
+<li>Streaming is currently buffered at the node transport boundary.</li>
 </ul>
-</li>
-<li>
-<p>Idempotency keys are required for side‑effecting methods (<code>send</code>, <code>run.start</code>) to
-safely retry; the server keeps a short‑lived dedupe cache.</p>
-</li>
-<li>
-<p>Nodes must include <code>role: "node"</code> plus capabilities/commands in <code>connect</code>.</p>
-</li>
-</ul>
-<h2 id="pairing"><a class="header" href="#pairing">Pairing</a></h2>
+<p>The node returns a <code>RunRoundResponse</code> with optional visible content, optional
+<code>rationale</code>, and zero or more tool calls.</p>
+<h3 id="45-replies-rationale-and-thinking-content"><a class="header" href="#45-replies-rationale-and-thinking-content">4.5 Replies, Rationale, and Thinking Content</a></h3>
+<p>If the node returns visible content and no tool calls, the gateway:</p>
+<ol>
+<li>Persists the visible content as an <code>assistant_response</code> conversation entry.</li>
+<li>Stores node-provided rationale in <code>run_rounds.rationale</code>.</li>
+<li>Emits a <code>streaming</code> run event with the visible content and optional
+<code>thinkingContent</code> copied from rationale.</li>
+<li>Emits a <code>completed</code> run event.</li>
+<li>Marks the run <code>completed</code> and stores the final response in <code>run_summaries</code>.</li>
+</ol>
+<p>Rationale is not written into the conversation transcript as assistant-visible text.
+It is stored per round and emitted ephemerally for clients that display thinking
+content.</p>
+<h3 id="46-tool-calls"><a class="header" href="#46-tool-calls">4.6 Tool Calls</a></h3>
+<p>If the node returns tool calls, the gateway:</p>
+<ol>
+<li>Persists the assistant tool-call plan as <code>tool_call_intent</code>.</li>
+<li>Executes tool calls sequentially in the order returned by the model.</li>
+<li>For each call, creates a <code>tool_traces</code> row and emits a <code>tool_call</code> run event.</li>
+<li>Acquires an advisory capability lock based on the prefix before the first <code>.</code> in
+the tool name.</li>
+<li>Executes gateway-native tools first. If no gateway tool matches, it forwards
+<code>tools.execute</code> to the node that registered the tool.</li>
+<li>Releases the capability lock after the tool returns.</li>
+<li>Persists the result as a <code>tool_result</code> conversation entry, updates the tool trace,
+and emits another <code>tool_call</code> run event carrying the result fields.</li>
+<li>Completes the round and starts the next round.</li>
+</ol>
+<p>If a capability lock is busy, the gateway records an error-shaped tool result and
+continues. If a tool is missing or its node is disconnected, the current implementation
+records a failed tool result or fails the forwarded request path; it does not yet enter
+a blocked/resumable state.</p>
+<h3 id="47-stop-conditions"><a class="header" href="#47-stop-conditions">4.7 Stop Conditions</a></h3>
+<p>Current stop conditions are:</p>
 <ul>
-<li>All WS clients (users + nodes) include a <strong>device identity</strong> on <code>connect</code>.</li>
-<li>Users also provide a <strong>user identity</strong> (role <code>user</code>)</li>
-<li>The gateway stores the device identity for nodes, and the user identity + device identity for clients, in it’s persistent memory store, including the time it was first seen and last seen.</li>
+<li>Final assistant reply with no tool calls.</li>
+<li>Inference or context assembly error.</li>
+<li>No suitable LLM node, which queues the run instead of failing it.</li>
+<li>Cooperative cancellation via <code>run.stop</code>.</li>
+<li>Maximum round count exceeded. The current limit is 20 rounds.</li>
 </ul>
-<p>Details: <a href="/nexo/gateway_protocol.html">Gateway protocol</a></p>
+<p>The current implementation does not enforce wall-clock budgets, remote token budgets,
+or repeated-failure thresholds beyond ordinary error handling.</p>
+<h3 id="48-cron-runs"><a class="header" href="#48-cron-runs">4.8 Cron Runs</a></h3>
+<p>The gateway runs a background cron scheduler every 60 seconds. When a due job fires,
+the scheduler emits a <code>cron</code> event, creates or resolves a session, creates a run with
+thinking disabled, and submits <code>RunCommand::StartRun</code> to the same background run task.</p>
+<h2 id="5-current-diagrams"><a class="header" href="#5-current-diagrams">5. Current Diagrams</a></h2>
+<h3 id="51-one-run-with-tools"><a class="header" href="#51-one-run-with-tools">5.1 One Run with Tools</a></h3>
+<pre class="mermaid">sequenceDiagram
+        participant Client
+        participant Gateway
+        participant DB as SQLite
+        participant Node
+
+        Client-&gt;&gt;Gateway: request run.start {input, sessionId?, modelId?, reasoning?}
+        Gateway-&gt;&gt;DB: insert session? + run
+        Gateway--&gt;&gt;Client: response {runId, sessionId, status: accepted}
+        Gateway-&gt;&gt;DB: insert user_input + instruction?
+
+        loop Round until terminal status
+                Gateway-&gt;&gt;DB: insert run_rounds row
+                Gateway--&gt;&gt;Client: event run {status: thinking}
+                Gateway-&gt;&gt;DB: load transcript + prompt collection
+
+                alt requested model available but not loaded
+                        Gateway-&gt;&gt;Node: request model.unload old model(s)
+                        Node--&gt;&gt;Gateway: response model.unload
+                        Gateway-&gt;&gt;Node: request model.load {modelId}
+                        Node--&gt;&gt;Gateway: response model.load
+                        Node-&gt;&gt;Gateway: request model.status {loadedModels, availableModels}
+                        Gateway--&gt;&gt;Node: response acknowledged
+                end
+
+                Gateway-&gt;&gt;Node: request run.round {messages, tools, reasoning, modelId?}
+                Node--&gt;&gt;Gateway: response {content?, rationale?, toolCalls?}
+
+                alt final content
+                        Gateway-&gt;&gt;DB: insert assistant_response + finish round + finish run
+                        Gateway--&gt;&gt;Client: event run {status: streaming, content, thinkingContent?}
+                        Gateway--&gt;&gt;Client: event run {status: completed}
+                else tool calls
+                        Gateway-&gt;&gt;DB: insert tool_call_intent
+                        loop each tool call in order
+                                Gateway--&gt;&gt;Client: event run {status: tool_call, toolName, toolCallId}
+                                Gateway-&gt;&gt;DB: insert tool_trace + acquire capability lock
+                                alt gateway-native tool
+                                        Gateway-&gt;&gt;Gateway: execute local ToolRegistry
+                                else node-hosted tool
+                                        Gateway-&gt;&gt;Node: request tools.execute {tool, args}
+                                        Node--&gt;&gt;Gateway: response {success, output, error?}
+                                end
+                                Gateway-&gt;&gt;DB: release lock + insert tool_result + finish tool_trace
+                                Gateway--&gt;&gt;Client: event run {status: tool_call, toolName, toolCallId, content?}
+                        end
+                        Gateway-&gt;&gt;DB: finish round
+                end
+        end
+</pre>
+
+<h3 id="52-current-round-algorithm"><a class="header" href="#52-current-round-algorithm">5.2 Current Round Algorithm</a></h3>
+<pre class="mermaid">flowchart TD
+        Start[Start or resume run] --&gt; Cancelled{Run cancelled?}
+        Cancelled --&gt;|yes| Stop[Release locks and stop]
+        Cancelled --&gt;|no| Round[Create run_rounds row]
+        Round --&gt; Context[Build context from prompt collection, transcript, and tools]
+        Context --&gt; Route{Suitable inference node?}
+        Route --&gt;|loaded model| Inference[Send run.round]
+        Route --&gt;|requested model available| Load[Send model.unload/model.load]
+        Load --&gt; Inference
+        Route --&gt;|none| Queue[Mark round and run queued]
+        Inference --&gt; Response{Node response}
+        Response --&gt;|content only| Complete[Persist assistant response and complete run]
+        Response --&gt;|tool calls| Tools[Execute tool calls sequentially]
+        Tools --&gt; Observe[Persist tool results]
+        Observe --&gt; CancelAgain{Run cancelled?}
+        CancelAgain --&gt;|yes| Stop
+        CancelAgain --&gt;|no| Round
+        Response --&gt;|error| Fail[Mark round and run failed]
+</pre>
+
+<h3 id="53-queued-run-resume"><a class="header" href="#53-queued-run-resume">5.3 Queued Run Resume</a></h3>
+<pre class="mermaid">sequenceDiagram
+        participant Client
+        participant Gateway
+        participant DB as SQLite
+        participant Node
+
+        Client-&gt;&gt;Gateway: request run.start {modelId?}
+        Gateway-&gt;&gt;DB: insert run {status: accepted}
+        Gateway--&gt;&gt;Client: response {status: accepted}
+        Gateway-&gt;&gt;Gateway: no suitable loaded/requested model
+        Gateway-&gt;&gt;DB: update run {status: queued, queued_at: now}
+        Gateway--&gt;&gt;Client: event run {status: queued}
+
+        Node-&gt;&gt;Gateway: request model.status {loadedModels: [...]}
+        Gateway--&gt;&gt;Node: response acknowledged
+        Gateway-&gt;&gt;Gateway: submit DrainQueue
+        Gateway-&gt;&gt;DB: claim queued runs in queued_at order
+        Gateway-&gt;&gt;Node: request run.round
+        Node--&gt;&gt;Gateway: response {content? or toolCalls?}
+</pre>
+
+<h2 id="6-current-state-that-replaced-older-notes"><a class="header" href="#6-current-state-that-replaced-older-notes">6. Current State That Replaced Older Notes</a></h2>
+<p>These points were useful in the archived loop note and are now part of the active
+contract:</p>
+<ul>
+<li>The public surface is <code>run.start</code>, <code>run.stop</code>, <code>run.instructions.append</code>,
+<code>run.round</code>, <code>run</code> events, sessions, prompt collections, runs, and run rounds.</li>
+<li>Prompt documents live under <code>PROMPTS/</code>; prompt collection metadata lives in
+<code>PROMPTS/collections.json</code> as a bare JSON array.</li>
+<li>Gateway-native tools currently include notes and IO tools registered at startup.
+They appear in <code>tools.catalog</code> with <code>source: "gateway"</code> and execute before node
+forwarding.</li>
+<li>Queued runs preserve model ID, prompt collection, and typed reasoning settings when
+drained.</li>
+<li>Thinking mode is represented by <code>ReasoningSettings</code>, not by injecting a hard-coded
+model-specific token into the system prompt.</li>
+</ul>
+<h2 id="7-selected-planned-contracts"><a class="header" href="#7-selected-planned-contracts">7. Selected Planned Contracts</a></h2>
+<p>The following blocks are intentionally retained as future requirements. They are not
+fully implemented in the current code.</p>
+<h3 id="71-token-counting-and-summarization"><a class="header" href="#71-token-counting-and-summarization">7.1 Token Counting and Summarization</a></h3>
+<p>The context builder <strong>MUST</strong> calculate assembled context size with the selected
+model’s tokenizer before inference. If the context exceeds the model window, the
+gateway <strong>MUST</strong> summarize older transcript material, store the summary in SQLite,
+rebuild context with the summary and current tools, and clear the relevant node-side
+KV/prefix cache before the next inference.</p>
+<h3 id="72-retrieved-memory-and-skills"><a class="header" href="#72-retrieved-memory-and-skills">7.2 Retrieved Memory and Skills</a></h3>
+<p>The context builder <strong>MUST</strong> support deterministic inclusion of retrieved memory and
+skills associated with the user, session, run, tool, or project. These inputs should
+be auditable, ordered, and visible in persisted run metadata or traces.</p>
+<h3 id="73-budget-and-kv-affinity-routing"><a class="header" href="#73-budget-and-kv-affinity-routing">7.3 Budget and KV-Affinity Routing</a></h3>
+<p>The router <strong>MUST</strong> eventually choose nodes per round using requested reasoning effort,
+model capabilities, tool availability, remote token budgets, time budgets, and
+performance hints such as session KV-cache affinity.</p>
+<h3 id="74-parallel-tool-scheduler"><a class="header" href="#74-parallel-tool-scheduler">7.4 Parallel Tool Scheduler</a></h3>
+<p>The tool orchestrator <strong>MUST</strong> use <code>ToolExecutionConstraints</code> when planning multiple
+tool calls from one inference:</p>
+<ul>
+<li>Read-only tools <strong>MAY</strong> run in parallel.</li>
+<li>Side-effecting tools <strong>MUST</strong> run sequentially unless explicitly marked parallel-safe.</li>
+<li>Tool timeouts <strong>MUST</strong> honor each tool definition’s configured timeout when present.</li>
+</ul>
+<p>The current implementation executes all tool calls sequentially and uses an advisory
+capability lock for every tool call.</p>
+<h3 id="75-blocked-tool-resume"><a class="header" href="#75-blocked-tool-resume">7.5 Blocked Tool Resume</a></h3>
+<p>If a required tool is unavailable, the run <strong>MUST</strong> be able to transition to a blocked
+state, freeze without further inference, and resume when the tool becomes available or
+the user cancels the run. Implementing this requires a wire/database status that is
+distinct from the current <code>queued</code> LLM-availability state.</p>
+<h3 id="76-tool-authorization-and-versioning"><a class="header" href="#76-tool-authorization-and-versioning">7.6 Tool Authorization and Versioning</a></h3>
+<p>The gateway <strong>MUST</strong> validate tool calls against schemas, permissions, and tool
+contract versions before dispatch. If a run depends on a tool version that is no
+longer available, the gateway <strong>MUST</strong> fail or block the run with a client-visible
+reason instead of silently using a different contract.</p>
+<h2 id="8-open-decisions"><a class="header" href="#8-open-decisions">8. Open Decisions</a></h2>
+<ul>
+<li><code>run.stop</code> currently cancels cooperatively in the gateway database; there is no
+gateway-to-node cancellation request for in-flight inference.</li>
+<li>A general idempotency table exists, and run IDs are protected by a unique
+idempotency key, but request replay/dedupe behavior is not yet implemented for all
+side-effecting methods.</li>
+<li><code>nexo-core</code> has richer run/round lifecycle types than the current WebSocket
+<code>RunStatus</code>; these should converge when blocked runs and detailed round events are
+added.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="gateway-protocol-websocket"><a class="header" href="#gateway-protocol-websocket">Gateway protocol (WebSocket)</a></h1>
-<p>The Gateway WS protocol is the <strong>single control plane + node transport</strong> for
-NEXO. All clients (CLI, macOS/iOS app, headless
-nodes) connect over WebSocket and declare their <strong>role</strong> + <strong>scope</strong> at
-handshake time.</p>
+<p>The Gateway WS protocol is the <strong>single control plane + node transport</strong> for NEXO. All clients (CLI, macOS/iOS app, headless nodes) connect over WebSocket and declare their <strong>role</strong> + <strong>scope</strong> at handshake time.</p>
 <h2 id="transport"><a class="header" href="#transport">Transport</a></h2>
 <ul>
 <li>WebSocket, text frames with JSON payloads.</li>
@@ -661,7 +1127,7 @@ Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-i
 </code></pre>
 <pre><code class="language-json">{ "type": "response", "id": "…", "ok": true, "payload": { "stopped": true } }
 </code></pre>
-<h2 id="sessions-1"><a class="header" href="#sessions-1">Sessions</a></h2>
+<h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
 <h3 id="sessioncreate"><a class="header" href="#sessioncreate"><code>session.create</code></a></h3>
 <p>Create a new transcript session.</p>
 <pre><code class="language-json">{ "type": "request", "id": "…", "method": "session.create", "params": { "name": "My chat", "promptCollectionId": "default" } }
@@ -1006,6 +1472,158 @@ Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-i
 <h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
 <p>All configuration is in ~/.nexo/nexo-gateway.toml</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="inference-sessions"><a class="header" href="#inference-sessions">Inference Sessions</a></h1>
+<p>Sessions track multi-turn transcript history between a client and the run loop. Each session maintains a unique <code>session_id</code> that flows from the gateway through to the inference node, enabling KV cache reuse across consecutive requests.</p>
+<hr>
+<h2 id="1-session-lifecycle"><a class="header" href="#1-session-lifecycle">1. Session Lifecycle</a></h2>
+<h3 id="creation"><a class="header" href="#creation">Creation</a></h3>
+<p>Sessions are created explicitly via <code>session.create</code> or implicitly when a <code>run.start</code> request is sent without a <code>sessionId</code>. The gateway stores session metadata in SQLite and returns a UUID v7 session ID.</p>
+<h3 id="resumption"><a class="header" href="#resumption">Resumption</a></h3>
+<p>After a client restart, <code>session.list</code> returns all previous sessions. The client can resume by including the <code>sessionId</code> in subsequent <code>run.start</code> requests. The full transcript history is loaded from the gateway’s message store and sent to the node as context.</p>
+<h3 id="session-id-propagation"><a class="header" href="#session-id-propagation">Session ID propagation</a></h3>
+<p>The gateway forwards <code>session_id</code> to the inference node as part of the inference payload. This enables the node to track which session’s KV cache is currently in memory and decide whether to reuse or replace it.</p>
+<pre><code>Client                  Gateway                       Node
+  |                        |                            |
+  |-- run.start ----------&gt;|                            |
+  |  { input, sessionId }  |                            |
+  |                        |-- inference --------------&gt;|
+  |                        |  { messages, session_id }  |
+  |                        |                            | prefix matching
+  |                        |                            | (reuse KV cache)
+  |                        |&lt;-- response ---------------|
+  |&lt;-- run event ----------|                            |
+</code></pre>
+<hr>
+<h2 id="2-kv-cache-prefix-reuse"><a class="header" href="#2-kv-cache-prefix-reuse">2. KV Cache Prefix Reuse</a></h2>
+<p>The most impactful optimization in session handling is <strong>KV cache prefix reuse</strong>. In multi-turn transcript flows, each new request contains the full transcript history. Without caching, the model re-processes all previous tokens from scratch on every request. For a 2000-token transcript, this wastes ~90% of prefill time on tokens already seen.</p>
+<h3 id="how-it-works-1"><a class="header" href="#how-it-works-1">How it works</a></h3>
+<p>The pipeline tracks two pieces of state per session:</p>
+<ul>
+<li><code>current_session_id</code> – which session’s tokens are currently in the KV cache</li>
+<li><code>processed_tokens</code> – the token IDs that were processed to build the current KV cache state</li>
+</ul>
+<p>When a new inference request arrives:</p>
+<ol>
+<li>The prompt is tokenized into a token sequence.</li>
+<li>If the <code>session_id</code> matches <code>current_session_id</code>, the pipeline computes the <strong>longest common prefix</strong> between the new tokens and <code>processed_tokens</code>.</li>
+<li>If a prefix match exists (prefix_len &gt; 0), the KV cache is <strong>not cleared</strong>. Only the new tokens beyond the prefix are fed through the model.</li>
+<li>If the session differs or there’s no match, the KV cache is cleared and all tokens are processed from scratch.</li>
+</ol>
+<pre><code>Request 1: [sys][user: hello]              → process all tokens, cache them
+Request 2: [sys][user: hello][ai: hi][user: how are you?]
+           ^^^^^^^^^^^^^^^^^^^^^^ prefix match (reused from cache)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^ only these are processed
+</code></pre>
+<h3 id="what-gets-cached"><a class="header" href="#what-gets-cached">What gets cached</a></h3>
+<p>The KV cache stores key and value tensors for every attention layer in the model. For Gemma 4 27B, this is 48 layers of key/value pairs. The cache grows with sequence length – each additional token adds a small tensor slice per layer.</p>
+<h3 id="limitations"><a class="header" href="#limitations">Limitations</a></h3>
+<ul>
+<li><strong>Prefix-only matching</strong>: If tokens diverge at position N, the entire cache is cleared. There is no partial cache trimming – this keeps the implementation simple and correct.</li>
+<li><strong>Image analysis always clears</strong>: Multimodal forward passes have a different token structure (image embeddings interleaved with text tokens), so prefix matching does not apply.</li>
+<li><strong>Single session in memory</strong>: Only one session’s KV cache is held in GPU/Metal memory at a time. Switching sessions requires saving to disk and loading the other session’s cache (see below).</li>
+</ul>
+<hr>
+<h2 id="3-disk-persisted-kv-cache"><a class="header" href="#3-disk-persisted-kv-cache">3. Disk-Persisted KV Cache</a></h2>
+<p>When the node needs to switch between sessions, the current session’s KV cache is saved to disk so it can be restored later without reprocessing.</p>
+<h3 id="storage-layout"><a class="header" href="#storage-layout">Storage layout</a></h3>
+<pre><code>~/.nexo/kv_cache/
+  &lt;model-name&gt;/
+    &lt;session-id&gt;.safetensors   # KV tensors (key + value per layer)
+    &lt;session-id&gt;.json          # Metadata sidecar
+</code></pre>
+<h3 id="metadata-sidecar"><a class="header" href="#metadata-sidecar">Metadata sidecar</a></h3>
+<p>Each cached session has a JSON metadata file:</p>
+<pre><code class="language-json">{
+  "session_id": "01jx...",
+  "model_name": "gemma4-27b",
+  "processed_tokens": [1, 234, 567, ...],
+  "layer_count": 48,
+  "created_at": "1743580800",
+  "last_accessed": "1743584400"
+}
+</code></pre>
+<p>The <code>processed_tokens</code> array is preserved so that prefix matching works immediately after restoring a session from disk – the pipeline knows exactly which tokens are already in the KV cache.</p>
+<h3 id="session-switch-flow"><a class="header" href="#session-switch-flow">Session switch flow</a></h3>
+<pre><code>1. Inference request arrives with session_id = B
+2. Current in-memory session is A
+3. Save session A's KV cache to disk:
+   - Move all tensors to CPU
+   - Write as safetensors file + JSON metadata
+4. Check disk for session B's cache:
+   - If found: load tensors to GPU, restore into model, resume prefix matching
+   - If not found: clear KV cache, process all tokens from scratch
+5. Run inference for session B
+</code></pre>
+<p>Tensors are moved to CPU before serialization and back to the target device (Metal GPU) on load. This avoids GPU memory issues during the save operation.</p>
+<h3 id="cache-expiry"><a class="header" href="#cache-expiry">Cache expiry</a></h3>
+<p>Disk caches are automatically expired to manage storage:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>Max entries per model</td><td>8</td><td>Oldest caches are evicted when exceeded</td></tr>
+<tr><td>Max age</td><td>1 hour</td><td>Caches not accessed within this window are deleted</td></tr>
+<tr><td>Check interval</td><td>5 minutes</td><td>Expiry runs periodically after inference completes</td></tr>
+</tbody>
+</table>
+</div>
+<p>Expiry is based on <code>last_accessed</code> – every time a cache is loaded from disk, its timestamp is updated. This means actively used sessions survive longer than idle ones.</p>
+<hr>
+<h2 id="4-two-layer-cache-design"><a class="header" href="#4-two-layer-cache-design">4. Two-Layer Cache Design</a></h2>
+<p>The KV cache system operates at two layers:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Layer</th><th>Location</th><th>Handles</th><th>Speed</th></tr>
+</thead>
+<tbody>
+<tr><td>In-memory prefix matching</td><td>nexo-ai (pipeline)</td><td>Consecutive requests in same session</td><td>Instant (no I/O)</td></tr>
+<tr><td>Disk persistence</td><td>nexo-node (kv_cache module)</td><td>Session switching</td><td>Seconds (disk I/O + tensor transfer)</td></tr>
+</tbody>
+</table>
+</div>
+<p>The <strong>common case</strong> – multiple turns in the same session – is handled entirely in-memory with zero disk I/O. Disk persistence only activates when the node is asked to serve a different session than the one currently in memory.</p>
+<h3 id="kvcacheable-trait"><a class="header" href="#kvcacheable-trait">KvCacheable trait</a></h3>
+<p>Disk persistence is abstracted behind a <code>KvCacheable</code> trait in nexo-ai, following the same pattern as <code>as_chat()</code> / <code>as_tool()</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait KvCacheable {
+    fn kv_cache_seq_len(&amp;self) -&gt; usize;
+    fn save_kv_cache(&amp;self) -&gt; Result&lt;Vec&lt;LayerKvSnapshot&gt;&gt;;
+    fn restore_kv_cache(&amp;mut self, snapshots: &amp;[LayerKvSnapshot]) -&gt; Result&lt;()&gt;;
+    fn clear_kv_cache(&amp;mut self);
+    fn processed_tokens(&amp;self) -&gt; &amp;[u32];
+    fn current_session_id(&amp;self) -&gt; Option&lt;&amp;str&gt;;
+    fn set_session_state(&amp;mut self, session_id: Option&lt;String&gt;, tokens: Vec&lt;u32&gt;);
+    fn tokenizer(&amp;self) -&gt; &amp;tokenizers::Tokenizer;
+}
+<span class="boring">}</span></code></pre>
+<p>Models that support KV caching implement this trait and expose it via <code>as_kv_cacheable()</code> on <code>ModelInfo</code>. The nexo-node <code>SessionCacheManager</code> uses this trait to save and restore caches without knowing model internals.</p>
+<hr>
+<h2 id="5-observability"><a class="header" href="#5-observability">5. Observability</a></h2>
+<p>The KV cache system logs key events at <code>DEBUG</code> level:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Event</th><th>Log message</th></tr>
+</thead>
+<tbody>
+<tr><td>Cache hit (prefix reuse)</td><td><code>KV cache hit: reusing {N}/{M} tokens</code></td></tr>
+<tr><td>Session switch</td><td><code>KV cache: switching session from {A} to {B}</code></td></tr>
+<tr><td>New session (no cache)</td><td><code>KV cache: new session {id}, clearing cache</code></td></tr>
+<tr><td>Disk save</td><td><code>KV cache saved to disk for session {id} ({N} layers, {T}ms)</code></td></tr>
+<tr><td>Disk load</td><td><code>KV cache loaded from disk for session {id} ({N} layers, {T}ms)</code></td></tr>
+<tr><td>Disk miss</td><td><code>KV cache: no disk cache found for session {id}</code></td></tr>
+<tr><td>Expiry</td><td><code>Expired {N} old KV cache entries from disk</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Enable debug logging on the node to see these messages:</p>
+<pre><code class="language-bash">nexo-node connect --log-level debug
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="code-layout"><a class="header" href="#code-layout">Code Layout</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="nexo-ai"><a class="header" href="#nexo-ai">NEXO AI</a></h1>
@@ -1015,501 +1633,397 @@ Any state → <code>failed</code> (on error) or <code>cancelled</code> (client-i
 <li>model family and execution backend are separate concepts</li>
 <li>model code is organized by family, with backend-specific implementations below each family</li>
 </ul>
-<h2 id="what-the-crate-owns"><a class="header" href="#what-the-crate-owns">What The Crate Owns</a></h2>
+<div style="break-before: page; page-break-before: always;"></div>
+<p><strong>LoRA</strong> is one of the most useful ideas in modern model fine-tuning because it lets you adapt a large model <strong>without retraining all of its weights</strong>.</p>
+<hr>
+<h1 id="what-is-lora"><a class="header" href="#what-is-lora">What is LoRA?</a></h1>
+<p><strong>LoRA</strong> stands for <strong>Low-Rank Adaptation</strong>.</p>
+<p>The core idea is:</p>
+<blockquote>
+<p>Instead of changing the full weight matrix of a large neural network during fine-tuning, you keep the original weights frozen and learn a <strong>small low-rank update</strong> that gets added on top.</p>
+</blockquote>
+<h2 id="intuition"><a class="header" href="#intuition">Intuition</a></h2>
+<p>A neural network layer often has a large weight matrix:</p>
+<p>$$
+W \in \mathbb{R}^{d \times k}
+$$</p>
+<p>If you fully fine-tune the model, you update <strong>every value in $$W$$</strong>.</p>
+<p>With LoRA, you leave $$W$$ unchanged and learn a small update:</p>
+<p>$$
+\Delta W = B A
+$$</p>
+<p>where:</p>
 <ul>
-<li>API traits and request/response types in <code>src/api</code></li>
-<li>static model registry and download metadata in <code>src/registry</code></li>
-<li>lifecycle, loading, and memory management in <code>src/coordinator</code></li>
-<li>backend adapters for local Candle execution and OpenAI-compatible remote execution</li>
-<li>CLI and REPL entry points behind the <code>cli</code> feature</li>
+<li>$$A \in \mathbb{R}^{r \times k}$$</li>
+<li>$$B \in \mathbb{R}^{d \times r}$$</li>
+<li>$$r$$ is a <strong>small rank</strong> (for example 4, 8, 16, 32)</li>
 </ul>
-<h2 id="runtime-categories"><a class="header" href="#runtime-categories">Runtime Categories</a></h2>
-<p>The registry currently ships models in these categories:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Category</th><th>Trait</th><th>Typical families</th></tr>
-</thead>
-<tbody>
-<tr><td>Chat</td><td><code>ChatModel</code></td><td>Gemma 4</td></tr>
-<tr><td>Tool</td><td><code>ToolModel</code></td><td>Gemma 4</td></tr>
-<tr><td>Image</td><td><code>ImageModel</code></td><td>Gemma 4</td></tr>
-<tr><td>Listen</td><td><code>AudioAnalysisModel</code></td><td>Whisper, Gemma 4 GGUF</td></tr>
-<tr><td>Imagine</td><td><code>ImagineModel</code></td><td>Flux.2, Qwen-Image, Z-Image</td></tr>
-</tbody>
-</table>
-</div>
-<p>Every concrete model also implements <code>ModelInfo</code>, which provides the shared lifecycle surface: <code>load</code>, <code>unload</code>, <code>is_loaded</code>, <code>name</code>, <code>family</code>, <code>categories</code>, and memory estimation.</p>
-<h2 id="feature-flags"><a class="header" href="#feature-flags">Feature Flags</a></h2>
-<p><code>nexo-ai</code> is split by runtime feature instead of one monolithic build:</p>
+<p>So instead of learning $$d \times k$$ parameters, you learn only:</p>
+<p>$$
+r \times k + d \times r
+$$</p>
+<p>If $$r$$ is much smaller than $$d$$ and $$k$$, this is <strong>far fewer parameters</strong>.</p>
+<p>The effective weight used at inference becomes:</p>
+<p>$$
+W’ = W + \alpha \cdot B A
+$$</p>
+<p>where <strong>α</strong> is a scaling factor.</p>
+<hr>
+<h1 id="why-lora-is-useful"><a class="header" href="#why-lora-is-useful">Why LoRA is useful</a></h1>
+<p>LoRA became popular because it solves several practical problems:</p>
+<h2 id="1-much-cheaper-than-full-fine-tuning"><a class="header" href="#1-much-cheaper-than-full-fine-tuning">1. Much cheaper than full fine-tuning</a></h2>
+<p>You only train a tiny fraction of the parameters.</p>
+<h2 id="2-smaller-storage"><a class="header" href="#2-smaller-storage">2. Smaller storage</a></h2>
+<p>Instead of saving a full copy of a multi-GB model, you save a relatively small adapter file.</p>
+<h2 id="3-easy-to-swap"><a class="header" href="#3-easy-to-swap">3. Easy to swap</a></h2>
+<p>You can keep one base model and load different LoRAs for different tasks.</p>
+<h2 id="4-less-infrastructure-cost"><a class="header" href="#4-less-infrastructure-cost">4. Less infrastructure cost</a></h2>
+<p>Training and serving are easier because most of the model remains frozen.</p>
+<h2 id="5-composable"><a class="header" href="#5-composable">5. Composable</a></h2>
+<p>In many systems, multiple LoRAs can be merged or stacked for different behaviors.</p>
+<hr>
+<h1 id="a-simple-mental-model"><a class="header" href="#a-simple-mental-model">A simple mental model</a></h1>
+<p>Think of the base model as a <strong>generalist</strong>.</p>
+<p>A LoRA is like a <strong>lightweight specialization patch</strong>:</p>
 <ul>
-<li><code>candle</code>: enables local model implementations</li>
-<li><code>mlx</code>: enables the MLX VLM OpenAI-compatible remote path</li>
-<li><code>cli</code>: enables the terminal CLI and REPL</li>
+<li>Base model: “knows language/images broadly”</li>
+<li>LoRA: “nudges it toward a task/style/behavior”</li>
 </ul>
-<p>This matters because some model families, such as Gemma 4, span both local and remote backends.</p>
-<h2 id="module-layout"><a class="header" href="#module-layout">Module Layout</a></h2>
-<p>The crate now follows a family-first layout:</p>
-<pre><code class="language-text">nexo-ai/src/
-├── api/                Traits and request/response types
-├── audio/              Shared audio preprocessing
-├── cli/                CLI commands and REPL
-├── config/             Config loading and runtime overrides
-├── coordinator/        Model factory, slot lifecycle, memory policy
-├── device/             Device and memory checks
-├── download/           Generic manifest/download machinery
-├── models/
-│   ├── support/        Shared prompting and Candle-only helpers
-│   ├── flux2/
-│   │   ├── common/
-│   │   ├── candle/
-│   │   └── openai/
-│   ├── gemma4/
-│   │   ├── common/
-│   │   ├── candle/
-│   │   └── openai/
-│   ├── qwen_image/
-│   ├── whisper/
-│   └── z_image/
-├── openai/             Generic OpenAI protocol, client, and model adapter
-├── registry/           Manifest metadata and list-model view
-├── servers/            Provider-specific server integrations
-├── statistics/         Inference metrics and aggregates
-├── vision/             Shared image preprocessing
-└── lib.rs
-</code></pre>
-<h2 id="family-and-runtime-metadata"><a class="header" href="#family-and-runtime-metadata">Family And Runtime Metadata</a></h2>
-<p>The registry no longer uses backend names as fake model families. Each manifest now carries:</p>
+<p>It doesn’t usually teach the model everything from scratch. It <strong>biases</strong> the model in a useful direction.</p>
+<hr>
+<h1 id="how-lora-works-in-practice"><a class="header" href="#how-lora-works-in-practice">How LoRA works in practice</a></h1>
+<p>LoRA is usually applied to specific layers, especially in <strong>attention</strong> and sometimes <strong>MLP</strong> layers.</p>
+<p>For transformers, common targets are projections like:</p>
 <ul>
-<li><code>ModelFamily</code>: <code>Whisper</code>, <code>Flux</code>, <code>ZImage</code>, <code>QwenImage</code>, <code>Gemma4</code></li>
-<li><code>ModelRuntime</code>: local Candle backends or remote OpenAI-compatible providers</li>
+<li><strong>Q</strong> (query)</li>
+<li><strong>K</strong> (key)</li>
+<li><strong>V</strong> (value)</li>
+<li><strong>O</strong> (output)</li>
 </ul>
-<p>That split lets the coordinator load the same family through different backends without hard-coding backend names into user-facing metadata.</p>
+<p>In some setups, only a subset is adapted (for example Q and V). In others, more layers are included for stronger adaptation.</p>
+<hr>
+<h1 id="lora-in-image-generation-models"><a class="header" href="#lora-in-image-generation-models">LoRA in image generation models</a></h1>
+<p>In image generation, “LoRA” often refers to a small adapter trained on top of a base model like a diffusion model.</p>
+<p>This is extremely common in ecosystems around:</p>
+<ul>
+<li>Stable Diffusion</li>
+<li>SDXL</li>
+<li>FLUX-style derivative ecosystems</li>
+<li>custom anime/photoreal/style checkpoints</li>
+</ul>
+<h2 id="what-it-does-in-image-models"><a class="header" href="#what-it-does-in-image-models">What it does in image models</a></h2>
+<p>A LoRA can teach the base image model to better represent:</p>
+<ul>
+<li>a <strong>specific visual style</strong></li>
+<li>a <strong>particular character</strong></li>
+<li>a <strong>person’s face</strong></li>
+<li>a <strong>specific object</strong></li>
+<li>a <strong>clothing concept</strong></li>
+<li>a <strong>camera/lighting aesthetic</strong></li>
+<li>a <strong>pose/style combination</strong></li>
+</ul>
+<p>So instead of training a whole new checkpoint, you train a small adapter that says:</p>
+<blockquote>
+<p>“When the prompt contains certain tokens or conditions, shift the model’s internal behavior in this direction.”</p>
+</blockquote>
+<hr>
+<h2 id="example"><a class="header" href="#example">Example</a></h2>
+<p>Suppose you have a base image model that can generate portraits.</p>
+<p>You want it to generate images in a very specific style:</p>
+<ul>
+<li>watercolor anime</li>
+<li>cyberpunk product photography</li>
+<li>your company mascot</li>
+<li>a custom game character</li>
+</ul>
+<p>Rather than fully fine-tuning the model, you train a LoRA on a smaller dataset of images representing that concept.</p>
+<p>Then during inference you use the base model + LoRA.</p>
+<p>The LoRA alters how the model denoises and interprets prompt features, making the output more likely to match that learned concept.</p>
+<hr>
+<h2 id="why-lora-is-so-popular-for-image-generation"><a class="header" href="#why-lora-is-so-popular-for-image-generation">Why LoRA is so popular for image generation</a></h2>
+<h3 id="1-small-file-size"><a class="header" href="#1-small-file-size">1. Small file size</a></h3>
+<p>A LoRA file can be dramatically smaller than a full model checkpoint.</p>
+<h3 id="2-easy-distribution"><a class="header" href="#2-easy-distribution">2. Easy distribution</a></h3>
+<p>Creators can share LoRAs rather than entire models.</p>
+<h3 id="3-easy-combination"><a class="header" href="#3-easy-combination">3. Easy combination</a></h3>
+<p>People often combine:</p>
+<ul>
+<li>a base model</li>
+<li>one style LoRA</li>
+<li>one character LoRA</li>
+<li>one detail enhancer LoRA</li>
+</ul>
+<h3 id="4-faster-experimentation"><a class="header" href="#4-faster-experimentation">4. Faster experimentation</a></h3>
+<p>You can iterate on many artistic concepts cheaply.</p>
+<h3 id="5-lower-data-requirement-than-full-retraining"><a class="header" href="#5-lower-data-requirement-than-full-retraining">5. Lower data requirement than full retraining</a></h3>
+<p>For narrow concepts, LoRA works surprisingly well even with relatively modest datasets (though quality still depends heavily on data quality).</p>
+<hr>
+<h2 id="how-lora-is-injected-into-image-generation-models"><a class="header" href="#how-lora-is-injected-into-image-generation-models">How LoRA is injected into image generation models</a></h2>
+<p>In diffusion models, LoRA is usually applied to parts of the <strong>U-Net</strong> and/or the <strong>text encoder</strong>.</p>
+<h3 id="u-net-lora"><a class="header" href="#u-net-lora">U-Net LoRA</a></h3>
+<p>This affects how latent images are denoised and refined.</p>
+<h3 id="text-encoder-lora"><a class="header" href="#text-encoder-lora">Text encoder LoRA</a></h3>
+<p>This affects how prompt tokens get interpreted.</p>
+<p>Training either or both changes how strongly the prompt maps to visual outcomes.</p>
+<hr>
+<h2 id="what-users-experience-in-image-generation"><a class="header" href="#what-users-experience-in-image-generation">What users experience in image generation</a></h2>
+<p>From the user point of view, a LoRA is often controlled by:</p>
+<ul>
+<li>a <strong>trigger word</strong> or phrase in the prompt</li>
+<li>a <strong>weight</strong>, e.g. <code>&lt;lora:my_style:0.7&gt;</code></li>
+</ul>
+<p>That weight determines how strongly the LoRA influences the output.</p>
+<h3 id="too-low"><a class="header" href="#too-low">Too low:</a></h3>
+<ul>
+<li>effect is weak</li>
+<li>concept may not show up clearly</li>
+</ul>
+<h3 id="too-high"><a class="header" href="#too-high">Too high:</a></h3>
+<ul>
+<li>image can become distorted</li>
+<li>style may overpower the prompt</li>
+<li>artifacts can appear</li>
+</ul>
+<p>So LoRA strength is usually tuned experimentally.</p>
+<hr>
+<h2 id="common-image-generation-lora-use-cases"><a class="header" href="#common-image-generation-lora-use-cases">Common image-generation LoRA use cases</a></h2>
+<h3 id="style-lora"><a class="header" href="#style-lora">Style LoRA</a></h3>
+<p>Teaches a specific artistic style.</p>
+<h3 id="character-lora"><a class="header" href="#character-lora">Character LoRA</a></h3>
+<p>Teaches a recognizable person/character appearance.</p>
+<h3 id="object-lora"><a class="header" href="#object-lora">Object LoRA</a></h3>
+<p>Teaches a specific product, logo-like object, or design motif.</p>
+<h3 id="posecomposition-lora"><a class="header" href="#posecomposition-lora">Pose/composition LoRA</a></h3>
+<p>Biases the model toward certain framing or body configurations.</p>
+<h3 id="realismdetail-lora"><a class="header" href="#realismdetail-lora">Realism/detail LoRA</a></h3>
+<p>Enhances sharpness, texture, skin detail, lighting aesthetics, etc.</p>
+<hr>
+<h2 id="limitations-in-image-models"><a class="header" href="#limitations-in-image-models">Limitations in image models</a></h2>
+<p>LoRAs are powerful, but not magic.</p>
+<h3 id="1-overfitting"><a class="header" href="#1-overfitting">1. Overfitting</a></h3>
+<p>If trained on too few or too similar images, the model memorizes instead of generalizing.</p>
+<h3 id="2-prompt-brittleness"><a class="header" href="#2-prompt-brittleness">2. Prompt brittleness</a></h3>
+<p>The LoRA may work well only with certain trigger words or prompt styles.</p>
+<h3 id="3-conflicts-with-other-loras"><a class="header" href="#3-conflicts-with-other-loras">3. Conflicts with other LoRAs</a></h3>
+<p>Multiple LoRAs may fight each other.</p>
+<h3 id="4-limited-conceptual-depth"><a class="header" href="#4-limited-conceptual-depth">4. Limited conceptual depth</a></h3>
+<p>A small adapter is great for narrow specialization, but not always enough for large capability shifts.</p>
+<h3 id="5-base-model-dependence"><a class="header" href="#5-base-model-dependence">5. Base-model dependence</a></h3>
+<p>A LoRA trained on one base model often won’t work well on another unless architectures and training assumptions align.</p>
+<hr>
+<h1 id="lora-in-tool-calling-models"><a class="header" href="#lora-in-tool-calling-models">LoRA in tool-calling models</a></h1>
+<p>Now to the second part: <strong>tool calling</strong>.</p>
+<p>A tool-calling model is a language model trained to do things like:</p>
+<ul>
+<li>decide whether to call a tool/API</li>
+<li>choose the correct tool</li>
+<li>produce structured arguments (often JSON)</li>
+<li>return control to the application</li>
+</ul>
 <p>Examples:</p>
 <ul>
-<li><code>gemma-4-e2b-it</code> is <code>Gemma4 + candle-safetensors</code></li>
-<li><code>gemma-4-e2b-it-q5</code> is <code>Gemma4 + candle-gguf</code></li>
-<li><code>mlx-gemma-4-e2b-it-8bit</code> is <code>Gemma4 + mlx-vlm</code></li>
+<li>weather API calls</li>
+<li>search tools</li>
+<li>database lookups</li>
+<li>calendar creation</li>
+<li>code execution</li>
+<li>retrieval calls</li>
 </ul>
-<h2 id="current-families"><a class="header" href="#current-families">Current Families</a></h2>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Family</th><th>Local backends</th><th>Remote backends</th></tr>
-</thead>
-<tbody>
-<tr><td>Whisper</td><td>Candle safetensors</td><td>none</td></tr>
-<tr><td>Flux.2</td><td>Candle safetensors</td><td>none</td></tr>
-<tr><td>Z-Image</td><td>Candle GGUF</td><td>none</td></tr>
-<tr><td>Qwen-Image</td><td>Candle safetensors and GGUF</td><td>none</td></tr>
-<tr><td>Gemma 4</td><td>Candle safetensors and GGUF</td><td>MLX VLM via OpenAI-compatible API</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="coordinator-role"><a class="header" href="#coordinator-role">Coordinator Role</a></h2>
-<p>The coordinator owns:</p>
-<ul>
-<li>active model selection per category</li>
-<li>lazy load and unload operations</li>
-<li>memory preflight checks before large loads</li>
-<li>factory dispatch from registry metadata to concrete model implementations</li>
-<li>statistics recording for load and inference activity</li>
-</ul>
-<p>Because runtime metadata is explicit, the loader no longer switches on raw manifest strings such as <code>"mlx"</code>.</p>
-<h2 id="cli-notes"><a class="header" href="#cli-notes">CLI Notes</a></h2>
-<p>The <code>list</code> command now shows both family and backend, which makes mixed-family or mixed-runtime installs easier to inspect.</p>
-<p>The REPL uses the same coordinator and model traits as library consumers, so CLI behavior stays aligned with gateway and service integration.</p>
-<h2 id="where-to-read-next"><a class="header" href="#where-to-read-next">Where To Read Next</a></h2>
-<ul>
-<li><code>Architecture</code> covers the full crate structure and request/load flows</li>
-<li><code>Candle Architecture</code> explains the local backend layout</li>
-<li><code>OpenAI Architecture</code> explains the generic remote adapter and the MLX server integration</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div>
-<h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
-<p>The <code>nexo-ai</code> crate is structured as a small set of stable layers:</p>
-<ul>
-<li>a trait and type API at the top</li>
-<li>a registry that describes what exists</li>
-<li>a coordinator that decides what to load</li>
-<li>backend-specific model code that does the actual inference</li>
-</ul>
-<p>The main refactor goal was to make family ownership and backend ownership explicit. Generic OpenAI logic now lives in one place, provider-specific server logic lives in one place, and each model family owns its own prompting and backend adapters.</p>
-<h2 id="layer-overview"><a class="header" href="#layer-overview">Layer Overview</a></h2>
-<pre class="mermaid">flowchart TD
-    API[api&lt;br/&gt;traits and request types]
-    Registry[registry&lt;br/&gt;family and runtime metadata]
-    Coordinator[coordinator&lt;br/&gt;factory and lifecycle]
-    Models[models/&lt;family&gt;&lt;br/&gt;common, candle, openai]
-    OpenAI[openai&lt;br/&gt;protocol, client, generic model adapter]
-    Servers[servers&lt;br/&gt;provider integrations]
-    Device[device&lt;br/&gt;memory and hardware checks]
-    Stats[statistics&lt;br/&gt;load and inference metrics]
-
-    API --&gt; Coordinator
-    Registry --&gt; Coordinator
-    Device --&gt; Coordinator
-    Coordinator --&gt; Models
-    Coordinator --&gt; OpenAI
-    OpenAI --&gt; Servers
-    Coordinator --&gt; Stats
-</pre>
-
-<h2 id="top-level-responsibilities"><a class="header" href="#top-level-responsibilities">Top-Level Responsibilities</a></h2>
-<h3 id="srcapi"><a class="header" href="#srcapi"><code>src/api</code></a></h3>
-<p>This is the stable runtime contract. It contains:</p>
-<ul>
-<li><code>model_traits.rs</code> for <code>ModelInfo</code> and category traits</li>
-<li><code>types.rs</code> for all request and response types</li>
-<li><code>lora_traits.rs</code> for adapter-capable model surfaces</li>
-</ul>
-<p>Everything else in the crate is built to satisfy these interfaces.</p>
-<h3 id="srcregistry"><a class="header" href="#srcregistry"><code>src/registry</code></a></h3>
-<p>The registry is static metadata, not executable model logic.</p>
-<p>Each <code>AiModelManifest</code> now carries:</p>
-<ul>
-<li>download files and sizes</li>
-<li>supported categories</li>
-<li><code>ModelFamily</code></li>
-<li><code>ModelRuntime</code></li>
-</ul>
-<p>That makes the registry the single source of truth for both user-facing model listing and runtime dispatch.</p>
-<h3 id="srccoordinator"><a class="header" href="#srccoordinator"><code>src/coordinator</code></a></h3>
-<p>The coordinator owns runtime state:</p>
-<ul>
-<li>loaded model slots</li>
-<li>active model selections per category</li>
-<li>configuration overrides</li>
-<li>load and unload policy</li>
-<li>the model factory used to instantiate concrete implementations</li>
-</ul>
-<p>The important change here is that creation now dispatches from explicit <code>(family, runtime)</code> metadata instead of matching on ad hoc manifest strings.</p>
-<h3 id="srcmodels"><a class="header" href="#srcmodels"><code>src/models</code></a></h3>
-<p>Each model family owns its own layout. The standard target shape is:</p>
-<pre><code class="language-text">models/&lt;family&gt;/
-├── common/
-├── candle/
-└── openai/
-</code></pre>
-<p>Not every family implements every backend. Empty backend folders are acceptable if they keep the family layout predictable.</p>
-<h3 id="srcopenai"><a class="header" href="#srcopenai"><code>src/openai</code></a></h3>
-<p>This module is intentionally generic. It contains:</p>
-<ul>
-<li>protocol types for OpenAI-compatible APIs</li>
-<li>a reusable HTTP client</li>
-<li>a generic <code>OpenAiModel&lt;F, S&gt;</code> adapter</li>
-</ul>
-<p>It does not own Gemma-specific prompting or MLX-specific process management.</p>
-<h3 id="srcservers"><a class="header" href="#srcservers"><code>src/servers</code></a></h3>
-<p>This module owns provider integration details, such as:</p>
-<ul>
-<li>process startup</li>
-<li>health checks</li>
-<li>model listing</li>
-<li>unload hooks</li>
-</ul>
-<p>Today that mainly means the <code>mlx_vlm</code> integration.</p>
-<h2 id="load-path"><a class="header" href="#load-path">Load Path</a></h2>
-<p>This is the current load path for every model:</p>
-<pre class="mermaid">flowchart LR
-    Request[load model by name]
-    Manifest[registry manifest lookup]
-    Memory[device preflight memory check]
-    Factory[coordinator factory]
-    Impl[concrete model implementation]
-    Slot[loaded model slot]
-    Stats[load statistics]
-
-    Request --&gt; Manifest
-    Manifest --&gt; Memory
-    Memory --&gt; Factory
-    Factory --&gt; Impl
-    Impl --&gt; Slot
-    Slot --&gt; Stats
-</pre>
-
-<p>The factory decision is driven by the manifest. That keeps download metadata, list output, and loader behavior aligned.</p>
-<h2 id="request-path"><a class="header" href="#request-path">Request Path</a></h2>
-<p>Once a model is loaded, request handling is intentionally boring:</p>
-<pre class="mermaid">flowchart LR
-    Caller[CLI or service caller]
-    Trait[ModelInfo plus category trait]
-    Model[concrete model instance]
-    Backend[Candle pipeline or OpenAI adapter]
-    Result[typed response plus metrics]
-
-    Caller --&gt; Trait
-    Trait --&gt; Model
-    Model --&gt; Backend
-    Backend --&gt; Result
-</pre>
-
-<p>The caller does not need to know whether the implementation is local or remote.</p>
-<h2 id="shared-support-code"><a class="header" href="#shared-support-code">Shared Support Code</a></h2>
-<p><code>models/support</code> holds cross-family helpers that do not belong to one family. Two examples are important:</p>
-<ul>
-<li><code>prompting.rs</code> for shared chat-template abstractions</li>
-<li><code>conversation.rs</code> for CLI conversation management</li>
-</ul>
-<p>The Candle-only tensor and weight helpers also live under <code>models/support</code>, but they stay behind the <code>candle</code> feature.</p>
-<h2 id="why-the-split-matters"><a class="header" href="#why-the-split-matters">Why The Split Matters</a></h2>
-<p>This layout fixes a few real problems from the previous structure:</p>
-<ul>
-<li>generic OpenAI code is no longer mixed with MLX-specific code</li>
-<li>Gemma 4 owns its prompt formatting for both Candle and MLX paths</li>
-<li>backend names are no longer treated as model families</li>
-<li>dead compatibility namespaces such as <code>shared</code> and <code>remote_models</code> are gone</li>
-</ul>
-<h2 id="backend-specific-docs"><a class="header" href="#backend-specific-docs">Backend-Specific Docs</a></h2>
-<ul>
-<li><code>Candle Architecture</code> covers the local runtime path</li>
-<li><code>OpenAI Architecture</code> covers the generic OpenAI adapter and MLX provider integration</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div>
-<h1 id="candle-architecture"><a class="header" href="#candle-architecture">Candle Architecture</a></h1>
-<p>The Candle path is the local inference backend in <code>nexo-ai</code>. It covers model loading from local files, Apple Silicon execution, and family-specific pipelines for chat, image, audio, and image generation workloads.</p>
-<h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>Candle currently backs these families:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Family</th><th>Runtime variants</th></tr>
-</thead>
-<tbody>
-<tr><td>Whisper</td><td>safetensors</td></tr>
-<tr><td>Flux.2</td><td>safetensors</td></tr>
-<tr><td>Z-Image</td><td>GGUF</td></tr>
-<tr><td>Qwen-Image</td><td>safetensors and GGUF</td></tr>
-<tr><td>Gemma 4</td><td>safetensors and GGUF</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="layout"><a class="header" href="#layout">Layout</a></h2>
-<p>The refactor standardizes Candle families under a family-first structure:</p>
-<pre><code class="language-text">models/&lt;family&gt;/
-├── common/
-│   └── family-owned shared code
-├── candle/
-│   └── local inference implementation
-└── openai/
-	└── optional remote adapter
-+```
-
-For Candle specifically:
-
-- `common/` holds code shared by multiple backends inside the family
-- `candle/` holds the local runtime implementation
-- `models/support/` holds cross-family Candle helpers such as encoders and weight loading
-
-## Local Load Flow
-
-```mermaid
-flowchart LR
-	Manifest[registry manifest&lt;br/&gt;runtime = Candle]
-	Factory[coordinator factory]
-	Family[family model wrapper]
-	Pipeline[family candle pipeline]
-	Files[local model files]
-	Ready[loaded model slot]
-
-	Manifest --&gt; Factory
-	Factory --&gt; Family
-	Family --&gt; Pipeline
-	Files --&gt; Pipeline
-	Pipeline --&gt; Ready
-+```
-
-The coordinator does not load tensors directly. It selects the correct family model, and that model delegates to its family-owned Candle pipeline.
-
-## Family Ownership
-
-### Whisper
-
-Whisper is a straightforward local-only family. Its Candle code lives under `models/whisper/candle` and handles transcription-specific preprocessing and decoding.
-
-### Flux.2
-
-Flux.2 uses local Candle pipelines for image generation. Shared family config and sampling code live under `models/flux2/common`, while the transformer and VAE implementation stay in `models/flux2/candle`.
-
-### Qwen-Image And Z-Image
-
-These families both use Candle locally but with different weight formats. The registry runtime metadata tells the coordinator whether the runtime is `candle-safetensors` or `candle-gguf`; loader logic no longer has to guess from filenames.
-
-### Gemma 4
-
-Gemma 4 is the most important mixed-backend family:
-
-- `common/template.rs` owns prompt formatting
-- `candle/safetensors` owns the local safetensors path
-- `candle/gguf` owns the local GGUF path
-- `openai/` owns the remote OpenAI-compatible adapter
-
-That split keeps the family-specific rules together while still making the backend implementation explicit.
-
-## Shared Candle Support
-
-`models/support` contains two kinds of shared code:
-
-- backend-agnostic prompting helpers such as `ChatTemplate`
-- Candle-only helpers such as encoder and weight utilities
-
-This matters because prompting is reused by both local and remote paths, while tensor-loading code is only relevant to Candle builds.
-
-## Why The Runtime Metadata Matters
-
-Before the refactor, some runtime choices were inferred indirectly from strings or file extensions. The registry now records the backend directly, which improves three things:
-
-- CLI output can show the real backend
-- the coordinator can dispatch without special cases like `"mlx"` as a family
-- mixed families such as Gemma 4 can expose both local and remote backends cleanly
-
-## Design Rule
-
-When adding a new local model family, prefer this sequence:
-
-1. add the family root under `models/&lt;family&gt;`
-2. put family-shared code under `common/`
-3. put local inference code under `candle/`
-4. register the family and backend explicitly in the registry
-5. add the `(family, runtime)` factory branch in the coordinator
-
-That keeps the backend contract consistent with the rest of the crate.
-</code></pre>
-<div style="break-before: page; page-break-before: always;"></div>
-<h1 id="openai-architecture"><a class="header" href="#openai-architecture">OpenAI Architecture</a></h1>
-<p>The OpenAI path in <code>nexo-ai</code> is the generic remote inference backend. It is responsible for talking to any OpenAI-compatible server without baking provider-specific rules into the transport layer.</p>
-<p>Today the main concrete provider is <code>mlx_vlm</code>, but the architecture is intentionally split so that additional providers can be added without cloning the whole adapter stack.</p>
-<h2 id="module-split"><a class="header" href="#module-split">Module Split</a></h2>
-<p>The remote path is divided into three layers:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Module</th><th>Responsibility</th></tr>
-</thead>
-<tbody>
-<tr><td><code>openai/protocol.rs</code></td><td>OpenAI-compatible request and response wire types</td></tr>
-<tr><td><code>openai/client.rs</code></td><td>HTTP transport for chat and model-list requests</td></tr>
-<tr><td><code>openai/model.rs</code></td><td>Generic <code>OpenAiModel&lt;F, S&gt;</code> runtime adapter</td></tr>
-</tbody>
-</table>
-</div>
-<p>Provider-specific logic lives outside that layer:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Module</th><th>Responsibility</th></tr>
-</thead>
-<tbody>
-<tr><td><code>servers/mlx_vlm</code></td><td>MLX server process lifecycle and health checks</td></tr>
-<tr><td><code>models/gemma4/openai</code></td><td>Gemma-specific request-model resolution and tool parsing</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="generic-adapter-model"><a class="header" href="#generic-adapter-model">Generic Adapter Model</a></h2>
-<p><code>OpenAiModel&lt;F, S&gt;</code> is parameterized over two small interfaces:</p>
-<ul>
-<li><code>F: OpenAiFamilyAdapter</code></li>
-<li><code>S: OpenAiServerControl</code></li>
-</ul>
-<p>That split is the key architectural boundary.</p>
-<p>The family adapter owns:</p>
-<ul>
-<li>the model family name</li>
-<li>request-model resolution</li>
-<li>response interpretation such as tool-call parsing</li>
-</ul>
-<p>The server control owns:</p>
-<ul>
-<li>ensuring the remote server is running</li>
-<li>unload behavior for the current provider</li>
-</ul>
-<h2 id="current-gemma-plus-mlx-path"><a class="header" href="#current-gemma-plus-mlx-path">Current Gemma Plus MLX Path</a></h2>
-<pre class="mermaid">flowchart LR
-    Manifest[registry manifest&lt;br/&gt;family = Gemma4&lt;br/&gt;runtime = mlx-vlm]
-    Factory[coordinator factory]
-    Model[OpenAiModel&lt;Gemma4OpenAiFamily, MlxVlmHandle&gt;]
-    Handle[MlxVlmHandle]
-    Server[MlxServer process]
-    API[OpenAI-compatible HTTP API]
-    Parse[Gemma family response parsing]
-
-    Manifest --&gt; Factory
-    Factory --&gt; Model
-    Model --&gt; Handle
-    Handle --&gt; Server
-    Model --&gt; API
-    API --&gt; Parse
-</pre>
-
-<p>The important part is that MLX-specific process management and Gemma-specific prompt behavior are separate dependencies of the generic adapter, not embedded into it.</p>
-<h2 id="protocol-layer"><a class="header" href="#protocol-layer">Protocol Layer</a></h2>
-<p><code>openai/protocol.rs</code> contains the wire types used across remote backends:</p>
-<ul>
-<li>model listing responses</li>
-<li>chat completion requests</li>
-<li>multimodal content parts</li>
-<li>tool definitions</li>
-<li>tool-call responses</li>
-<li>usage accounting</li>
-</ul>
-<p>This file should stay free of provider-specific assumptions.</p>
-<h2 id="client-layer"><a class="header" href="#client-layer">Client Layer</a></h2>
-<p><code>openai/client.rs</code> is a small transport wrapper over <code>reqwest</code>. It currently handles:</p>
-<ul>
-<li><code>POST /v1/chat/completions</code></li>
-<li><code>GET /v1/models</code></li>
-</ul>
-<p>The client does not know anything about Gemma, MLX, or the coordinator. It just sends and receives typed protocol payloads.</p>
-<h2 id="family-adapter-layer"><a class="header" href="#family-adapter-layer">Family Adapter Layer</a></h2>
-<p><code>models/gemma4/openai</code> owns the Gemma-specific parts of the remote path.</p>
-<p>That includes:</p>
-<ul>
-<li><code>default_request_model_id</code>, which maps local registry names to the request model id expected by the remote backend</li>
-<li><code>Gemma4OpenAiFamily</code>, which plugs Gemma behavior into the generic <code>OpenAiModel</code></li>
-<li>fallback tool parsing using the same Gemma template used by the Candle path</li>
-</ul>
-<p>This is what keeps the Candle and MLX prompt behavior aligned for Gemma 4.</p>
-<h2 id="server-integration-layer"><a class="header" href="#server-integration-layer">Server Integration Layer</a></h2>
-<p><code>servers/mlx_vlm</code> owns the provider integration details:</p>
-<ul>
-<li>launching <code>mlx_vlm.server</code></li>
-<li>health probing</li>
-<li>model listing</li>
-<li>unload requests</li>
-<li>shared handle management through <code>MlxVlmHandle</code></li>
-</ul>
-<p>The coordinator stores the handle, and the generic OpenAI model only depends on the <code>OpenAiServerControl</code> interface.</p>
-<h2 id="why-this-split-is-better"><a class="header" href="#why-this-split-is-better">Why This Split Is Better</a></h2>
-<p>This refactor removes two earlier architecture problems:</p>
-<ul>
-<li>generic OpenAI code no longer depends directly on <code>MlxServer</code></li>
-<li>Gemma-specific remote behavior no longer lives in a generic transport namespace</li>
-</ul>
-<p>That makes the remote path easier to extend. Adding a new provider should mostly mean:</p>
+<hr>
+<h2 id="what-lora-does-here"><a class="header" href="#what-lora-does-here">What LoRA does here</a></h2>
+<p>In a tool-calling model, LoRA can fine-tune a base LLM to become better at:</p>
 <ol>
-<li>implement a new server integration in <code>src/servers</code></li>
-<li>add or reuse a family adapter in <code>models/&lt;family&gt;/openai</code></li>
-<li>register the new runtime in the registry</li>
-<li>add the new <code>(family, runtime)</code> branch in the coordinator factory</li>
+<li><strong>Recognizing when a tool is needed</strong></li>
+<li><strong>Selecting the right tool</strong></li>
+<li><strong>Formatting the tool call correctly</strong></li>
+<li><strong>Extracting arguments from the user’s request</strong></li>
+<li><strong>Following a schema</strong></li>
+<li><strong>Reducing hallucinated tool calls</strong></li>
 </ol>
-<h2 id="practical-outcome"><a class="header" href="#practical-outcome">Practical Outcome</a></h2>
-<p>The user-visible effect is simple:</p>
+<p>So instead of changing the whole language model, you apply a compact adaptation that nudges the model toward structured behavior.</p>
+<hr>
+<h2 id="example-1"><a class="header" href="#example-1">Example</a></h2>
+<p>Suppose you start with a general instruction model.</p>
+<p>User says:</p>
+<blockquote>
+<p>“Book a meeting with Sarah tomorrow at 3 PM and add a Teams link.”</p>
+</blockquote>
+<p>A generic model may answer in plain text.</p>
+<p>A tool-call LoRA can teach it to output something more like:</p>
+<pre><code class="language-json">{
+  "tool": "create_calendar_event",
+  "arguments": {
+    "title": "Meeting with Sarah",
+    "datetime": "2026-03-25T15:00:00",
+    "add_teams_link": true
+  }
+}
+</code></pre>
+<p>This is exactly the kind of behavioral specialization LoRA is good at.</p>
+<hr>
+<h1 id="why-lora-is-attractive-for-tool-calling"><a class="header" href="#why-lora-is-attractive-for-tool-calling">Why LoRA is attractive for tool calling</a></h1>
+<h2 id="1-efficient-specialization"><a class="header" href="#1-efficient-specialization">1. Efficient specialization</a></h2>
+<p>You can take a strong general-purpose model and cheaply specialize it for:</p>
 <ul>
-<li><code>list</code> can show <code>gemma4</code> as the family and <code>mlx-vlm</code> as the backend</li>
-<li>the loader can create the correct adapter without fake family names</li>
-<li>shared prompt formatting stays owned by the family, not duplicated across backends</li>
+<li>function calling</li>
+<li>JSON schema compliance</li>
+<li>enterprise workflows</li>
+<li>domain-specific APIs</li>
 </ul>
+<h2 id="2-multiple-adapters-for-multiple-environments"><a class="header" href="#2-multiple-adapters-for-multiple-environments">2. Multiple adapters for multiple environments</a></h2>
+<p>A company might keep one base model and attach different LoRAs for:</p>
+<ul>
+<li>CRM tools</li>
+<li>cloud ops tools</li>
+<li>ITSM workflows</li>
+<li>finance tools</li>
+<li>internal search/retrieval systems</li>
+</ul>
+<h2 id="3-safer-iteration"><a class="header" href="#3-safer-iteration">3. Safer iteration</a></h2>
+<p>You can improve tool-use behavior without retraining the full model.</p>
+<h2 id="4-domain-adaptation"><a class="header" href="#4-domain-adaptation">4. Domain adaptation</a></h2>
+<p>If your API names, parameter conventions, or business objects are unique, LoRA can teach the model that vocabulary.</p>
+<hr>
+<h1 id="what-is-actually-learned-in-tool-calling-loras"><a class="header" href="#what-is-actually-learned-in-tool-calling-loras">What is actually learned in tool-calling LoRAs?</a></h1>
+<p>A tool-calling LoRA often teaches patterns like:</p>
+<h2 id="1-tool-selection-policy"><a class="header" href="#1-tool-selection-policy">1. Tool selection policy</a></h2>
+<p>When should the model answer directly vs. invoke a tool?</p>
+<h2 id="2-argument-extraction"><a class="header" href="#2-argument-extraction">2. Argument extraction</a></h2>
+<p>How to map natural language into structured parameters.</p>
+<p>Example:</p>
+<ul>
+<li>“next Friday morning” → date range / timestamp</li>
+<li>“the Berlin office” → office_id or location field</li>
+</ul>
+<h2 id="3-schema-obedience"><a class="header" href="#3-schema-obedience">3. Schema obedience</a></h2>
+<p>The model learns to produce required fields, enum values, nesting, and valid JSON.</p>
+<h2 id="4-tool-sequencing"><a class="header" href="#4-tool-sequencing">4. Tool sequencing</a></h2>
+<p>In more advanced setups:</p>
+<ul>
+<li>search first</li>
+<li>then retrieve details</li>
+<li>then call action tool</li>
+</ul>
+<h2 id="5-error-aware-behavior"><a class="header" href="#5-error-aware-behavior">5. Error-aware behavior</a></h2>
+<p>Some fine-tuning datasets teach the model to:</p>
+<ul>
+<li>ask for missing fields</li>
+<li>retry with corrected arguments</li>
+<li>interpret tool results before answering</li>
+</ul>
+<hr>
+<h1 id="lora-vs-prompt-engineering-for-tool-calling"><a class="header" href="#lora-vs-prompt-engineering-for-tool-calling">LoRA vs prompt engineering for tool calling</a></h1>
+<p>Prompting alone can get you surprisingly far, especially with strong frontier models.</p>
+<p>But LoRA can help when you need <strong>consistency</strong>.</p>
+<h2 id="prompt-engineering-is-good-for"><a class="header" href="#prompt-engineering-is-good-for">Prompt engineering is good for:</a></h2>
+<ul>
+<li>quick iteration</li>
+<li>small number of tools</li>
+<li>strong base model</li>
+<li>low-stakes workflows</li>
+</ul>
+<h2 id="lora-is-better-when"><a class="header" href="#lora-is-better-when">LoRA is better when:</a></h2>
+<ul>
+<li>you need reliable structured output</li>
+<li>your schemas are complicated</li>
+<li>the tool vocabulary is domain-specific</li>
+<li>you have enough training data</li>
+<li>you want lower latency / less giant prompting</li>
+<li>you need consistent behavior across many requests</li>
+</ul>
+<p>In other words:</p>
+<blockquote>
+<p>Prompting tells the model what you want now.<br>LoRA changes how the model tends to behave.</p>
+</blockquote>
+<hr>
+<h1 id="typical-training-data-for-a-tool-calling-lora"><a class="header" href="#typical-training-data-for-a-tool-calling-lora">Typical training data for a tool-calling LoRA</a></h1>
+<p>You would train on examples like:</p>
+<ul>
+<li>user query</li>
+<li>available tools / schemas</li>
+<li>expected tool call</li>
+<li>maybe intermediate reasoning traces (depending on setup)</li>
+<li>maybe tool responses and final answer</li>
+</ul>
+<p>For example:</p>
+<h3 id="input"><a class="header" href="#input">Input</a></h3>
+<p>“Restart the failing VM in resource group prod-eu and tell me whether it comes back healthy.”</p>
+<h3 id="target-behavior"><a class="header" href="#target-behavior">Target behavior</a></h3>
+<ol>
+<li>call <code>get_vm_status</code></li>
+<li>if unhealthy, call <code>restart_vm</code></li>
+<li>call <code>get_vm_status</code> again</li>
+<li>summarize result</li>
+</ol>
+<p>This kind of supervised data teaches orchestration patterns.</p>
+<hr>
+<h1 id="lora-in-tool-calling-where-it-is-applied"><a class="header" href="#lora-in-tool-calling-where-it-is-applied">LoRA in tool calling: where it is applied</a></h1>
+<p>Technically, the LoRA is still usually attached to transformer layers in the language model — often attention projections and sometimes MLP blocks.</p>
+<p>The difference is not <em>where</em> it is inserted, but <em>what data it is trained on</em>.</p>
+<p>So:</p>
+<ul>
+<li><strong>Image LoRA</strong> → data teaches visual concepts/styles</li>
+<li><strong>Tool-calling LoRA</strong> → data teaches structured decision-making and API usage</li>
+</ul>
+<p>Same mechanism, different specialization objective.</p>
+<hr>
+<h1 id="lora-vs-qlora"><a class="header" href="#lora-vs-qlora">LoRA vs QLoRA</a></h1>
+<p>You may also hear <strong>QLoRA</strong>.</p>
+<p>This is related but different.</p>
+<h2 id="lora"><a class="header" href="#lora">LoRA</a></h2>
+<p>Adds low-rank trainable adapters to a frozen base model.</p>
+<h2 id="qlora"><a class="header" href="#qlora">QLoRA</a></h2>
+<p>Does the same thing, <strong>but</strong> the base model is quantized (often 4-bit) during fine-tuning to reduce memory usage even more.</p>
+<p>This is especially popular for LLM fine-tuning because it makes training large models much cheaper.</p>
+<p>For tool-calling adaptation, QLoRA is often a very practical choice.</p>
+<hr>
+<h1 id="strengths-and-weaknesses-of-lora-overall"><a class="header" href="#strengths-and-weaknesses-of-lora-overall">Strengths and weaknesses of LoRA overall</a></h1>
+<h2 id="strengths"><a class="header" href="#strengths">Strengths</a></h2>
+<ul>
+<li>parameter efficient</li>
+<li>cheaper to train</li>
+<li>small artifacts to store/share</li>
+<li>easy to swap/merge</li>
+<li>great for narrow specialization</li>
+<li>excellent for experimentation</li>
+</ul>
+<h2 id="weaknesses"><a class="header" href="#weaknesses">Weaknesses</a></h2>
+<ul>
+<li>not always enough for deep capability shifts</li>
+<li>can overfit</li>
+<li>can be sensitive to rank / target modules / scaling</li>
+<li>may interfere with other adapters</li>
+<li>performance ceiling can be below full fine-tuning on some tasks</li>
+</ul>
+<hr>
+<h1 id="a-concise-comparison"><a class="header" href="#a-concise-comparison">A concise comparison</a></h1>
+<h2 id="in-image-generation"><a class="header" href="#in-image-generation">In image generation</a></h2>
+<p>LoRA is used to teach:</p>
+<ul>
+<li>styles</li>
+<li>characters</li>
+<li>objects</li>
+<li>aesthetics</li>
+</ul>
+<p>It modifies how the diffusion model interprets prompts and denoises images.</p>
+<h2 id="in-tool-calling-models"><a class="header" href="#in-tool-calling-models">In tool-calling models</a></h2>
+<p>LoRA is used to teach:</p>
+<ul>
+<li>when to call tools</li>
+<li>which tool to use</li>
+<li>how to produce arguments</li>
+<li>how to follow structured schemas</li>
+</ul>
+<p>It modifies how the language model performs structured reasoning and action formatting.</p>
+<hr>
+<h1 id="one-sentence-summary"><a class="header" href="#one-sentence-summary">One-sentence summary</a></h1>
+<blockquote>
+<p><strong>LoRA is a lightweight fine-tuning method that learns a small low-rank “patch” for a frozen base model, making it ideal for cheaply specializing image models toward styles/concepts and language models toward reliable tool-calling behavior.</strong></p>
+</blockquote>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="introduction-1"><a class="header" href="#introduction-1">Introduction</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="random-links-and-notes"><a class="header" href="#random-links-and-notes">Random Links and Notes</a></h1>
-<p>I’ve based my architecture on OpenClaw and ZeroClaw.</p>
-<p>OpenClaw architecture:
-https://docs.openclaw.ai/gateway/protocol</p>
-<p>ZeroClaw architecture:
-https://github.com/zeroclaw-labs/zeroclaw/blob/41dd23175fe991adf1ee1a5693eff69e09ef2a3a/docs/assets/architecture-diagrams.md</p>
-<p>Memory system:
-https://github.com/zeroclaw-labs/zeroclaw/blob/41dd23175fe991adf1ee1a5693eff69e09ef2a3a/docs/assets/architecture-diagrams.md#8-memory-system-architecture</p>
 
                     </main>
 

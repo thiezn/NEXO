@@ -1,5 +1,6 @@
 //! Hugging Face-backed model downloads into NEXO's local model store.
 
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -105,9 +106,14 @@ pub async fn pull_model(
         resolved_files.extend(resolve_model_file(&api, file).await?);
     }
 
-    let mut files_to_download = Vec::new();
+    let mut resolved_by_path = BTreeMap::new();
     for file in resolved_files {
         let clean_path = models_dir.join(storage_path(manifest, &file.hf_filename));
+        resolved_by_path.insert(clean_path, file);
+    }
+
+    let mut files_to_download = Vec::new();
+    for (clean_path, file) in resolved_by_path {
         if !force && file_is_present(&clean_path, file.size_bytes) {
             eprintln!(
                 "  skipping {} (already downloaded{})",
@@ -162,8 +168,9 @@ pub async fn pull_model(
     }
 
     while let Some(result) = in_flight.join_next().await {
-        let (component, clean_path) = result
-            .map_err(|error| DownloadError::FilePlacement(format!("download task failed: {error}")))??;
+        let (component, clean_path) = result.map_err(|error| {
+            DownloadError::FilePlacement(format!("download task failed: {error}"))
+        })??;
         downloads.push((component, clean_path));
 
         if let Some(task) = pending.next() {

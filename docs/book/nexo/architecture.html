@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-240f1b22.js";
+            window.path_to_searchindex_js = "../searchindex-ef2e75da.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-aa7fd050.js"></script>
+        <script src="../toc-af1dea89.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -176,154 +176,261 @@
                     <main>
                         <h1 id="gateway-architecture"><a class="header" href="#gateway-architecture">Gateway architecture</a></h1>
 <h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>NEXO is gateway-centric. A single long-lived <strong>Gateway</strong> accepts WebSocket
+connections from user clients and nodes, owns durable state, routes model inference,
+and coordinates tool execution. There is no peer-to-peer client or node transport in
+the current design.</p>
+<p>The current Rust runtime is split across shared contracts and executable actors:</p>
 <ul>
-<li>A single long‑lived <strong>Gateway</strong> is the heart of the system.</li>
-<li>Control-plane clients (macOS/iOS app, CLI) connect to the
-Gateway over <strong>WebSocket</strong> on the configured bind host (default
-<code>127.0.0.1:6969</code>).</li>
-<li><strong>Nodes</strong> (macOS/iOS/headless) also connect over <strong>WebSocket</strong>, but
-declare <code>role: node</code> with explicit capabilities/commands.</li>
-<li>There is no peer-to-peer client transport. Client-to-client messaging is
-routed through the gateway.</li>
+<li><code>nexo-core</code> defines canonical Rust contracts for messages, tools, model
+descriptors, inference requests/responses, runs, and rounds.</li>
+<li><code>nexo-ws-schema</code> defines the JSON WebSocket protocol frames, methods, event
+payloads, and generated schema surface.</li>
+<li><code>nexo-gateway</code> runs the WebSocket daemon, SQLite persistence, prompt storage,
+cron scheduler, run loop, and gateway-native tools.</li>
+<li><code>nexo-node</code> connects to the Gateway, registers tools, loads local models, and
+executes <code>run.round</code> through <code>nexo-ai</code>.</li>
+<li><code>nexo-ai</code> is the library-first local inference runtime that adapts <code>nexo-core</code>
+requests to <code>mistralrs-core</code>.</li>
 </ul>
-<h2 id="components-and-flows"><a class="header" href="#components-and-flows">Components and flows</a></h2>
-<h3 id="gateway-daemon"><a class="header" href="#gateway-daemon">Gateway (daemon)</a></h3>
-<ul>
-<li>Maintains connections to clients and nodes</li>
-<li>Exposes a typed WS API (requests, responses, server‑push events).</li>
-<li>Validates inbound frames against JSON Schema.</li>
-<li>Emits events like <code>run</code>, <code>message</code>, <code>presence</code>, <code>heartbeat</code>, <code>cron</code>, <code>tick</code>, <code>shutdown</code>.</li>
-</ul>
-<h3 id="clients-macos--ios-app--cli"><a class="header" href="#clients-macos--ios-app--cli">Clients (macOS / iOS app / CLI)</a></h3>
-<ul>
-<li>One WS connection per client.</li>
-<li>Provide a user routing identity in <code>connect</code>; today the gateway uses <code>client.id</code> for
-<code>role: "user"</code> connections when routing directed messages and associating sessions.
-Multiple connected peers can share the same <code>client.id</code>, in which case all of them
-receive directed <code>message</code> events. <code>device.id</code> identifies the concrete device.</li>
-<li>Send requests (<code>health</code>, <code>status</code>, <code>send</code>, <code>run.start</code>, <code>run.stop</code>, <code>run.instructions.append</code>, <code>system-presence</code>).</li>
-<li>Subscribe to events (<code>tick</code>, <code>run</code>, <code>message</code>, <code>presence</code>, <code>shutdown</code>).</li>
-</ul>
-<h3 id="nodes-macos--ios--headless"><a class="header" href="#nodes-macos--ios--headless">Nodes (macOS / iOS / headless)</a></h3>
-<ul>
-<li>Connect to the <strong>same WS server</strong> with <code>role: node</code>.</li>
-<li>Provide a device identity in <code>connect</code>; pairing is <strong>device‑based</strong> (role <code>node</code>)</li>
-<li>After handshake, register full tool specs via <code>tools.register</code>.</li>
-<li>Listen for <code>tools.execute</code> requests forwarded by the gateway.</li>
-<li>Handle <code>run.round</code> inference requests from the gateway loop runner.</li>
-<li>Respond to <code>model.load</code> / <code>model.unload</code> commands; push <code>model.status</code> updates.</li>
-<li>Expose commands like <code>epub_extractor.*</code>, <code>echo.*</code>, <code>ping</code>.</li>
-<li>Automatically reconnect and re-register on disconnect.</li>
-<li>On macOS, nexo-node also starts and monitors local inference servers (llama-server, etc.). See <a href="/nexo/model_management.html">Model Management</a> §6.</li>
-</ul>
-<h2 id="connection-lifecycle-single-client"><a class="header" href="#connection-lifecycle-single-client">Connection lifecycle (single client)</a></h2>
-<pre class="mermaid">sequenceDiagram
-    participant Client
-    participant Gateway
-
-    Client-&gt;&gt;Gateway: request:connect
-    Gateway--&gt;&gt;Client: response (ok)
-    Note right of Gateway: or response error + close
-    Note left of Client: payload=hello-ok&lt;br&gt;snapshot: presence + health
-
-    Gateway--&gt;&gt;Client: event:presence
-    Gateway--&gt;&gt;Client: event:tick
-
-    Client-&gt;&gt;Gateway: request:run.start
-    Gateway--&gt;&gt;Client: response:run.start&lt;br&gt;ack {runId, sessionId, status:"accepted"}
-    Gateway--&gt;&gt;Client: event:run&lt;br&gt;(streaming)
-    Gateway--&gt;&gt;Client: event:run&lt;br&gt;{status:"completed"}
+<h2 id="component-view"><a class="header" href="#component-view">Component View</a></h2>
+<pre class="mermaid">graph TD
+    Client[User clients&lt;br/&gt;CLI / macOS / iOS] &lt;--&gt;|WebSocket JSON protocol| Gateway[Gateway daemon&lt;br/&gt;nexo-gateway]
+    Node[Node runtime&lt;br/&gt;nexo-node] &lt;--&gt;|same WebSocket server| Gateway
+    Gateway --&gt; SQLite[(SQLite&lt;br/&gt;identity, sessions, runs, rounds, tools, cron)]
+    Gateway --&gt; GitStorage[(Git-backed storage&lt;br/&gt;PROMPTS and NOTES)]
+    Gateway --&gt; GatewayTools[Gateway-native tools&lt;br/&gt;notes and io]
+    Node --&gt; NexoAi[nexo-ai&lt;br/&gt;mistralrs-core adapter]
+    NexoAi --&gt; Models[(Local model storage&lt;br/&gt;nexo-model-mgmt)]
 </pre>
 
-<h2 id="node-registration--tool-execution"><a class="header" href="#node-registration--tool-execution">Node registration + tool execution</a></h2>
+<h2 id="gateway"><a class="header" href="#gateway">Gateway</a></h2>
+<p>The Gateway daemon binds to the configured host and port, defaulting to
+<code>127.0.0.1:6969</code>, and requires the configured auth header during WebSocket upgrade.</p>
+<p>Current responsibilities:</p>
+<ul>
+<li>Maintain connected user and node peers in memory.</li>
+<li>Persist device and user identity, sessions, runs, run rounds, conversation entries,
+tool traces, run summaries, capability locks, and cron jobs in SQLite.</li>
+<li>Maintain in-memory registries for node-hosted tools, pending forwarded requests,
+loaded models, and available models.</li>
+<li>Expose typed request/response methods from <code>nexo-ws-schema</code>.</li>
+<li>Spawn the serialized run task (<code>RunHandle</code>) and cron scheduler at startup.</li>
+<li>Register gateway-native note and IO tools at startup.</li>
+<li>Route <code>run.round</code>, <code>tools.execute</code>, <code>model.load</code>, <code>model.unload</code>, and
+<code>image.analyze</code> requests to nodes when needed.</li>
+<li>Emit <code>tick</code>, <code>presence</code>, <code>message</code>, <code>run</code>, <code>cron</code>, <code>heartbeat</code>, and <code>shutdown</code>
+events when those flows occur.</li>
+</ul>
+<p>The Gateway deserializes inbound payloads into typed schema structs. Runtime JSON
+Schema files can be generated from <code>nexo-ws-schema</code>; request handling itself is based
+on typed deserialization and handler-level validation.</p>
+<h2 id="clients"><a class="header" href="#clients">Clients</a></h2>
+<p>Clients connect with <code>role: "user"</code>.</p>
+<p>Current behavior:</p>
+<ul>
+<li>One WebSocket connection represents one connected peer.</li>
+<li><code>client.id</code> is the current user routing identity for sessions and directed
+messages.</li>
+<li>Multiple connected peers may share a <code>client.id</code>; all matching peers receive
+directed <code>message</code> events for that target.</li>
+<li><code>device.id</code> identifies the concrete device and is persisted with first/last seen
+timestamps.</li>
+<li>Clients can call <code>health</code>, <code>status</code>, <code>send</code>, <code>session.*</code>, <code>run.*</code>, <code>tools.*</code>,
+<code>cron.*</code>, <code>prompt.*</code>, <code>image.analyze</code>, and <code>system-presence</code> methods according to
+their role and handler support.</li>
+</ul>
+<h2 id="nodes"><a class="header" href="#nodes">Nodes</a></h2>
+<p>Nodes connect to the same WebSocket server with <code>role: "node"</code>.</p>
+<p>Current behavior:</p>
+<ul>
+<li>Nodes provide a device identity, capability labels, command names, and available
+model IDs in <code>connect</code>.</li>
+<li>After handshake, nodes register full <code>nexo-core</code> tool definitions with
+<code>tools.register</code>.</li>
+<li>Nodes publish loaded model descriptors and available model IDs with <code>model.status</code>.</li>
+<li>Nodes handle Gateway-directed <code>tools.execute</code>, <code>run.round</code>, <code>image.analyze</code>,
+<code>model.load</code>, and <code>model.unload</code> requests.</li>
+<li>Nodes execute at most one inference-class request at a time. A second <code>run.round</code> or
+<code>image.analyze</code> receives <code>node_busy</code>.</li>
+<li>Nodes automatically reconnect and must re-register tools and republish model status
+after reconnecting.</li>
+</ul>
+<p>The current local inference path is embedded in the node instead of managed as a
+separate external model-server process. <code>nexo-node</code> embeds <code>nexo-ai</code>, which builds a
+local <code>NexoAi</code> service from downloaded model configs and submits shared <code>nexo-core</code>
+inference requests to <code>mistralrs-core</code>.</p>
+<h2 id="connection-lifecycle"><a class="header" href="#connection-lifecycle">Connection Lifecycle</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant Peer as Client or Node
+    participant Gateway
+    participant DB as SQLite
+
+    Peer-&gt;&gt;Gateway: request connect {role, client, device?, models?}
+    Gateway-&gt;&gt;Gateway: protocol/auth/typed payload checks
+    Gateway-&gt;&gt;DB: upsert device; upsert user when role=user
+    Gateway--&gt;&gt;Peer: response hello-ok {protocol, policy}
+    Gateway--&gt;&gt;Peer: event presence {status: online}
+    Gateway--&gt;&gt;Peer: event tick ...
+
+    alt peer disconnects
+        Gateway--&gt;&gt;Peer: close
+        Gateway-&gt;&gt;Gateway: remove peer, deregister node tools, forget loaded/available models
+        Gateway--&gt;&gt;Peer: event presence {status: offline}
+    end
+</pre>
+
+<h2 id="node-registration-and-tool-routing"><a class="header" href="#node-registration-and-tool-routing">Node Registration and Tool Routing</a></h2>
 <pre class="mermaid">sequenceDiagram
     participant Node
     participant Gateway
     participant User
 
-    Node-&gt;&gt;Gateway: request:connect (role=node, capabilities)
-    Gateway--&gt;&gt;Node: response:hello-ok
-    Node-&gt;&gt;Gateway: request:tools.register (full specs)
-    Gateway--&gt;&gt;Node: response {registered: N}
-    Note right of Gateway: Tools stored in memory registry
+    Node-&gt;&gt;Gateway: request connect {role: node, capabilities, commands, models}
+    Gateway--&gt;&gt;Node: response hello-ok
+    Node-&gt;&gt;Gateway: request tools.register {tools: [ToolDefinition...]}
+    Gateway--&gt;&gt;Node: response {registered}
+    Node-&gt;&gt;Gateway: request model.status {loadedModels, availableModels}
+    Gateway--&gt;&gt;Node: response {acknowledged: true}
 
-    User-&gt;&gt;Gateway: request:tools.catalog
-    Gateway--&gt;&gt;User: response {tools: [...]}
+    User-&gt;&gt;Gateway: request tools.catalog
+    Gateway--&gt;&gt;User: response {tools: [gateway + node tools]}
 
-    User-&gt;&gt;Gateway: request:tools.execute {tool, args}
-    Gateway-&gt;&gt;Node: forwarded:tools.execute {tool, args}
-    Node--&gt;&gt;Gateway: response {success, output}
-    Gateway--&gt;&gt;User: relayed response {success, output}
-
-    Note over Node,Gateway: On disconnect: gateway deregisters&lt;br&gt;all tools from this node
+    User-&gt;&gt;Gateway: request tools.execute {tool, args, idempotencyKey}
+    alt gateway-native tool exists
+        Gateway-&gt;&gt;Gateway: execute local ToolRegistry
+    else node-hosted tool exists
+        Gateway-&gt;&gt;Node: forwarded request tools.execute
+        Node--&gt;&gt;Gateway: response {success, output, error?}
+    end
+    Gateway--&gt;&gt;User: response {success, output, error?}
 </pre>
 
-<h2 id="client-to-client-messaging"><a class="header" href="#client-to-client-messaging">Client-to-client messaging</a></h2>
+<h2 id="run-loop"><a class="header" href="#run-loop">Run Loop</a></h2>
+<p>The Gateway spawns a single <strong>RunHandle</strong> at startup. Request handlers submit run
+commands to this background task over an mpsc channel. The task processes commands
+sequentially.</p>
+<p>When a client sends <code>run.start</code>:</p>
+<ol>
+<li>The handler creates or resolves a session and creates a <code>runs</code> row.</li>
+<li>The handler submits <code>RunCommand::StartRun</code> with input, optional instructions,
+optional model ID, prompt collection, and typed reasoning settings.</li>
+<li>The run task persists transcript entries and executes rounds.</li>
+<li>Each round assembles context, routes inference, sends one <code>run.round</code>, handles
+either final content or tool calls, and repeats until terminal status or queueing.</li>
+<li>Run lifecycle events are broadcast to connected clients.</li>
+</ol>
+<p>Details: <a href="agent_loop.html">Run Loop</a></p>
+<pre class="mermaid">flowchart TD
+    Start[Client run.start] --&gt; Persist[Create session/run and persist input]
+    Persist --&gt; Round[Create round and build context]
+    Round --&gt; Route{Inference route?}
+    Route --&gt;|loaded model| Infer[Send run.round]
+    Route --&gt;|requested model available| Load[Send model.load]
+    Load --&gt; Infer
+    Route --&gt;|none| Queue[Mark run queued]
+    Infer --&gt; Decision{Response type}
+    Decision --&gt;|final content| Complete[Persist assistant response and complete run]
+    Decision --&gt;|tool calls| Tools[Execute tools sequentially today]
+    Tools --&gt; Round
+    Decision --&gt;|error| Fail[Mark run failed]
+</pre>
+
+<h2 id="model-loading-and-local-inference"><a class="header" href="#model-loading-and-local-inference">Model Loading and Local Inference</a></h2>
+<p><code>nexo-model-mgmt</code> owns model manifests, local storage paths, downloads, and reusable
+<code>models</code> CLI commands. <code>nexo-ai</code> converts downloaded manifests into
+<code>RegisteredModelConfig</code> values and builds a runtime from those configs. <code>nexo-node</code>
+uses those configs; it should not construct loader configs itself.</p>
+<p>Current model flow:</p>
+<ol>
+<li>A node discovers downloaded models and includes their IDs in the <code>connect</code> payload.</li>
+<li>The node may auto-load startup models based on configured startup capabilities.</li>
+<li>The node sends <code>model.status</code> with loaded <code>ModelDescriptor</code> values and available
+model IDs.</li>
+<li>If a run requests a model that is available but not loaded, the Gateway sends
+<code>model.unload</code> for other loaded models on that node, then <code>model.load</code> for the
+requested model.</li>
+<li><code>nexo-node</code> rebuilds its embedded <code>NexoAi</code> service when loaded model state changes
+and sends a fresh <code>model.status</code>.</li>
+</ol>
+<h2 id="sessions-and-prompt-collections"><a class="header" href="#sessions-and-prompt-collections">Sessions and Prompt Collections</a></h2>
+<p>Sessions are durable conversation containers owned by a user identity.</p>
+<ul>
+<li>Sessions are created explicitly with <code>session.create</code> or implicitly by <code>run.start</code>.</li>
+<li><code>session.list</code> returns prior sessions for the calling user’s <code>client.id</code>.</li>
+<li><code>session.get</code> returns the persisted conversation messages for a session.</li>
+<li><code>session.clear</code> clears session data.</li>
+<li>A session may reference <code>prompt_collection_id</code>.</li>
+<li>Prompt documents live in git-backed <code>PROMPTS/</code>.</li>
+<li>Prompt collection metadata lives in git-backed <code>PROMPTS/collections.json</code> as a bare
+JSON array. The loader still accepts the old wrapped shape for existing storage.</li>
+</ul>
+<h2 id="gateway-native-tools"><a class="header" href="#gateway-native-tools">Gateway-Native Tools</a></h2>
+<p>Gateway-native tools execute inside the Gateway process and appear in <code>tools.catalog</code>
+with <code>source: "gateway"</code>. They are tried before node forwarding.</p>
+<p>Current gateway-native tool families:</p>
+<ul>
+<li><code>notes.*</code> from <code>nexo-notes</code>, backed by git storage.</li>
+<li><code>io.*</code> from <code>nexo-io</code>, covering filesystem, shell, and web-fetch style operations.</li>
+</ul>
+<p>Node tools are deregistered when the hosting peer disconnects. Gateway-native tools
+remain available for the life of the Gateway process.</p>
+<h2 id="capability-locks"><a class="header" href="#capability-locks">Capability Locks</a></h2>
+<p>The run loop currently uses advisory SQLite locks for tool capability families. The
+capability is the prefix before the first <code>.</code> in the tool name. Locks expire after 5
+minutes for crash recovery and are released after each tool call or when a run reaches
+a terminal state.</p>
+<p>The current implementation executes tool calls sequentially. Future scheduling should
+use <code>ToolExecutionConstraints</code> from <code>nexo-core</code> to parallelize read-only or explicitly
+parallel-safe tools.</p>
+<h2 id="cron-scheduler"><a class="header" href="#cron-scheduler">Cron Scheduler</a></h2>
+<p>A background scheduler runs every 60 seconds. When a due cron job fires, the Gateway:</p>
+<ol>
+<li>emits a <code>cron</code> event;</li>
+<li>creates or resolves a session;</li>
+<li>creates a run with thinking disabled;</li>
+<li>submits <code>RunCommand::StartRun</code> to the same serialized run task;</li>
+<li>updates cron timestamps to avoid retry storms.</li>
+</ol>
+<h2 id="client-to-client-messaging"><a class="header" href="#client-to-client-messaging">Client-to-Client Messaging</a></h2>
 <pre class="mermaid">sequenceDiagram
     participant Alice as Client A
     participant Gateway
     participant Bob as Client B
 
-    Alice-&gt;&gt;Gateway: request:send {target:"bob", payload:{...}}
-    Gateway--&gt;&gt;Alice: response {delivered:true}
-    Gateway--&gt;&gt;Bob: event:message {from:"alice", target:"bob", payload:{...}}
+    Alice-&gt;&gt;Gateway: request send {target: "bob", payload, idempotencyKey}
+    Gateway--&gt;&gt;Alice: response {delivered: true}
+    Gateway--&gt;&gt;Bob: event message {from: "alice", target: "bob", payload}
 </pre>
 
-<h2 id="run-loop"><a class="header" href="#run-loop">Run loop</a></h2>
-<p>The gateway spawns a <strong>RunHandle</strong> at startup — a background task that processes
-run commands sequentially. When a client sends a <code>run.start</code> request:</p>
-<ol>
-<li>The handler creates (or resumes) a session and a run row in SQLite</li>
-<li>It submits a <code>RunCommand::StartRun</code> to the run task via an mpsc channel</li>
-<li>The run task executes the loop: transcript assembly → inference → tool calls → repeat</li>
-<li>Lifecycle events (<code>thinking</code>, <code>tool_call</code>, <code>streaming</code>, <code>completed</code>) are broadcast
-to all connected clients via the event channel</li>
-</ol>
-<p>Details: <a href="/nexo/agent_loop.html">Run Loop</a></p>
-<h3 id="capability-locking"><a class="header" href="#capability-locking">Capability locking</a></h3>
-<p>When the run loop invokes a node capability (inference or tool execution), it acquires
-an advisory lock in the <code>capability_locks</code> SQLite table. This prevents concurrent
-run executions from using the same capability. Locks expire after 5 minutes for crash
-recovery.</p>
-<h3 id="cron-scheduler"><a class="header" href="#cron-scheduler">Cron scheduler</a></h3>
-<p>A background scheduler task runs alongside the run loop, checking every 60 seconds for
-due cron jobs. When a job fires, it emits a <code>cron</code> event and submits a run command
-to the run task.</p>
-<h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
-<p>A client can have multiple sessions and maintains a <code>sessionId</code> locally. Sessions are
-created explicitly via <code>session.create</code> or implicitly when a <code>run.start</code> request is sent
-without a <code>sessionId</code>. After a client restart, it can query <code>session.list</code> to resume
-previous transcript sessions.</p>
-<h2 id="wire-protocol-summary"><a class="header" href="#wire-protocol-summary">Wire protocol (summary)</a></h2>
+<p><code>send</code> routes to connected user peers whose <code>client.id</code> matches the target, excluding
+the origin peer. The current <code>send</code> handler reports whether at least one matching peer
+was reached.</p>
+<h2 id="wire-protocol-summary"><a class="header" href="#wire-protocol-summary">Wire Protocol Summary</a></h2>
 <ul>
-<li>
-<p>Transport: WebSocket, text frames with JSON payloads.</p>
-</li>
-<li>
-<p>First frame <strong>must</strong> be <code>connect</code>.</p>
-</li>
-<li>
-<p>After handshake:</p>
+<li>Transport is WebSocket text frames containing JSON.</li>
+<li>The first frame <strong>MUST</strong> be <code>connect</code>.</li>
+<li>After handshake, requests use <code>{type: "request", id, method, params}</code>.</li>
+<li>Responses use <code>{type: "response", id, ok, payload | error}</code>.</li>
+<li>Events use <code>{type: "event", event, payload, seq?}</code>.</li>
+<li>Multiword fields use camelCase on the wire, such as <code>sessionId</code>, <code>modelId</code>,
+<code>toolCalls</code>, <code>thinkingContent</code>, and <code>idempotencyKey</code>.</li>
+<li>Nodes <strong>MUST</strong> connect with <code>role: "node"</code> and should advertise tools, commands,
+and available model IDs.</li>
+</ul>
+<p>Idempotency keys are part of the public shape for side-effecting requests such as
+<code>run.start</code>, <code>send</code>, and <code>tools.execute</code>. Today <code>run.start</code> stores a unique
+idempotency key on the <code>runs</code> row; broader replay/dedupe behavior is still an open
+implementation area.</p>
+<h2 id="pairing-and-identity"><a class="header" href="#pairing-and-identity">Pairing and Identity</a></h2>
+<p>All WebSocket peers may include a device identity on <code>connect</code>.</p>
 <ul>
-<li>Requests: <code>{type:"request", id, method, params}</code> → <code>{type:"response", id, ok, payload|error}</code></li>
-<li>Events: <code>{type:"event", event, payload, seq?, stateVersion?}</code></li>
+<li>For nodes, the Gateway stores the device identity and role.</li>
+<li>For users, the Gateway stores both the user identity (<code>client.id</code>) and the concrete
+<code>device.id</code>.</li>
+<li>The persistent identity store tracks first-seen and last-seen timestamps.</li>
 </ul>
-</li>
-<li>
-<p>Idempotency keys are required for side‑effecting methods (<code>send</code>, <code>run.start</code>) to
-safely retry; the server keeps a short‑lived dedupe cache.</p>
-</li>
-<li>
-<p>Nodes must include <code>role: "node"</code> plus capabilities/commands in <code>connect</code>.</p>
-</li>
-</ul>
-<h2 id="pairing"><a class="header" href="#pairing">Pairing</a></h2>
-<ul>
-<li>All WS clients (users + nodes) include a <strong>device identity</strong> on <code>connect</code>.</li>
-<li>Users also provide a <strong>user identity</strong> (role <code>user</code>)</li>
-<li>The gateway stores the device identity for nodes, and the user identity + device identity for clients, in it’s persistent memory store, including the time it was first seen and last seen.</li>
-</ul>
-<p>Details: <a href="/nexo/gateway_protocol.html">Gateway protocol</a></p>
+<p>Details: <a href="/nexo/gateway_protocol.html">Gateway Protocol</a></p>
 
                     </main>
 
@@ -333,7 +440,7 @@ safely retry; the server keeps a short‑lived dedupe cache.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../nexo/gateway_protocol.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../nexo/agent_loop.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -347,7 +454,7 @@ safely retry; the server keeps a short‑lived dedupe cache.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../nexo/gateway_protocol.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../nexo/agent_loop.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
