@@ -19,9 +19,10 @@ GIT_UPDATE_PACKAGES=(
 )
 
 print_usage() {
-	echo "Usage: ./scripts/deploy.sh [target ...]"
+	echo "Usage: ./scripts/deploy.sh [--update-deps] [target ...]"
 	echo
 	echo "Deploy all targets when no arguments are provided."
+	echo "Use --update-deps to refresh git dependencies and run cargo clean before building."
 	echo "Valid targets: ${ALL_TARGETS[*]}"
 }
 
@@ -49,16 +50,29 @@ binary_for_target() {
 }
 
 
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-	print_usage
-	exit 0
-fi
+UPDATE_DEPS=false
+
+ARGS=()
+for arg in "$@"; do
+	case "$arg" in
+		"--help"|"-h")
+			print_usage
+			exit 0
+			;;
+		"--update-deps")
+			UPDATE_DEPS=true
+			;;
+		*)
+			ARGS+=("$arg")
+			;;
+	esac
+done
 
 DEPLOY_TARGETS=()
-if [[ "$#" -eq 0 ]]; then
+if [[ "${#ARGS[@]}" -eq 0 ]]; then
 	DEPLOY_TARGETS=("${ALL_TARGETS[@]}")
 else
-	for requested_target in "$@"; do
+	for requested_target in "${ARGS[@]}"; do
 		if ! is_valid_target "$requested_target"; then
 			echo "❌ Unknown deploy target: $requested_target"
 			print_usage
@@ -68,14 +82,15 @@ else
 	done
 fi
 
-# Clean up build artifacts
-# echo "Cleaning up previous build artifacts..."
-# cargo clean
+if [[ "$UPDATE_DEPS" == true ]]; then
+	echo "Refreshing git dependencies to their latest remote commits..."
+	for git_package in "${GIT_UPDATE_PACKAGES[@]}"; do
+		cargo update -p "$git_package"
+	done
 
-echo "Refreshing git dependencies to their latest remote commits..."
-for git_package in "${GIT_UPDATE_PACKAGES[@]}"; do
-	cargo update -p "$git_package"
-done
+	echo "Cleaning up previous build artifacts..."
+	cargo clean
+fi
 
 # First test and build the production apps
 # cargo test --release

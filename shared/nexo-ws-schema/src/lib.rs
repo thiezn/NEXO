@@ -25,22 +25,22 @@ pub use events::{
 pub use frame::Frame;
 pub use methods::PromptCollection;
 pub use methods::{
-    CronCreateParams, CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry,
-    CronListParams, CronListResponse, HealthParams, HealthResponse, ImageAnalyzeParams,
-    ImageAnalyzeResponse, Method, ModelLoadParams, ModelLoadResponse, ModelStatusParams,
-    ModelUnloadParams, ModelUnloadResponse, PromptCollectionCreateParams,
-    PromptCollectionCreateResponse, PromptCollectionDeleteParams, PromptCollectionDeleteResponse,
-    PromptCollectionListParams, PromptCollectionListResponse, PromptDocument,
-    PromptDocumentCreateParams, PromptDocumentCreateResponse, PromptDocumentDeleteParams,
-    PromptDocumentDeleteResponse, PromptDocumentEntry, PromptDocumentListParams,
-    PromptDocumentListResponse, RunInstructionsAppendParams, RunInstructionsAppendResponse,
-    RunRoundRequest, RunRoundResponse, RunRoundToolCall, RunStartParams, RunStartResponse,
-    RunStatus, RunStopParams, RunStopResponse, SendParams, SendResponse, SessionClearParams,
-    SessionClearResponse, SessionCreateParams, SessionCreateResponse, SessionEntry,
-    SessionGetParams, SessionGetResponse, SessionListParams, SessionListResponse, StatusParams,
-    StatusResponse, SystemPresenceParams, SystemPrompt, ToolEntry, ToolSpecEntry,
-    ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams, ToolsExecuteResponse,
-    ToolsRegisterParams, ToolsRegisterResponse,
+    AudioAnalyzeParams, AudioAnalyzeResponse, CronCreateParams, CronCreateResponse,
+    CronDeleteParams, CronDeleteResponse, CronEntry, CronListParams, CronListResponse,
+    HealthParams, HealthResponse, ImageAnalyzeParams, ImageAnalyzeResponse, Method,
+    ModelLoadParams, ModelLoadResponse, ModelStatusParams, ModelUnloadParams, ModelUnloadResponse,
+    PromptCollectionCreateParams, PromptCollectionCreateResponse, PromptCollectionDeleteParams,
+    PromptCollectionDeleteResponse, PromptCollectionListParams, PromptCollectionListResponse,
+    PromptDocument, PromptDocumentCreateParams, PromptDocumentCreateResponse,
+    PromptDocumentDeleteParams, PromptDocumentDeleteResponse, PromptDocumentEntry,
+    PromptDocumentListParams, PromptDocumentListResponse, RunInstructionsAppendParams,
+    RunInstructionsAppendResponse, RunRoundRequest, RunRoundResponse, RunRoundToolCall,
+    RunStartParams, RunStartResponse, RunStatus, RunStopParams, RunStopResponse, SendParams,
+    SendResponse, SessionClearParams, SessionClearResponse, SessionCreateParams,
+    SessionCreateResponse, SessionEntry, SessionGetParams, SessionGetResponse, SessionListParams,
+    SessionListResponse, StatusParams, StatusResponse, SystemPresenceParams, SystemPrompt,
+    ToolEntry, ToolSpecEntry, ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams,
+    ToolsExecuteResponse, ToolsRegisterParams, ToolsRegisterResponse,
 };
 pub use nexo_core::message::{ContentPart, ConversationMessage, MessageRole, TextPart};
 pub use nexo_core::model::ModelDescriptor;

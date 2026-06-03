@@ -89,6 +89,9 @@ pub enum Method {
     /// Client → gateway → node: analyze an image using the model's vision capabilities.
     #[serde(rename = "image.analyze")]
     ImageAnalyze,
+    /// Client → gateway → node: analyze an audio clip using the model's audio capabilities.
+    #[serde(rename = "audio.analyze")]
+    AudioAnalyze,
 }
 
 /// Run lifecycle status.
@@ -771,6 +774,9 @@ pub struct PromptCollectionDeleteResponse {
 pub struct ImageAnalyzeParams {
     /// Base64-encoded image data.
     pub image_data: String,
+    /// Optional media type for the encoded image, such as `image/png`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
     /// The prompt/question about the image.
     pub prompt: String,
     #[serde(default = "default_image_analyze_max_tokens")]
@@ -799,6 +805,55 @@ fn default_image_analyze_temperature() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageAnalyzeResponse {
+    /// Field value.
+    pub text: String,
+    /// Field value.
+    pub tokens_generated: usize,
+    /// Field value.
+    pub inference_time_ms: u64,
+}
+
+// -- audio.analyze --
+
+/// Parameters for `audio.analyze`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioAnalyzeParams {
+    /// Base64-encoded audio data.
+    pub audio_data: String,
+    /// Optional media type for the encoded audio, such as `audio/wav`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// Optional sample rate in hertz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_rate_hz: Option<u32>,
+    /// Optional channel count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_count: Option<u16>,
+    /// The prompt/question about the audio clip.
+    pub prompt: String,
+    #[serde(default = "default_audio_analyze_max_tokens")]
+    /// Field value.
+    pub max_tokens: usize,
+    #[serde(default = "default_audio_analyze_temperature")]
+    /// Field value.
+    pub temperature: f64,
+    /// Field value.
+    pub idempotency_key: String,
+}
+
+fn default_audio_analyze_max_tokens() -> usize {
+    4096
+}
+
+fn default_audio_analyze_temperature() -> f64 {
+    1.0
+}
+
+/// Response payload for `audio.analyze`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioAnalyzeResponse {
     /// Field value.
     pub text: String,
     /// Field value.

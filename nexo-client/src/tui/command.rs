@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use base64::Engine;
 use nexo_ws_schema::{
-    CronCreateParams, CronDeleteParams, ImageAnalyzeParams, PromptCollectionCreateParams,
-    PromptCollectionDeleteParams, PromptDocumentCreateParams, PromptDocumentDeleteParams,
-    RunStartParams, SendParams, SessionClearParams, SessionCreateParams, SessionGetParams,
-    SystemPresenceParams, ToolsExecuteParams,
+    AudioAnalyzeParams, CronCreateParams, CronDeleteParams, ImageAnalyzeParams,
+    PromptCollectionCreateParams, PromptCollectionDeleteParams, PromptDocumentCreateParams,
+    PromptDocumentDeleteParams, RunStartParams, SendParams, SessionClearParams,
+    SessionCreateParams, SessionGetParams, SystemPresenceParams, ToolsExecuteParams,
 };
+
+use crate::audio;
 
 pub struct CommandContext<'a> {
     pub current_session_id: Option<&'a str>,
@@ -40,6 +41,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "prompt collection delete",
     "system presence",
     "image analyze",
+    "audio analyze",
 ];
 
 #[derive(Debug, Clone)]
@@ -68,6 +70,7 @@ pub enum AppCommand {
     PromptCollectionDelete(PromptCollectionDeleteParams),
     SystemPresence(SystemPresenceParams),
     ImageAnalyze(ImageAnalyzeParams),
+    AudioAnalyze(AudioAnalyzeParams),
 }
 
 pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, String> {
@@ -134,6 +137,7 @@ pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, Str
             },
         })),
         "image analyze" => parse_image_analyze(args, context.workspace_root),
+        "audio analyze" => parse_audio_analyze(args, context.workspace_root),
         _ => Err(format!(
             "Unknown command '/{command}'. Use /help to see available commands."
         )),
@@ -154,6 +158,8 @@ Messaging:
 /send <target> <json>
 /run [--session <id>] [--model <id>] <prompt>
 /image analyze <@image-path|path> <prompt>
+/audio analyze <@audio-path|path> <prompt>
+/audio analyze --mic [--max-secs <seconds>] <prompt>
 
 Sessions:
 /session create [name]
@@ -185,6 +191,8 @@ Autocomplete:
 - Type plain text to run it as `/run <prompt>`.
 - Use @path in /run prompts to inline file contents.
 - Use @path as the image argument for /image analyze.
+- Use @path as the audio argument for /audio analyze.
+- Use /audio analyze --mic to record from microphone, then analyze.
 - Press F1 or type /help to open this help view.
 - Press Esc to close the help view or dismiss autocomplete.
 "
@@ -280,16 +288,138 @@ fn parse_image_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, 
     let image_path = resolve_path(workspace_root, image_path)?;
     let image_bytes = std::fs::read(&image_path)
         .map_err(|e| format!("Failed to read image '{}': {e}", image_path.display()))?;
-    let image_data = base64::engine::general_purpose::STANDARD.encode(image_bytes);
+    let image_data = encode_base64(&image_bytes);
 
     Ok(AppCommand::ImageAnalyze(ImageAnalyzeParams {
         image_data,
+        media_type: detect_image_media_type(&image_path),
         prompt: prompt.trim().to_string(),
         max_tokens: 4096,
         temperature: 1.0,
         visual_token_budget: None,
         idempotency_key: nexo_ws_schema::Frame::new_id(),
     }))
+}
+
+fn parse_audio_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, String> {
+    if args.is_empty() {
+        return Err(
+            "Usage: /audio analyze <@audio-path|path> <prompt> OR /audio analyze --mic [--max-secs <seconds>] <prompt>"
+                .into(),
+        );
+    }
+
+    let trimmed = args.trim();
+    if let Some(rest) = trimmed.strip_prefix("--mic") {
+        return parse_audio_analyze_mic(rest.trim_start());
+    }
+
+    let Some((audio_path, prompt)) = trimmed.split_once(' ') else {
+        return Err("Usage: /audio analyze <@audio-path|path> <prompt>".into());
+    };
+    let audio_path = resolve_path(workspace_root, audio_path)?;
+    let audio_bytes = std::fs::read(&audio_path)
+        .map_err(|e| format!("Failed to read audio '{}': {e}", audio_path.display()))?;
+    let buffer = audio::load_file(&audio_path)
+        .map_err(|e| format!("Failed to decode audio '{}': {e}", audio_path.display()))?;
+
+    Ok(AppCommand::AudioAnalyze(AudioAnalyzeParams {
+        audio_data: encode_base64(&audio_bytes),
+        media_type: detect_audio_media_type(&audio_path),
+        sample_rate_hz: Some(buffer.sample_rate),
+        channel_count: Some(buffer.channels),
+        prompt: prompt.trim().to_string(),
+        max_tokens: 4096,
+        temperature: 1.0,
+        idempotency_key: nexo_ws_schema::Frame::new_id(),
+    }))
+}
+
+fn parse_audio_analyze_mic(args: &str) -> Result<AppCommand, String> {
+    let mut max_secs = 8.0;
+    let mut prompt_parts = Vec::new();
+    let mut iter = args.split_whitespace().peekable();
+
+    while let Some(token) = iter.next() {
+        match token {
+            "--max-secs" => {
+                let value = iter.next().ok_or_else(|| {
+                    "Missing value for --max-secs in /audio analyze --mic".to_string()
+                })?;
+                max_secs = value
+                    .parse::<f64>()
+                    .map_err(|_| format!("Invalid --max-secs value '{value}'"))?;
+                if max_secs <= 0.0 {
+                    return Err("--max-secs must be greater than 0".to_string());
+                }
+            }
+            _ => prompt_parts.push(token),
+        }
+    }
+
+    if prompt_parts.is_empty() {
+        return Err("Usage: /audio analyze --mic [--max-secs <seconds>] <prompt>".into());
+    }
+
+    let config = audio::RecordConfig {
+        sample_rate: 16_000,
+        max_duration_secs: Some(max_secs),
+        silence_threshold_secs: Some(2.0),
+        silence_rms_threshold: 0.01,
+    };
+    let buffer = audio::record_microphone(&config)
+        .map_err(|e| format!("Failed to record microphone audio: {e}"))?
+        .to_mono();
+    let wav_bytes = audio::encode_wav(&buffer)
+        .map_err(|e| format!("Failed to encode recorded audio: {e}"))?;
+
+    Ok(AppCommand::AudioAnalyze(AudioAnalyzeParams {
+        audio_data: encode_base64(&wav_bytes),
+        media_type: Some("audio/wav".to_string()),
+        sample_rate_hz: Some(buffer.sample_rate),
+        channel_count: Some(buffer.channels),
+        prompt: prompt_parts.join(" "),
+        max_tokens: 4096,
+        temperature: 1.0,
+        idempotency_key: nexo_ws_schema::Frame::new_id(),
+    }))
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn detect_image_media_type(path: &Path) -> Option<String> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    let media_type = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "avif" => "image/avif",
+        "heic" => "image/heic",
+        _ => return None,
+    };
+    Some(media_type.to_string())
+}
+
+fn detect_audio_media_type(path: &Path) -> Option<String> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    let media_type = match extension.as_str() {
+        "wav" => "audio/wav",
+        "mp3" => "audio/mpeg",
+        "flac" => "audio/flac",
+        "ogg" => "audio/ogg",
+        "opus" => "audio/opus",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "webm" => "audio/webm",
+        _ => return None,
+    };
+    Some(media_type.to_string())
 }
 
 fn parse_json_args<T: serde::de::DeserializeOwned>(args: &str, usage: &str) -> Result<T, String> {
@@ -452,5 +582,90 @@ mod tests {
     fn parses_spaced_session_list_command() {
         let command = parse("/session list", context(Path::new("."))).unwrap();
         assert!(matches!(command, AppCommand::SessionList));
+    }
+
+    #[test]
+    fn parses_image_analyze_with_media_type() {
+        let temp_root =
+            std::env::temp_dir().join(format!("nexo-client-image-test-{}", std::process::id()));
+        fs::create_dir_all(&temp_root).unwrap();
+        let image_path = temp_root.join("sample.png");
+
+        let image = image::RgbImage::from_vec(1, 1, vec![255, 0, 0]).unwrap();
+        image.save(&image_path).unwrap();
+
+        let command = parse(
+            "/image analyze @sample.png what is this?",
+            context(&temp_root),
+        )
+        .unwrap();
+
+        match command {
+            AppCommand::ImageAnalyze(params) => {
+                assert_eq!(params.media_type.as_deref(), Some("image/png"));
+                assert_eq!(params.prompt, "what is this?");
+                assert!(!params.image_data.is_empty());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let _ = fs::remove_file(image_path);
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn parses_audio_analyze_from_file() {
+        let temp_root =
+            std::env::temp_dir().join(format!("nexo-client-audio-test-{}", std::process::id()));
+        fs::create_dir_all(&temp_root).unwrap();
+        let audio_path = temp_root.join("sample.wav");
+
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        {
+            let mut writer = hound::WavWriter::create(&audio_path, spec).unwrap();
+            for _ in 0..1600 {
+                writer.write_sample(0_i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        let command = parse(
+            "/audio analyze @sample.wav summarize this clip",
+            context(&temp_root),
+        )
+        .unwrap();
+
+        match command {
+            AppCommand::AudioAnalyze(params) => {
+                assert_eq!(params.media_type.as_deref(), Some("audio/wav"));
+                assert_eq!(params.sample_rate_hz, Some(16_000));
+                assert_eq!(params.channel_count, Some(1));
+                assert_eq!(params.prompt, "summarize this clip");
+                assert!(!params.audio_data.is_empty());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let _ = fs::remove_file(audio_path);
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn detects_media_types_from_file_extensions() {
+        assert_eq!(
+            detect_image_media_type(Path::new("photo.jpeg")).as_deref(),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            detect_audio_media_type(Path::new("speech.m4a")).as_deref(),
+            Some("audio/mp4")
+        );
+        assert_eq!(detect_image_media_type(Path::new("data.unknown")), None);
+        assert_eq!(detect_audio_media_type(Path::new("data.unknown")), None);
     }
 }

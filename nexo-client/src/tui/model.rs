@@ -86,6 +86,7 @@ pub enum PendingRequest {
     PromptCollectionDelete,
     SystemPresence,
     ImageAnalyze,
+    AudioAnalyze,
 }
 
 impl PendingRequest {
@@ -112,6 +113,7 @@ impl PendingRequest {
             Self::PromptCollectionDelete => "prompt collection delete",
             Self::SystemPresence => "system presence",
             Self::ImageAnalyze => "image analyze",
+            Self::AudioAnalyze => "audio analyze",
         }
     }
 }

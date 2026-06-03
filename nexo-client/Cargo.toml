@@ -23,6 +23,7 @@ tracing = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 dirs = { workspace = true }
 base64 = { workspace = true }
+anyhow = { workspace = true }
 ratatui = { version = "0", features = ["crossterm"] }
 crossterm = "0"
 

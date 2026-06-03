@@ -1,6 +1,7 @@
 //! WebSocket request handling for connected gateway peers.
 
 mod base;
+mod audio_analyze;
 mod connection;
 mod cron;
 mod dispatch;

@@ -5,7 +5,7 @@ use crate::server::state::SharedState;
 use nexo_ws_schema::{ErrorPayload, Frame, Method};
 use sqlx::SqlitePool;
 
-use super::{base, cron, image_analyze, prompt, run, send, session, status, tools};
+use super::{audio_analyze, base, cron, image_analyze, prompt, run, send, session, status, tools};
 
 /// Dispatch a method request from a connected peer.
 pub(crate) async fn dispatch_method(
@@ -66,6 +66,7 @@ pub(crate) async fn dispatch_method(
             },
         ),
         Method::ImageAnalyze => image_analyze::handle(request_id, params, state).await,
+        Method::AudioAnalyze => audio_analyze::handle(request_id, params, state).await,
         Method::SystemPresence => {
             ok_or_internal_error(request_id, serde_json::json!({"acknowledged": true}))
         }

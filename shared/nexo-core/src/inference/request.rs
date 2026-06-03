@@ -2,9 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::MetadataMap;
 use crate::ids::{RequestId, RoundId, RunId, SessionId};
-use crate::message::{Conversation, MediaSource};
+use crate::message::{
+    AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
+    MessageRole, TextPart,
+};
 use crate::model::{ModelSelection, ReasoningSettings};
 use crate::tools::{ToolChoice, ToolDefinition};
+use crate::ModelCapability;
 
 use super::{OutputConstraint, SamplingConfig, StreamingMode};
 
@@ -116,6 +120,144 @@ pub struct GenerateRequest {
 
     /// Additional request metadata.
     pub metadata: MetadataMap,
+}
+
+impl GenerateRequest {
+    /// Build a round-based conversational generation request.
+    pub fn new_round(
+        request_id: RequestId,
+        session_id: SessionId,
+        run_id: RunId,
+        round_id: RoundId,
+        model: ModelSelection,
+        messages: Vec<ConversationMessage>,
+        tools: Vec<ToolDefinition>,
+        tool_choice: ToolChoice,
+        reasoning: ReasoningSettings,
+    ) -> Self {
+        Self {
+            request_id: Some(request_id),
+            session_id: Some(session_id),
+            run_id: Some(run_id),
+            round_id: Some(round_id),
+            model,
+            conversation: Conversation {
+                messages,
+                metadata: MetadataMap::new(),
+            },
+            tools,
+            tool_choice,
+            reasoning,
+            output_constraint: OutputConstraint::None,
+            sampling: SamplingConfig::default(),
+            streaming: StreamingMode::Buffered,
+            metadata: MetadataMap::new(),
+        }
+    }
+
+    /// Build a single-turn image analysis generation request.
+    pub fn new_image_analyze(
+        request_id: RequestId,
+        image_data: String,
+        media_type: Option<String>,
+        prompt: String,
+        max_output_tokens: usize,
+        temperature: f32,
+    ) -> Self {
+        Self {
+            request_id: Some(request_id),
+            session_id: None,
+            run_id: None,
+            round_id: None,
+            model: ModelSelection {
+                specific_model: None,
+                required_capabilities: vec![
+                    ModelCapability::TextGeneration,
+                    ModelCapability::ImageInput,
+                ],
+                preferred_capabilities: Vec::new(),
+            },
+            conversation: Conversation {
+                messages: vec![ConversationMessage {
+                    role: MessageRole::User,
+                    parts: vec![
+                        ContentPart::Image(ImageInput {
+                            source: MediaSource::Base64(image_data),
+                            media_type,
+                        }),
+                        ContentPart::Text(TextPart { text: prompt }),
+                    ],
+                    metadata: MetadataMap::new(),
+                }],
+                metadata: MetadataMap::new(),
+            },
+            tools: Vec::new(),
+            tool_choice: ToolChoice::Disabled,
+            reasoning: ReasoningSettings::default(),
+            output_constraint: OutputConstraint::None,
+            sampling: SamplingConfig {
+                max_output_tokens: Some(max_output_tokens),
+                temperature: Some(temperature),
+                ..SamplingConfig::default()
+            },
+            streaming: StreamingMode::Buffered,
+            metadata: MetadataMap::new(),
+        }
+    }
+
+    /// Build a single-turn audio analysis generation request.
+    pub fn new_audio_analyze(
+        request_id: RequestId,
+        audio_data: String,
+        media_type: Option<String>,
+        sample_rate_hz: Option<u32>,
+        channel_count: Option<u16>,
+        prompt: String,
+        max_output_tokens: usize,
+        temperature: f32,
+    ) -> Self {
+        Self {
+            request_id: Some(request_id),
+            session_id: None,
+            run_id: None,
+            round_id: None,
+            model: ModelSelection {
+                specific_model: None,
+                required_capabilities: vec![
+                    ModelCapability::TextGeneration,
+                    ModelCapability::AudioInput,
+                ],
+                preferred_capabilities: Vec::new(),
+            },
+            conversation: Conversation {
+                messages: vec![ConversationMessage {
+                    role: MessageRole::User,
+                    parts: vec![
+                        ContentPart::Audio(AudioInput {
+                            source: MediaSource::Base64(audio_data),
+                            media_type,
+                            sample_rate_hz,
+                            channel_count,
+                        }),
+                        ContentPart::Text(TextPart { text: prompt }),
+                    ],
+                    metadata: MetadataMap::new(),
+                }],
+                metadata: MetadataMap::new(),
+            },
+            tools: Vec::new(),
+            tool_choice: ToolChoice::Disabled,
+            reasoning: ReasoningSettings::default(),
+            output_constraint: OutputConstraint::None,
+            sampling: SamplingConfig {
+                max_output_tokens: Some(max_output_tokens),
+                temperature: Some(temperature),
+                ..SamplingConfig::default()
+            },
+            streaming: StreamingMode::Buffered,
+            metadata: MetadataMap::new(),
+        }
+    }
 }
 
 /// A request for one or more embedding vectors.
@@ -315,4 +457,57 @@ pub struct GeneratedAudio {
 
     /// The number of audio channels, if known.
     pub channel_count: Option<u16>,
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn new_image_analyze_builds_expected_message() {
+        let request = GenerateRequest::new_image_analyze(
+            RequestId::from("req-1"),
+            "abcd".to_string(),
+            Some("image/png".to_string()),
+            "describe this image".to_string(),
+            512,
+            0.3,
+        );
+
+        assert_eq!(request.request_id, Some(RequestId::from("req-1")));
+        assert_eq!(request.model.required_capabilities.len(), 2);
+        assert_eq!(request.sampling.max_output_tokens, Some(512));
+        assert_eq!(request.sampling.temperature, Some(0.3));
+
+        let message = &request.conversation.messages[0];
+        assert!(matches!(message.role, MessageRole::User));
+        assert!(matches!(message.parts[0], ContentPart::Image(_)));
+        assert!(matches!(message.parts[1], ContentPart::Text(_)));
+    }
+
+    #[test]
+    fn new_audio_analyze_builds_expected_message() {
+        let request = GenerateRequest::new_audio_analyze(
+            RequestId::from("req-2"),
+            "efgh".to_string(),
+            Some("audio/wav".to_string()),
+            Some(16_000),
+            Some(1),
+            "summarize this audio".to_string(),
+            1024,
+            0.8,
+        );
+
+        assert_eq!(request.request_id, Some(RequestId::from("req-2")));
+        assert_eq!(request.model.required_capabilities.len(), 2);
+        assert_eq!(request.sampling.max_output_tokens, Some(1024));
+        assert_eq!(request.sampling.temperature, Some(0.8));
+
+        let message = &request.conversation.messages[0];
+        assert!(matches!(message.role, MessageRole::User));
+        assert!(matches!(message.parts[0], ContentPart::Audio(_)));
+        assert!(matches!(message.parts[1], ContentPart::Text(_)));
+    }
 }

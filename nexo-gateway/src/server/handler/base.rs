@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 pub(super) const IMAGE_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(180);
+pub(super) const AUDIO_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Build an ok response, falling back to an internal_error response on serialization failure.
 pub(super) fn ok_or_internal_error(request_id: &str, payload: impl serde::Serialize) -> Frame {

@@ -5,18 +5,16 @@ use futures_util::StreamExt;
 use nexo_ai::{NexoAi, NexoAiConfig, RegisteredModelConfig, RuntimeConfig, StaticModelRegistry};
 use nexo_core::inference::request::GenerateRequest;
 use nexo_core::{
-    ContentPart, Conversation, ConversationMessage, FinishReason, GenerateDelta, ImageInput,
-    InferenceEngine, InferenceRequest, InferenceResponse, InferenceStream, MediaSource,
-    MessageRole, MetadataMap, ModelCapability, ModelDescriptor, ModelId, ModelSelection,
-    OutputConstraint, PerformanceMetrics, ReasoningSettings, RequestId, RoundId, RunId,
-    SamplingConfig, SessionId, StreamingMode, TextPart, ThinkingMode, TokenUsage, ToolCall,
-    ToolCallDelta, ToolCallId, ToolChoice,
+    ContentPart, ConversationMessage, FinishReason, GenerateDelta, InferenceEngine,
+    InferenceRequest, InferenceResponse, InferenceStream, MessageRole, ModelCapability,
+    ModelDescriptor, ModelId, ModelSelection, PerformanceMetrics, RequestId, RoundId, RunId,
+    SessionId, TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId, ToolChoice,
 };
 use nexo_ws_client::WriteHalf;
 use nexo_ws_schema::{
-    ErrorPayload, Frame, ImageAnalyzeParams, ImageAnalyzeResponse, Method, ModelLoadParams,
-    ModelLoadResponse, ModelStatusParams, ModelUnloadParams, ModelUnloadResponse, RunRoundRequest,
-    RunRoundResponse, RunRoundToolCall,
+    AudioAnalyzeParams, AudioAnalyzeResponse, ErrorPayload, Frame, ImageAnalyzeParams,
+    ImageAnalyzeResponse, Method, ModelLoadParams, ModelLoadResponse, ModelStatusParams,
+    ModelUnloadParams, ModelUnloadResponse, RunRoundRequest, RunRoundResponse, RunRoundToolCall,
 };
 use tokio::sync::Mutex;
 
@@ -407,13 +405,62 @@ pub(super) async fn queue_image_analyze(
     };
 
     tracing::info!("Analyzing image (prompt: '{:.80}')", params.prompt);
-    let request = image_analyze_request(request_id, params);
+    let request = InferenceRequest::Generate(GenerateRequest::new_image_analyze(
+        RequestId::from(request_id),
+        params.image_data,
+        params.media_type,
+        params.prompt,
+        params.max_tokens,
+        params.temperature as f32,
+    ));
     let models = models.clone();
     let tx = tx.clone();
     let request_id = request_id.to_string();
 
     tokio::spawn(async move {
         let result = execute_image_analyze(&models, request).await;
+        let _ = tx.send((request_id, result)).await;
+    });
+
+    Ok(())
+}
+
+pub(super) async fn queue_audio_analyze(
+    request_id: &str,
+    params: serde_json::Value,
+    models: &SharedModels,
+    tx: &InferenceSender,
+) -> cli_helpers::Result {
+    let params: AudioAnalyzeParams = match serde_json::from_value(params) {
+        Ok(params) => params,
+        Err(error) => {
+            let _ = tx
+                .send((
+                    request_id.to_string(),
+                    Err(format!("Invalid audio.analyze params: {error}")),
+                ))
+                .await;
+            return Ok(());
+        }
+    };
+
+    tracing::info!("Analyzing audio (prompt: '{:.80}')", params.prompt);
+    let request = InferenceRequest::Generate(GenerateRequest::new_audio_analyze(
+        RequestId::from(request_id),
+        params.audio_data,
+        params.media_type,
+        params.sample_rate_hz,
+        params.channel_count,
+        params.prompt,
+        params.max_tokens,
+        params.temperature as f32,
+    ));
+    let models = models.clone();
+    let tx = tx.clone();
+    let request_id = request_id.to_string();
+
+    tokio::spawn(async move {
+        let result = execute_audio_analyze(&models, request).await;
         let _ = tx.send((request_id, result)).await;
     });
 
@@ -437,6 +484,16 @@ async fn execute_image_analyze(
     let trace_label = request_trace_label(&request);
     let stream = submit(models, request).await?;
     let response = image_analyze_response_from_stream(stream, &trace_label).await?;
+    serde_json::to_value(response).map_err(|error| error.to_string())
+}
+
+async fn execute_audio_analyze(
+    models: &SharedModels,
+    request: InferenceRequest,
+) -> Result<serde_json::Value, String> {
+    let trace_label = request_trace_label(&request);
+    let stream = submit(models, request).await?;
+    let response = audio_analyze_response_from_stream(stream, &trace_label).await?;
     serde_json::to_value(response).map_err(|error| error.to_string())
 }
 
@@ -468,12 +525,12 @@ fn run_round_request(
     } else {
         ToolChoice::Disabled
     };
-    InferenceRequest::Generate(GenerateRequest {
-        request_id: Some(RequestId::from(request_id)),
-        session_id: Some(SessionId::from(round.session_id)),
-        run_id: Some(RunId::from(round.run_id)),
-        round_id: Some(RoundId::from(round.round_id)),
-        model: ModelSelection {
+    InferenceRequest::Generate(GenerateRequest::new_round(
+        RequestId::from(request_id),
+        SessionId::from(round.session_id),
+        RunId::from(round.run_id),
+        RoundId::from(round.round_id),
+        ModelSelection {
             specific_model: round.model_id.map(ModelId::from),
             required_capabilities: vec![ModelCapability::TextGeneration],
             preferred_capabilities: if use_tools {
@@ -482,65 +539,11 @@ fn run_round_request(
                 Vec::new()
             },
         },
-        conversation: Conversation {
-            messages: round.messages,
-            metadata: MetadataMap::new(),
-        },
-        tools: if use_tools { round.tools } else { Vec::new() },
+        round.messages,
+        if use_tools { round.tools } else { Vec::new() },
         tool_choice,
-        reasoning: round.reasoning,
-        output_constraint: OutputConstraint::None,
-        sampling: SamplingConfig::default(),
-        streaming: StreamingMode::Buffered,
-        metadata: MetadataMap::new(),
-    })
-}
-
-fn image_analyze_request(request_id: &str, params: ImageAnalyzeParams) -> InferenceRequest {
-    InferenceRequest::Generate(GenerateRequest {
-        request_id: Some(RequestId::from(request_id)),
-        session_id: None,
-        run_id: None,
-        round_id: None,
-        model: ModelSelection {
-            specific_model: None,
-            required_capabilities: vec![
-                ModelCapability::TextGeneration,
-                ModelCapability::ImageInput,
-            ],
-            preferred_capabilities: Vec::new(),
-        },
-        conversation: Conversation {
-            messages: vec![ConversationMessage {
-                role: MessageRole::User,
-                parts: vec![
-                    ContentPart::Image(ImageInput {
-                        source: MediaSource::Base64(params.image_data),
-                        media_type: None,
-                    }),
-                    ContentPart::Text(TextPart {
-                        text: params.prompt,
-                    }),
-                ],
-                metadata: MetadataMap::new(),
-            }],
-            metadata: MetadataMap::new(),
-        },
-        tools: Vec::new(),
-        tool_choice: ToolChoice::Disabled,
-        reasoning: ReasoningSettings {
-            thinking: ThinkingMode::Disabled,
-            effort: None,
-        },
-        output_constraint: OutputConstraint::None,
-        sampling: SamplingConfig {
-            max_output_tokens: Some(params.max_tokens),
-            temperature: Some(params.temperature as f32),
-            ..SamplingConfig::default()
-        },
-        streaming: StreamingMode::Buffered,
-        metadata: MetadataMap::new(),
-    })
+        round.reasoning,
+    ))
 }
 
 async fn run_round_response_from_stream(
@@ -566,6 +569,20 @@ async fn image_analyze_response_from_stream(
 ) -> Result<ImageAnalyzeResponse, String> {
     let output = collect_generation(stream, trace_label).await?;
     Ok(ImageAnalyzeResponse {
+        text: output.content,
+        tokens_generated: output.usage.map_or(0, |usage| usage.output_tokens),
+        inference_time_ms: output
+            .performance
+            .map_or(0, |performance| performance.total_duration_ms),
+    })
+}
+
+async fn audio_analyze_response_from_stream(
+    stream: InferenceStream,
+    trace_label: &str,
+) -> Result<AudioAnalyzeResponse, String> {
+    let output = collect_generation(stream, trace_label).await?;
+    Ok(AudioAnalyzeResponse {
         text: output.content,
         tokens_generated: output.usage.map_or(0, |usage| usage.output_tokens),
         inference_time_ms: output
@@ -899,8 +916,8 @@ mod tests {
     use futures_util::stream;
     use nexo_ai::{AutoModelLoader, ModelDataType, ModelLoader};
     use nexo_core::{
-        GenerateChunk, InferenceErrorCode, InferenceFailure, ModelModalities, Retryability,
-        RoleStrategy, SupportedModality,
+        GenerateChunk, InferenceErrorCode, InferenceFailure, MetadataMap, ModelModalities,
+        ReasoningSettings, Retryability, RoleStrategy, SupportedModality,
     };
 
     use super::*;

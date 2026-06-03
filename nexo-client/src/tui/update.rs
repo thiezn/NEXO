@@ -1,11 +1,11 @@
 use nexo_ws_schema::{
-    CronListParams, CronListResponse, CronPayload, EventKind, Frame, HealthParams, HealthResponse,
-    ImageAnalyzeResponse, MessagePayload, Method, PresencePayload, PromptCollectionListParams,
-    PromptCollectionListResponse, PromptDocumentListParams, PromptDocumentListResponse,
-    RunEventPayload, RunStartResponse, RunStatus, SendResponse, SessionClearResponse,
-    SessionClosedPayload, SessionCreateResponse, SessionGetResponse, SessionListParams,
-    SessionListResponse, ShutdownPayload, StatusParams, StatusResponse, ToolEntry,
-    ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteResponse,
+    AudioAnalyzeResponse, CronListParams, CronListResponse, CronPayload, EventKind, Frame,
+    HealthParams, HealthResponse, ImageAnalyzeResponse, MessagePayload, Method, PresencePayload,
+    PromptCollectionListParams, PromptCollectionListResponse, PromptDocumentListParams,
+    PromptDocumentListResponse, RunEventPayload, RunStartResponse, RunStatus, SendResponse,
+    SessionClearResponse, SessionClosedPayload, SessionCreateResponse, SessionGetResponse,
+    SessionListParams, SessionListResponse, ShutdownPayload, StatusParams, StatusResponse,
+    ToolEntry, ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteResponse,
 };
 use tracing::Event;
 
@@ -316,6 +316,12 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             Method::ImageAnalyze,
             params,
         ),
+        AppCommand::AudioAnalyze(params) => single_request(
+            model,
+            PendingRequest::AudioAnalyze,
+            Method::AudioAnalyze,
+            params,
+        ),
     }
 }
 
@@ -573,6 +579,21 @@ fn handle_success_response(
             model.push_log(
                 LogKind::Success,
                 "image analyze",
+                format!(
+                    "{}\n\n[{} tokens in {}ms]",
+                    response.text, response.tokens_generated, response.inference_time_ms
+                ),
+            );
+        }
+        PendingRequest::AudioAnalyze => {
+            let Some(response) =
+                decode_response::<AudioAnalyzeResponse>(model, "audio analyze", payload)
+            else {
+                return Vec::new();
+            };
+            model.push_log(
+                LogKind::Success,
+                "audio analyze",
                 format!(
                     "{}\n\n[{} tokens in {}ms]",
                     response.text, response.tokens_generated, response.inference_time_ms
