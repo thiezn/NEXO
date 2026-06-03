@@ -1,13 +1,13 @@
 use std::path::Path;
 
 use anyhow::Context;
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
+use symphonia::core::codecs::CodecParameters;
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, TrackType};
+use symphonia::core::formats::probe::Hint;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 
 use super::AudioBuffer;
 
@@ -115,19 +115,21 @@ fn pcm_scale(bits_per_sample: u16) -> f32 {
 /// Shared decode logic: probe the stream, find the default audio track,
 /// and decode all packets into an `AudioBuffer`.
 fn decode_stream(mss: MediaSourceStream, hint: Hint) -> anyhow::Result<AudioBuffer> {
-    let probed = symphonia::default::get_probe().format(
+    let mut format = symphonia::default::get_probe().probe(
         &hint,
         mss,
-        &FormatOptions::default(),
-        &MetadataOptions::default(),
+        FormatOptions::default(),
+        MetadataOptions::default(),
     )?;
-    let mut format = probed.format;
 
     let track = format
-        .default_track()
+        .default_track(TrackType::Audio)
         .ok_or_else(|| anyhow::anyhow!("no audio track found"))?;
-    let audio_params = &track.codec_params;
-    if audio_params.codec == symphonia::core::codecs::CODEC_TYPE_NULL {
+    let audio_params = match &track.codec_params {
+        Some(CodecParameters::Audio(params)) => params,
+        _ => anyhow::bail!("no audio track found"),
+    };
+    if audio_params.codec == CODEC_ID_NULL_AUDIO {
         anyhow::bail!("no decodable audio track found");
     }
 
@@ -142,34 +144,30 @@ fn decode_stream(mss: MediaSourceStream, hint: Hint) -> anyhow::Result<AudioBuff
     let track_id = track.id;
 
     let mut decoder = symphonia::default::get_codecs()
-        .make(audio_params, &DecoderOptions::default())?;
+        .make_audio_decoder(audio_params, &AudioDecoderOptions::default())?;
 
     let mut all_samples: Vec<f32> = Vec::new();
+    let mut packet_samples: Vec<f32> = Vec::new();
 
     loop {
         let packet = match format.next_packet() {
-            Ok(packet) => packet,
+            Ok(Some(packet)) => packet,
+            Ok(None) => break,
             Err(SymphoniaError::ResetRequired) => {
                 return Err(anyhow::anyhow!("audio track list changed during decode"));
-            }
-            Err(SymphoniaError::IoError(ref e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break;
             }
             Err(e) => return Err(e.into()),
         };
 
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
 
         match decoder.decode(&packet) {
             Ok(decoded) => {
-                let mut sample_buffer =
-                    SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec());
-                sample_buffer.copy_interleaved_ref(decoded);
-                all_samples.extend_from_slice(sample_buffer.samples());
+                packet_samples.clear();
+                decoded.copy_to_vec_interleaved::<f32>(&mut packet_samples);
+                all_samples.extend_from_slice(&packet_samples);
             }
             Err(SymphoniaError::IoError(_)) | Err(SymphoniaError::DecodeError(_)) => continue,
             Err(e) => return Err(e.into()),
