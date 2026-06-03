@@ -774,6 +774,9 @@ pub struct PromptCollectionDeleteResponse {
 pub struct ImageAnalyzeParams {
     /// Base64-encoded image data.
     pub image_data: String,
+    /// Optional session identifier used to preserve runtime continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     /// Optional media type for the encoded image, such as `image/png`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
@@ -821,6 +824,9 @@ pub struct ImageAnalyzeResponse {
 pub struct AudioAnalyzeParams {
     /// Base64-encoded audio data.
     pub audio_data: String,
+    /// Optional session identifier used to preserve runtime continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     /// Optional media type for the encoded audio, such as `audio/wav`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,

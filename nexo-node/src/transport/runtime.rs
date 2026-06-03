@@ -294,23 +294,53 @@ async fn handle_inference_result(
     result: InferenceResult,
 ) -> cli_helpers::Result {
     let response = match result {
-        Ok(payload) => Frame::ok_response(request_id, &payload).unwrap_or_else(|error| {
+        Ok(payload) => {
+            tracing::info!(
+                request_id,
+                payload_kind = payload_type_name(&payload),
+                "Sending inference success response to gateway"
+            );
+            Frame::ok_response(request_id, &payload).unwrap_or_else(|error| {
+                tracing::error!(
+                    request_id,
+                    error = %error,
+                    "Failed to serialize inference success payload"
+                );
+                Frame::error_response(
+                    request_id,
+                    ErrorPayload {
+                        code: "internal_error".into(),
+                        message: error.to_string(),
+                    },
+                )
+            })
+        }
+        Err(message) => {
+            tracing::error!(
+                request_id,
+                error = %message,
+                "Sending inference error response to gateway"
+            );
             Frame::error_response(
                 request_id,
                 ErrorPayload {
-                    code: "internal_error".into(),
-                    message: error.to_string(),
+                    code: "inference_error".into(),
+                    message,
                 },
             )
-        }),
-        Err(message) => Frame::error_response(
-            request_id,
-            ErrorPayload {
-                code: "inference_error".into(),
-                message,
-            },
-        ),
+        }
     };
 
     send(writer, &response).await
+}
+
+fn payload_type_name(payload: &serde_json::Value) -> &'static str {
+    match payload {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
 }

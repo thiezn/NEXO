@@ -150,9 +150,12 @@ impl RuntimeController {
         };
 
         if let Some(model_id) = &selection.specific_model {
-            let slot = self.slots.get(model_id).ok_or_else(|| Error::UnknownModel {
-                model_id: model_id.clone(),
-            })?;
+            let slot = self
+                .slots
+                .get(model_id)
+                .ok_or_else(|| Error::UnknownModel {
+                    model_id: model_id.clone(),
+                })?;
             if !supports_selection(&slot.descriptor, selection) {
                 return Err(Error::UnresolvedModelSelection {
                     message: format!(
@@ -190,9 +193,11 @@ impl RuntimeController {
     }
 
     fn slot_mut(&mut self, model_id: &ModelId) -> Result<&mut ModelSlot> {
-        self.slots.get_mut(model_id).ok_or_else(|| Error::UnknownModel {
-            model_id: model_id.clone(),
-        })
+        self.slots
+            .get_mut(model_id)
+            .ok_or_else(|| Error::UnknownModel {
+                model_id: model_id.clone(),
+            })
     }
 
     async fn build_runtime(
@@ -250,7 +255,10 @@ mod tests {
 
     #[test]
     fn generate_request_reloads_when_session_presence_changes() {
-        assert!(should_reload_for_session(&generate_request(None), Some("session-a")));
+        assert!(should_reload_for_session(
+            &generate_request(None),
+            Some("session-a")
+        ));
         assert!(!should_reload_for_session(
             &generate_request(Some("session-a")),
             None,

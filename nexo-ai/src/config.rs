@@ -72,6 +72,9 @@ pub struct RuntimeConfig {
 
     /// Enables periodic throughput logging from `mistralrs-core`.
     pub throughput_logging: bool,
+
+    /// PagedAttention runtime controls.
+    pub paged_attention: PagedAttentionRuntimeConfig,
 }
 
 impl Default for RuntimeConfig {
@@ -84,8 +87,72 @@ impl Default for RuntimeConfig {
             prefix_cache_entries: 16,
             disable_eos_stop: false,
             throughput_logging: false,
+            paged_attention: PagedAttentionRuntimeConfig::default(),
         }
     }
+}
+
+/// PagedAttention controls for runtimes that support paged KV-cache allocation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PagedAttentionRuntimeConfig {
+    /// Tri-state mode:
+    /// - `auto`: use backend defaults (enabled on CUDA, disabled on Metal/CPU)
+    /// - `enabled`: force-enable when supported by the build/backend
+    /// - `disabled`: force-disable
+    pub mode: PagedAttentionMode,
+
+    /// Optional fixed GPU memory budget (MB) for paged KV cache.
+    pub gpu_memory_mb: Option<usize>,
+
+    /// Optional GPU memory utilization ratio in `[0, 1]` for paged KV cache.
+    pub gpu_memory_utilization: Option<f32>,
+
+    /// Optional context-length target for paged KV cache sizing.
+    pub context_size: Option<usize>,
+
+    /// Optional tokens-per-block override (supported values depend on backend).
+    pub block_size: Option<usize>,
+
+    /// KV cache dtype policy for paged attention.
+    pub cache_type: PagedAttentionCacheType,
+}
+
+impl Default for PagedAttentionRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            mode: PagedAttentionMode::Auto,
+            gpu_memory_mb: None,
+            gpu_memory_utilization: None,
+            context_size: None,
+            block_size: None,
+            cache_type: PagedAttentionCacheType::Auto,
+        }
+    }
+}
+
+/// PagedAttention enablement policy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PagedAttentionMode {
+    /// Use backend defaults (CUDA: enabled, Metal/CPU: disabled).
+    #[default]
+    Auto,
+    /// Force-enable paged attention when supported.
+    Enabled,
+    /// Force-disable paged attention.
+    Disabled,
+}
+
+/// PagedAttention KV-cache storage type.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PagedAttentionCacheType {
+    /// Let mistral-rs choose the cache dtype.
+    #[default]
+    Auto,
+    /// Force f8e4m3 cache storage.
+    F8e4m3,
 }
 
 /// A single model exposed through `nexo-ai`.

@@ -4,16 +4,17 @@ use either::Either;
 use indexmap::IndexMap;
 use mistralrs_core::Function as MistralFunction;
 use mistralrs_core::{
-    Constraint, DetokenizationRequest as MistralDetokenizationRequest, MessageContent,
+    AudioInput as MistralAudioInput, Constraint,
+    DetokenizationRequest as MistralDetokenizationRequest, MessageContent,
     NormalRequest, ReasoningEffort as MistralReasoningEffort, RequestMessage, Response,
     SamplingParams, StopTokens, TokenizationRequest as MistralTokenizationRequest, Tool,
     ToolChoice as MistralToolChoice, ToolType,
 };
 use nexo_core::inference::request::{DetokenizationRequest, GenerateRequest, TokenizationRequest};
 use nexo_core::{
-    ContentPart, Conversation, ConversationMessage, MessageRole, ModelDescriptor, OutputConstraint,
-    RoleStrategy, SamplingConfig, SpecialTokenPolicy, TextPart, ToolCall, ToolChoice,
-    ToolDefinition, ToolResultContent,
+    AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
+    MessageRole, ModelDescriptor, OutputConstraint, RoleStrategy, SamplingConfig,
+    SpecialTokenPolicy, TextPart, ToolCall, ToolChoice, ToolDefinition, ToolResultContent,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -27,13 +28,26 @@ pub(crate) fn map_generate_request(
     request_ordinal: usize,
 ) -> Result<NormalRequest> {
     let tools = map_tool_definitions(&request.tools)?;
-
-    let mut normal_request = NormalRequest::new_simple(
+    let mapped = map_generate_conversation(&request.conversation, descriptor.role_strategy)?;
+    let request_message = if mapped.images.is_empty() && mapped.audios.is_empty() {
         RequestMessage::Chat {
-            messages: map_conversation(&request.conversation, descriptor.role_strategy)?,
+            messages: mapped.messages,
             enable_thinking: Some(thinking_enabled(request.reasoning.thinking)),
             reasoning_effort: map_reasoning_effort(request.reasoning.effort),
-        },
+        }
+    } else {
+        RequestMessage::MultimodalChat {
+            images: mapped.images,
+            audios: mapped.audios,
+            videos: Vec::new(),
+            messages: mapped.messages,
+            enable_thinking: Some(thinking_enabled(request.reasoning.thinking)),
+            reasoning_effort: map_reasoning_effort(request.reasoning.effort),
+        }
+    };
+
+    let mut normal_request = NormalRequest::new_simple(
+        request_message,
         map_sampling(&request.sampling),
         response,
         request_ordinal,
@@ -116,6 +130,186 @@ fn map_conversation(
         mapped.extend(map_message(message, role_strategy)?);
     }
     Ok(mapped)
+}
+
+struct GenerateConversationMapping {
+    messages: Vec<IndexMap<String, MessageContent>>,
+    images: Vec<image::DynamicImage>,
+    audios: Vec<MistralAudioInput>,
+}
+
+fn map_generate_conversation(
+    conversation: &Conversation,
+    role_strategy: RoleStrategy,
+) -> Result<GenerateConversationMapping> {
+    let mut mapped = GenerateConversationMapping {
+        messages: Vec::new(),
+        images: Vec::new(),
+        audios: Vec::new(),
+    };
+
+    for message in &conversation.messages {
+        mapped.messages.extend(map_generate_message(
+            message,
+            role_strategy,
+            &mut mapped.images,
+            &mut mapped.audios,
+        )?);
+    }
+
+    Ok(mapped)
+}
+
+fn map_generate_message(
+    message: &ConversationMessage,
+    role_strategy: RoleStrategy,
+    images: &mut Vec<image::DynamicImage>,
+    audios: &mut Vec<MistralAudioInput>,
+) -> Result<Vec<IndexMap<String, MessageContent>>> {
+    let mut text_parts = Vec::new();
+    let mut tool_calls = Vec::new();
+    let mut tool_results = Vec::new();
+    let mut image_parts = Vec::new();
+    let mut audio_parts = Vec::new();
+
+    for part in &message.parts {
+        match part {
+            ContentPart::Text(TextPart { text }) => text_parts.push(text.clone()),
+            ContentPart::ToolCall(call) => tool_calls.push(call.clone()),
+            ContentPart::ToolResult(result) => tool_results.push(result.clone()),
+            ContentPart::Image(image) => image_parts.push(image),
+            ContentPart::Video(_) => {
+                return Err(Error::UnsupportedMessagePart {
+                    part: "video input",
+                });
+            }
+            ContentPart::Audio(audio) => audio_parts.push(audio),
+        }
+    }
+
+    if !tool_results.is_empty() {
+        if !text_parts.is_empty()
+            || !tool_calls.is_empty()
+            || !image_parts.is_empty()
+            || !audio_parts.is_empty()
+            || message.role != MessageRole::Tool
+        {
+            return Err(Error::UnsupportedMessagePart {
+                part: "mixed tool-result message",
+            });
+        }
+
+        return tool_results
+            .iter()
+            .map(map_tool_result_message)
+            .collect::<Result<Vec<_>>>();
+    }
+
+    if !tool_calls.is_empty() && (!image_parts.is_empty() || !audio_parts.is_empty()) {
+        return Err(Error::UnsupportedMessagePart {
+            part: "mixed tool-call and multimodal message",
+        });
+    }
+
+    let mut mapped = IndexMap::new();
+    mapped.insert(
+        "role".to_string(),
+        Either::Left(map_role(message.role, role_strategy).to_string()),
+    );
+
+    if image_parts.is_empty() && audio_parts.is_empty() {
+        let content = if !text_parts.is_empty() {
+            text_parts.join("\n")
+        } else if !tool_calls.is_empty() {
+            serialize_tool_calls(&tool_calls)?
+        } else {
+            String::new()
+        };
+        mapped.insert("content".to_string(), Either::Left(content));
+    } else {
+        let mut content_parts = Vec::new();
+
+        for image in image_parts {
+            images.push(map_image_input(image)?);
+            content_parts.push(IndexMap::from([(
+                "type".to_string(),
+                serde_json::Value::String("image".to_string()),
+            )]));
+        }
+
+        for audio in audio_parts {
+            audios.push(map_audio_input(audio)?);
+            content_parts.push(IndexMap::from([(
+                "type".to_string(),
+                serde_json::Value::String("audio".to_string()),
+            )]));
+        }
+
+        content_parts.push(IndexMap::from([
+            (
+                "type".to_string(),
+                serde_json::Value::String("text".to_string()),
+            ),
+            (
+                "text".to_string(),
+                serde_json::Value::String(text_parts.join("\n")),
+            ),
+        ]));
+        mapped.insert("content".to_string(), Either::Right(content_parts));
+    }
+
+    if !tool_calls.is_empty() {
+        mapped.insert("tool_calls".to_string(), map_tool_calls_field(&tool_calls)?);
+    }
+
+    Ok(vec![mapped])
+}
+
+fn map_image_input(input: &ImageInput) -> Result<image::DynamicImage> {
+    let bytes = media_source_bytes(&input.source, "image")?;
+    image::load_from_memory(&bytes).map_err(|error| {
+        nexo_core::Error::InvalidRequest {
+            message: format!("invalid image input: {error}"),
+        }
+        .into()
+    })
+}
+
+fn map_audio_input(input: &AudioInput) -> Result<MistralAudioInput> {
+    let bytes = media_source_bytes(&input.source, "audio")?;
+    MistralAudioInput::from_bytes(&bytes).map_err(|error| {
+        nexo_core::Error::InvalidRequest {
+            message: format!("invalid audio input: {error}"),
+        }
+        .into()
+    })
+}
+
+fn media_source_bytes(source: &MediaSource, part: &str) -> Result<Vec<u8>> {
+    match source {
+        MediaSource::Bytes(bytes) => Ok(bytes.clone()),
+        MediaSource::Base64(encoded) => decode_base64_bytes(encoded, part),
+        MediaSource::Url(url) => {
+            if let Some(payload) = url.strip_prefix("data:")
+                && let Some((_, base64_data)) = payload.split_once(";base64,")
+            {
+                return decode_base64_bytes(base64_data, part);
+            }
+
+            Err(Error::UnsupportedMessagePart {
+                part: "non-data-url media source",
+            })
+        }
+    }
+}
+
+fn decode_base64_bytes(encoded: &str, part: &str) -> Result<Vec<u8>> {
+    base64::decode(encoded).map_err(|error| {
+        nexo_core::Error::InvalidRequest {
+            message: format!("invalid {part} base64 payload: {error}"),
+        }
+        .into()
+    })
 }
 
 fn map_message(
@@ -382,8 +576,8 @@ fn map_reasoning_effort(
 mod tests {
     use nexo_core::{
         ConversationMessage, MetadataMap, ModelCapability, ModelId, ModelModalities,
-        ReasoningSettings, SupportedModality, ToolChoice, ToolExecutionConstraints,
-        ToolParallelism, ToolSideEffectLevel,
+        ReasoningSettings, RequestId, SupportedModality, ToolChoice,
+        ToolExecutionConstraints, ToolParallelism, ToolSideEffectLevel,
     };
 
     use super::*;
@@ -472,6 +666,105 @@ mod tests {
         .unwrap();
 
         assert!(matches!(choice, Some(MistralToolChoice::Tool(_))));
+    }
+
+    #[test]
+    fn maps_image_analyze_to_multimodal_chat() {
+        let (response, _receiver) = tokio::sync::mpsc::channel(1);
+        let descriptor = descriptor(RoleStrategy::MergeDeveloperIntoSystem);
+        let request = GenerateRequest::new_image_analyze(
+            RequestId::from("request-1"),
+            base64::encode(tiny_png_bytes()),
+            Some("image/png".to_string()),
+            "Describe this image".to_string(),
+            64,
+            0.2,
+        );
+
+        let mapped = map_generate_request(&request, &descriptor, response, 1).unwrap();
+        match mapped.messages {
+            RequestMessage::MultimodalChat {
+                messages,
+                images,
+                audios,
+                ..
+            } => {
+                assert_eq!(messages.len(), 1);
+                assert_eq!(images.len(), 1);
+                assert!(audios.is_empty());
+            }
+            _ => panic!("expected multimodal chat request"),
+        }
+    }
+
+    #[test]
+    fn maps_audio_analyze_to_multimodal_chat() {
+        let (response, _receiver) = tokio::sync::mpsc::channel(1);
+        let descriptor = descriptor(RoleStrategy::MergeDeveloperIntoSystem);
+        let request = GenerateRequest::new_audio_analyze(
+            RequestId::from("request-2"),
+            base64::encode(tiny_wav_bytes()),
+            Some("audio/wav".to_string()),
+            Some(16_000),
+            Some(1),
+            "Transcribe this audio".to_string(),
+            64,
+            0.2,
+        );
+
+        let mapped = map_generate_request(&request, &descriptor, response, 1).unwrap();
+        match mapped.messages {
+            RequestMessage::MultimodalChat {
+                messages,
+                images,
+                audios,
+                ..
+            } => {
+                assert_eq!(messages.len(), 1);
+                assert!(images.is_empty());
+                assert_eq!(audios.len(), 1);
+            }
+            _ => panic!("expected multimodal chat request"),
+        }
+    }
+
+    fn tiny_png_bytes() -> Vec<u8> {
+        use image::ImageEncoder;
+
+        let mut bytes = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+        encoder
+            .write_image(&[255, 0, 0, 255], 1, 1, image::ColorType::Rgba8.into())
+            .unwrap();
+        bytes
+    }
+
+    fn tiny_wav_bytes() -> Vec<u8> {
+        let sample_rate = 16_000_u32;
+        let channels = 1_u16;
+        let bits_per_sample = 16_u16;
+        let data = [0_u8, 0_u8];
+        let data_len = data.len() as u32;
+        let chunk_size = 36 + data_len;
+        let byte_rate = sample_rate * u32::from(channels) * u32::from(bits_per_sample) / 8;
+        let block_align = channels * bits_per_sample / 8;
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&chunk_size.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&byte_rate.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        bytes.extend_from_slice(&data);
+        bytes
     }
 
     fn descriptor(role_strategy: RoleStrategy) -> ModelDescriptor {

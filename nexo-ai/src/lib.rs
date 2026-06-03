@@ -18,6 +18,7 @@ pub use catalog::{downloaded_model_configs, model_config_from_manifest};
 pub use config::default_config_path;
 pub use config::{
     AutoModelLoader, DeviceSpec, GgufModelLoader, ModelDataType, ModelLoader, NexoAiConfig,
+    PagedAttentionCacheType, PagedAttentionMode, PagedAttentionRuntimeConfig,
     RegisteredModelConfig, RuntimeConfig, SchedulerPolicy,
 };
 pub use error::{Error, Result};

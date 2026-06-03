@@ -404,8 +404,17 @@ pub(super) async fn queue_image_analyze(
         }
     };
 
-    tracing::info!("Analyzing image (prompt: '{:.80}')", params.prompt);
-    let request = InferenceRequest::Generate(GenerateRequest::new_image_analyze(
+    tracing::info!(
+        session_id = ?params.session_id,
+        media_type = ?params.media_type,
+        image_base64_chars = params.image_data.len(),
+        image_bytes_estimate = estimate_base64_bytes(params.image_data.len()),
+        max_tokens = params.max_tokens,
+        temperature = params.temperature,
+        "Analyzing image (prompt: '{:.80}')",
+        params.prompt
+    );
+    let mut request = InferenceRequest::Generate(GenerateRequest::new_image_analyze(
         RequestId::from(request_id),
         params.image_data,
         params.media_type,
@@ -413,12 +422,21 @@ pub(super) async fn queue_image_analyze(
         params.max_tokens,
         params.temperature as f32,
     ));
+    if let InferenceRequest::Generate(generate) = &mut request {
+        generate.session_id = params.session_id.map(SessionId::from);
+    }
     let models = models.clone();
     let tx = tx.clone();
     let request_id = request_id.to_string();
 
     tokio::spawn(async move {
         let result = execute_image_analyze(&models, request).await;
+        match &result {
+            Ok(_) => tracing::info!(request_id, "Image analyze inference completed"),
+            Err(error) => {
+                tracing::error!(request_id, error = %error, "Image analyze inference failed")
+            }
+        }
         let _ = tx.send((request_id, result)).await;
     });
 
@@ -444,8 +462,19 @@ pub(super) async fn queue_audio_analyze(
         }
     };
 
-    tracing::info!("Analyzing audio (prompt: '{:.80}')", params.prompt);
-    let request = InferenceRequest::Generate(GenerateRequest::new_audio_analyze(
+    tracing::info!(
+        session_id = ?params.session_id,
+        media_type = ?params.media_type,
+        audio_base64_chars = params.audio_data.len(),
+        audio_bytes_estimate = estimate_base64_bytes(params.audio_data.len()),
+        sample_rate_hz = ?params.sample_rate_hz,
+        channel_count = ?params.channel_count,
+        max_tokens = params.max_tokens,
+        temperature = params.temperature,
+        "Analyzing audio (prompt: '{:.80}')",
+        params.prompt
+    );
+    let mut request = InferenceRequest::Generate(GenerateRequest::new_audio_analyze(
         RequestId::from(request_id),
         params.audio_data,
         params.media_type,
@@ -455,12 +484,21 @@ pub(super) async fn queue_audio_analyze(
         params.max_tokens,
         params.temperature as f32,
     ));
+    if let InferenceRequest::Generate(generate) = &mut request {
+        generate.session_id = params.session_id.map(SessionId::from);
+    }
     let models = models.clone();
     let tx = tx.clone();
     let request_id = request_id.to_string();
 
     tokio::spawn(async move {
         let result = execute_audio_analyze(&models, request).await;
+        match &result {
+            Ok(_) => tracing::info!(request_id, "Audio analyze inference completed"),
+            Err(error) => {
+                tracing::error!(request_id, error = %error, "Audio analyze inference failed")
+            }
+        }
         let _ = tx.send((request_id, result)).await;
     });
 
@@ -879,6 +917,10 @@ fn optional_id<T: ToString>(value: Option<&T>) -> String {
     value
         .map(ToString::to_string)
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn estimate_base64_bytes(encoded_len: usize) -> usize {
+    encoded_len.saturating_mul(3) / 4
 }
 
 async fn send_invalid_params_error(

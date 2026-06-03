@@ -7,8 +7,10 @@ use futures_util::{StreamExt, stream};
 use mistralrs_core::{
     AddModelConfig, AutoDeviceMapParams, DefaultSchedulerMethod, DeviceMapSetting,
     EngineConfig as MistralEngineConfig, GGUFLoaderBuilder, GGUFSpecificConfig, LoaderBuilder,
-    MistralRs, MistralRsBuilder, ModelPaths, ModelSelected, Request, Response as MistralResponse,
+    MemoryGpuConfig, MistralRs, MistralRsBuilder, ModelPaths, ModelSelected,
+    PagedAttentionConfig, PagedCacheType, Request, Response as MistralResponse,
     SchedulerConfig as MistralSchedulerConfig, TokenSource, UQFF_MULTI_FILE_DELIMITER,
+    paged_attn_supported,
     get_auto_device_map_params, get_model_dtype,
 };
 use nexo_core::inference::request::{EmbedRequest, GenerateRequest};
@@ -21,7 +23,8 @@ use tokio::sync::mpsc;
 
 use crate::config::{
     AutoModelLoader, DeviceSpec, GgufModelLoader, ModelDataType, ModelLoader,
-    RegisteredModelConfig, RuntimeConfig, SchedulerPolicy,
+    PagedAttentionCacheType, PagedAttentionMode, RegisteredModelConfig, RuntimeConfig,
+    SchedulerPolicy,
 };
 use crate::mapping::request::{
     map_detokenization_request, map_embedding_request, map_generate_request,
@@ -62,9 +65,11 @@ impl MistralRuntime {
     ) -> Result<Self> {
         let mut models = models.iter();
         let first = models.next().ok_or(Error::EmptyModelCatalog)?;
+        let paged_attn_config = resolve_paged_attention_config(runtime_config, device)?;
 
-        let first_pipeline = build_pipeline(first, runtime_config, device)?;
-        let scheduler = map_scheduler(runtime_config.scheduler);
+        let first_pipeline = build_pipeline(first, runtime_config, device, paged_attn_config)?;
+        let scheduler =
+            map_scheduler(runtime_config.scheduler, &first_pipeline, paged_attn_config).await;
         let engine = MistralRsBuilder::new(
             first_pipeline,
             scheduler.clone(),
@@ -80,7 +85,7 @@ impl MistralRuntime {
         .await;
 
         for model in models {
-            let pipeline = build_pipeline(model, runtime_config, device)?;
+            let pipeline = build_pipeline(model, runtime_config, device, paged_attn_config)?;
             engine
                 .add_model(
                     model.descriptor.id.to_string(),
@@ -131,6 +136,17 @@ impl MistralRuntime {
         };
         let (response_tx, response_rx) = mpsc::channel(32);
         let request_ordinal = self.next_request_ordinal();
+        let text_parts_per_message = request
+            .conversation
+            .messages
+            .iter()
+            .map(text_part_count)
+            .collect::<Vec<_>>();
+        let text_parts_total = text_parts_per_message.iter().sum::<usize>();
+        let messages_with_multiple_text_parts = text_parts_per_message
+            .iter()
+            .filter(|count| **count > 1)
+            .count();
         tracing::debug!(
             request_ordinal,
             model_id = %descriptor.id,
@@ -139,6 +155,9 @@ impl MistralRuntime {
             round_id = ?request.round_id,
             session_id = ?request.session_id,
             messages = request.conversation.messages.len(),
+            text_parts_total,
+            messages_with_multiple_text_parts,
+            text_parts_per_message = ?text_parts_per_message,
             tools = request.tools.len(),
             streaming = ?request.streaming,
             sampling = ?request.sampling,
@@ -400,10 +419,15 @@ fn build_pipeline(
     model: &RegisteredModelConfig,
     runtime_config: &RuntimeConfig,
     device: &Device,
+    paged_attn_config: Option<PagedAttentionConfig>,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
     match &model.loader {
-        ModelLoader::Auto(loader) => build_auto_pipeline(loader, runtime_config, device),
-        ModelLoader::Gguf(loader) => build_gguf_pipeline(loader, runtime_config, device),
+        ModelLoader::Auto(loader) => {
+            build_auto_pipeline(loader, runtime_config, device, paged_attn_config)
+        }
+        ModelLoader::Gguf(loader) => {
+            build_gguf_pipeline(loader, runtime_config, device, paged_attn_config)
+        }
     }
 }
 
@@ -411,6 +435,7 @@ fn build_auto_pipeline(
     loader: &AutoModelLoader,
     runtime_config: &RuntimeConfig,
     device: &Device,
+    paged_attn_config: Option<PagedAttentionConfig>,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
     let model_dir = resolve_model_storage_dir(&loader.model_id);
     let from_uqff = resolve_uqff_selection(&model_dir, loader.from_uqff.as_deref())?;
@@ -466,7 +491,7 @@ fn build_auto_pipeline(
                 true,
                 DeviceMapSetting::Auto(device_map),
                 None,
-                None,
+                paged_attn_config,
             )
             .map_err(|error| Error::MistralRuntime {
                 message: error.to_string(),
@@ -483,7 +508,7 @@ fn build_auto_pipeline(
             true,
             DeviceMapSetting::Auto(device_map),
             None,
-            None,
+            paged_attn_config,
         )
         .map_err(|error| Error::MistralRuntime {
             message: error.to_string(),
@@ -494,6 +519,7 @@ fn build_gguf_pipeline(
     loader: &GgufModelLoader,
     runtime_config: &RuntimeConfig,
     device: &Device,
+    paged_attn_config: Option<PagedAttentionConfig>,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
     let built_loader = GGUFLoaderBuilder::new(
         path_to_string(loader.chat_template.as_ref()),
@@ -516,7 +542,7 @@ fn build_gguf_pipeline(
             true,
             DeviceMapSetting::Auto(AutoDeviceMapParams::default_text()),
             None,
-            None,
+            paged_attn_config,
         )
         .map_err(|error| Error::MistralRuntime {
             message: error.to_string(),
@@ -863,13 +889,114 @@ mod tests {
     }
 }
 
-fn map_scheduler(policy: SchedulerPolicy) -> MistralSchedulerConfig {
+async fn map_scheduler(
+    policy: SchedulerPolicy,
+    first_pipeline: &Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>,
+    paged_attn_config: Option<PagedAttentionConfig>,
+) -> MistralSchedulerConfig {
     match policy {
         SchedulerPolicy::Fixed {
             max_running_sequences,
-        } => MistralSchedulerConfig::DefaultScheduler {
-            method: DefaultSchedulerMethod::Fixed(max_running_sequences),
-        },
+        } => {
+            if paged_attn_config.is_some() {
+                let cache_config = first_pipeline.lock().await.get_metadata().cache_config.clone();
+                if let Some(config) = cache_config {
+                    return MistralSchedulerConfig::PagedAttentionMeta {
+                        max_num_seqs: max_running_sequences.get(),
+                        config,
+                    };
+                }
+
+                tracing::warn!(
+                    "PagedAttention requested but pipeline metadata did not provide a cache config; falling back to default scheduler"
+                );
+            }
+
+            MistralSchedulerConfig::DefaultScheduler {
+                method: DefaultSchedulerMethod::Fixed(max_running_sequences),
+            }
+        }
+    }
+}
+
+fn resolve_paged_attention_config(
+    runtime_config: &RuntimeConfig,
+    device: &Device,
+) -> Result<Option<PagedAttentionConfig>> {
+    let requested = match runtime_config.paged_attention.mode {
+        PagedAttentionMode::Enabled => true,
+        PagedAttentionMode::Disabled => false,
+        PagedAttentionMode::Auto => {
+            if device.is_cuda() {
+                true
+            } else {
+                false
+            }
+        }
+    };
+
+    if !requested {
+        return Ok(None);
+    }
+
+    if !paged_attn_supported() {
+        tracing::warn!(
+            "PagedAttention requested but this build/backend does not support it; continuing without paged attention"
+        );
+        return Ok(None);
+    }
+
+    let memory_config = resolve_paged_memory_config(runtime_config);
+    let cache_type = map_paged_cache_type(runtime_config.paged_attention.cache_type);
+    let config = PagedAttentionConfig::new(
+        runtime_config.paged_attention.block_size,
+        memory_config,
+        cache_type,
+    )
+    .map_err(|error| Error::MistralRuntime {
+        message: error.to_string(),
+    })?;
+
+    Ok(Some(config))
+}
+
+fn resolve_paged_memory_config(runtime_config: &RuntimeConfig) -> MemoryGpuConfig {
+    let paged = &runtime_config.paged_attention;
+
+    match (
+        paged.gpu_memory_mb,
+        paged.gpu_memory_utilization,
+        paged.context_size,
+    ) {
+        (_, Some(utilization), Some(_)) => {
+            tracing::warn!(
+                "Both paged_attention.gpu_memory_utilization and paged_attention.context_size are set; using gpu_memory_utilization"
+            );
+            MemoryGpuConfig::Utilization(utilization)
+        }
+        (Some(_), Some(utilization), None) => {
+            tracing::warn!(
+                "Both paged_attention.gpu_memory_mb and paged_attention.gpu_memory_utilization are set; using gpu_memory_utilization"
+            );
+            MemoryGpuConfig::Utilization(utilization)
+        }
+        (Some(_), None, Some(context_size)) => {
+            tracing::warn!(
+                "Both paged_attention.gpu_memory_mb and paged_attention.context_size are set; using context_size"
+            );
+            MemoryGpuConfig::ContextSize(context_size)
+        }
+        (None, Some(utilization), None) => MemoryGpuConfig::Utilization(utilization),
+        (Some(memory_mb), None, None) => MemoryGpuConfig::MbAmount(memory_mb),
+        (None, None, Some(context_size)) => MemoryGpuConfig::ContextSize(context_size),
+        (None, None, None) => MemoryGpuConfig::Utilization(0.9),
+    }
+}
+
+fn map_paged_cache_type(cache_type: PagedAttentionCacheType) -> PagedCacheType {
+    match cache_type {
+        PagedAttentionCacheType::Auto => PagedCacheType::Auto,
+        PagedAttentionCacheType::F8e4m3 => PagedCacheType::F8E4M3,
     }
 }
 
@@ -895,6 +1022,14 @@ fn map_dtype(dtype: ModelDataType) -> mistralrs_core::ModelDType {
 
 fn path_to_string(path: Option<&PathBuf>) -> Option<String> {
     path.map(|path| path.to_string_lossy().into_owned())
+}
+
+fn text_part_count(message: &nexo_core::ConversationMessage) -> usize {
+    message
+        .parts
+        .iter()
+        .filter(|part| matches!(part, nexo_core::ContentPart::Text(_)))
+        .count()
 }
 
 fn mistral_response_kind(response: &MistralResponse) -> &'static str {

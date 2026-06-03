@@ -136,8 +136,12 @@ pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, Str
                 args.to_string()
             },
         })),
-        "image analyze" => parse_image_analyze(args, context.workspace_root),
-        "audio analyze" => parse_audio_analyze(args, context.workspace_root),
+        "image analyze" => {
+            parse_image_analyze(args, context.workspace_root, context.current_session_id)
+        }
+        "audio analyze" => {
+            parse_audio_analyze(args, context.workspace_root, context.current_session_id)
+        }
         _ => Err(format!(
             "Unknown command '/{command}'. Use /help to see available commands."
         )),
@@ -280,7 +284,11 @@ fn parse_run(args: &str, context: CommandContext<'_>) -> Result<AppCommand, Stri
     }))
 }
 
-fn parse_image_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, String> {
+fn parse_image_analyze(
+    args: &str,
+    workspace_root: &Path,
+    current_session_id: Option<&str>,
+) -> Result<AppCommand, String> {
     let Some((image_path, prompt)) = args.split_once(' ') else {
         return Err("Usage: /image analyze <@image-path|path> <prompt>".into());
     };
@@ -292,6 +300,7 @@ fn parse_image_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, 
 
     Ok(AppCommand::ImageAnalyze(ImageAnalyzeParams {
         image_data,
+        session_id: current_session_id.map(ToOwned::to_owned),
         media_type: detect_image_media_type(&image_path),
         prompt: prompt.trim().to_string(),
         max_tokens: 4096,
@@ -301,7 +310,11 @@ fn parse_image_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, 
     }))
 }
 
-fn parse_audio_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, String> {
+fn parse_audio_analyze(
+    args: &str,
+    workspace_root: &Path,
+    current_session_id: Option<&str>,
+) -> Result<AppCommand, String> {
     if args.is_empty() {
         return Err(
             "Usage: /audio analyze <@audio-path|path> <prompt> OR /audio analyze --mic [--max-secs <seconds>] <prompt>"
@@ -311,7 +324,7 @@ fn parse_audio_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, 
 
     let trimmed = args.trim();
     if let Some(rest) = trimmed.strip_prefix("--mic") {
-        return parse_audio_analyze_mic(rest.trim_start());
+        return parse_audio_analyze_mic(rest.trim_start(), current_session_id);
     }
 
     let Some((audio_path, prompt)) = trimmed.split_once(' ') else {
@@ -325,6 +338,7 @@ fn parse_audio_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, 
 
     Ok(AppCommand::AudioAnalyze(AudioAnalyzeParams {
         audio_data: encode_base64(&audio_bytes),
+        session_id: current_session_id.map(ToOwned::to_owned),
         media_type: detect_audio_media_type(&audio_path),
         sample_rate_hz: Some(buffer.sample_rate),
         channel_count: Some(buffer.channels),
@@ -335,7 +349,10 @@ fn parse_audio_analyze(args: &str, workspace_root: &Path) -> Result<AppCommand, 
     }))
 }
 
-fn parse_audio_analyze_mic(args: &str) -> Result<AppCommand, String> {
+fn parse_audio_analyze_mic(
+    args: &str,
+    current_session_id: Option<&str>,
+) -> Result<AppCommand, String> {
     let mut max_secs = 8.0;
     let mut prompt_parts = Vec::new();
     let mut iter = args.split_whitespace().peekable();
@@ -370,11 +387,12 @@ fn parse_audio_analyze_mic(args: &str) -> Result<AppCommand, String> {
     let buffer = audio::record_microphone(&config)
         .map_err(|e| format!("Failed to record microphone audio: {e}"))?
         .to_mono();
-    let wav_bytes = audio::encode_wav(&buffer)
-        .map_err(|e| format!("Failed to encode recorded audio: {e}"))?;
+    let wav_bytes =
+        audio::encode_wav(&buffer).map_err(|e| format!("Failed to encode recorded audio: {e}"))?;
 
     Ok(AppCommand::AudioAnalyze(AudioAnalyzeParams {
         audio_data: encode_base64(&wav_bytes),
+        session_id: current_session_id.map(ToOwned::to_owned),
         media_type: Some("audio/wav".to_string()),
         sample_rate_hz: Some(buffer.sample_rate),
         channel_count: Some(buffer.channels),
@@ -602,6 +620,7 @@ mod tests {
 
         match command {
             AppCommand::ImageAnalyze(params) => {
+                assert_eq!(params.session_id.as_deref(), Some("sess-1"));
                 assert_eq!(params.media_type.as_deref(), Some("image/png"));
                 assert_eq!(params.prompt, "what is this?");
                 assert!(!params.image_data.is_empty());
@@ -642,6 +661,7 @@ mod tests {
 
         match command {
             AppCommand::AudioAnalyze(params) => {
+                assert_eq!(params.session_id.as_deref(), Some("sess-1"));
                 assert_eq!(params.media_type.as_deref(), Some("audio/wav"));
                 assert_eq!(params.sample_rate_hz, Some(16_000));
                 assert_eq!(params.channel_count, Some(1));
