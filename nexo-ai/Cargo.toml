@@ -20,6 +20,7 @@ metal = ["candle-core/metal", "mistralrs-core/metal"]
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 candle-core = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 cli-helpers = { workspace = true, features = ["clap", "config"] }
@@ -31,6 +32,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+tracing = { workspace = true }
 
 [dependencies.either]
 version = "1"
@@ -39,7 +41,8 @@ version = "1"
 version = "2"
 
 [dependencies.mistralrs-core]
-version = "0"
+git = "https://github.com/EricLBuehler/mistral.rs"
+branch = "master"
 default-features = false
 
 [lints]

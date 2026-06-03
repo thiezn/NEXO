@@ -2,6 +2,7 @@ use crate::error::Result;
 use crate::inference::{InferenceRequest, InferenceStream};
 
 /// A service capable of executing shared `nexo-core` inference requests.
+#[async_trait::async_trait]
 pub trait InferenceEngine: Send + Sync {
     /// Submits a new inference request and returns a stream of responses.
     ///
@@ -12,5 +13,5 @@ pub trait InferenceEngine: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the request cannot be accepted for execution.
-    fn submit(&self, request: InferenceRequest) -> Result<InferenceStream>;
+    async fn submit(&self, request: InferenceRequest) -> Result<InferenceStream>;
 }

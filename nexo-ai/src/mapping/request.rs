@@ -28,27 +28,24 @@ pub(crate) fn map_generate_request(
 ) -> Result<NormalRequest> {
     let tools = map_tool_definitions(&request.tools)?;
 
-    Ok(NormalRequest {
-        messages: RequestMessage::Chat {
+    let mut normal_request = NormalRequest::new_simple(
+        RequestMessage::Chat {
             messages: map_conversation(&request.conversation, descriptor.role_strategy)?,
             enable_thinking: Some(thinking_enabled(request.reasoning.thinking)),
             reasoning_effort: map_reasoning_effort(request.reasoning.effort),
         },
-        sampling_params: map_sampling(&request.sampling),
+        map_sampling(&request.sampling),
         response,
-        return_logprobs: false,
-        is_streaming: matches!(request.streaming, nexo_core::StreamingMode::Streaming),
-        id: request_ordinal,
-        constraint: map_constraint(&request.output_constraint),
-        suffix: None,
-        tools: tools.clone(),
-        tool_choice: map_tool_choice(&request.tool_choice, tools.as_deref())?,
-        logits_processors: None,
-        return_raw_logits: false,
-        web_search_options: None,
-        model_id: Some(descriptor.id.to_string()),
-        truncate_sequence: false,
-    })
+        request_ordinal,
+        tools.clone(),
+        map_tool_choice(&request.tool_choice, tools.as_deref())?,
+    );
+    normal_request.is_streaming = matches!(request.streaming, nexo_core::StreamingMode::Streaming);
+    normal_request.constraint = map_constraint(&request.output_constraint);
+    normal_request.model_id = Some(descriptor.id.to_string());
+    normal_request.session_id = request.session_id.as_ref().map(ToString::to_string);
+
+    Ok(normal_request)
 }
 
 /// Builds a `mistralrs-core` normal request for a single embedding input.
@@ -58,23 +55,17 @@ pub(crate) fn map_embedding_request(
     response: Sender<Response>,
     request_ordinal: usize,
 ) -> NormalRequest {
-    NormalRequest {
-        messages: RequestMessage::Embedding { prompt },
-        sampling_params: SamplingParams::neutral(),
+    let mut request = NormalRequest::new_simple(
+        RequestMessage::Embedding { prompt },
+        SamplingParams::neutral(),
         response,
-        return_logprobs: false,
-        is_streaming: false,
-        id: request_ordinal,
-        constraint: Constraint::None,
-        suffix: None,
-        tools: None,
-        tool_choice: None,
-        logits_processors: None,
-        return_raw_logits: false,
-        web_search_options: None,
-        model_id: Some(descriptor.id.to_string()),
-        truncate_sequence: false,
-    }
+        request_ordinal,
+        None,
+        None,
+    );
+    request.constraint = Constraint::None;
+    request.model_id = Some(descriptor.id.to_string());
+    request
 }
 
 /// Builds a `mistralrs-core` tokenization request.
@@ -266,6 +257,7 @@ fn map_tool_definitions(definitions: &[ToolDefinition]) -> Result<Option<Vec<Too
                     description: Some(definition.description.clone()),
                     name: definition.name.clone(),
                     parameters,
+                    strict: None,
                 },
             })
         })
@@ -401,7 +393,7 @@ mod tests {
         let (response, _receiver) = tokio::sync::mpsc::channel(1);
         let request = GenerateRequest {
             request_id: None,
-            session_id: None,
+            session_id: Some(nexo_core::SessionId::from("session-1")),
             run_id: None,
             round_id: None,
             model: nexo_core::ModelSelection {
@@ -450,6 +442,7 @@ mod tests {
             mapped.sampling_params.stop_toks,
             Some(StopTokens::Seqs(_))
         ));
+        assert_eq!(mapped.session_id.as_deref(), Some("session-1"));
     }
 
     #[test]

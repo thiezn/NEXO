@@ -5,12 +5,12 @@ use futures_util::StreamExt;
 use nexo_ai::{NexoAi, NexoAiConfig, RegisteredModelConfig, RuntimeConfig, StaticModelRegistry};
 use nexo_core::inference::request::GenerateRequest;
 use nexo_core::{
-    ContentPart, Conversation, ConversationMessage, GenerateDelta, ImageInput, InferenceEngine,
-    InferenceRequest, InferenceResponse, InferenceStream, MediaSource, MessageRole, MetadataMap,
-    ModelCapability, ModelDescriptor, ModelId, ModelRegistry, ModelSelection, OutputConstraint,
-    PerformanceMetrics, ReasoningSettings, RequestId, RoundId, RunId, SamplingConfig, SessionId,
-    StreamingMode, TextPart, ThinkingMode, TokenUsage, ToolCall, ToolCallDelta, ToolCallId,
-    ToolChoice,
+    ContentPart, Conversation, ConversationMessage, FinishReason, GenerateDelta, ImageInput,
+    InferenceEngine, InferenceRequest, InferenceResponse, InferenceStream, MediaSource,
+    MessageRole, MetadataMap, ModelCapability, ModelDescriptor, ModelId, ModelSelection,
+    OutputConstraint, PerformanceMetrics, ReasoningSettings, RequestId, RoundId, RunId,
+    SamplingConfig, SessionId, StreamingMode, TextPart, ThinkingMode, TokenUsage, ToolCall,
+    ToolCallDelta, ToolCallId, ToolChoice,
 };
 use nexo_ws_client::WriteHalf;
 use nexo_ws_schema::{
@@ -31,33 +31,41 @@ pub(super) type InferenceSender = tokio::sync::mpsc::Sender<(String, InferenceRe
 #[derive(Debug)]
 pub(super) struct LoadedModels {
     runtime: RuntimeConfig,
+    enable_tool_calling: bool,
     available: BTreeMap<ModelId, RegisteredModelConfig>,
-    loaded: BTreeSet<ModelId>,
     engine: Option<NexoAi>,
 }
 
 impl LoadedModels {
-    pub(super) fn new(runtime: RuntimeConfig, models: Vec<RegisteredModelConfig>) -> Self {
+    pub(super) fn new(
+        runtime: RuntimeConfig,
+        enable_tool_calling: bool,
+        models: Vec<RegisteredModelConfig>,
+    ) -> Self {
         Self {
             runtime,
+            enable_tool_calling,
             available: models
                 .into_iter()
                 .map(|model| (model.descriptor.id.clone(), model))
                 .collect(),
-            loaded: BTreeSet::new(),
             engine: None,
         }
+    }
+
+    fn enable_tool_calling(&self) -> bool {
+        self.enable_tool_calling
     }
 
     pub(super) fn available_model_ids(&self) -> Vec<String> {
         self.available.keys().map(ToString::to_string).collect()
     }
 
-    fn loaded_model_descriptors(&self) -> Vec<ModelDescriptor> {
-        self.engine
-            .as_ref()
-            .map(ModelRegistry::list_models)
-            .unwrap_or_default()
+    async fn loaded_model_descriptors(&self) -> Vec<ModelDescriptor> {
+        match &self.engine {
+            Some(engine) => engine.loaded_models().await,
+            None => Vec::new(),
+        }
     }
 
     fn startup_model_ids(&self, config: &NodeConfig) -> Vec<ModelId> {
@@ -109,40 +117,27 @@ impl LoadedModels {
             return Err(format!("Model '{model_id}' is not downloaded on this node"));
         }
 
-        if self.loaded.contains(&model_id) {
-            return Ok(());
-        }
-
-        let previous_loaded = self.loaded.clone();
-        let previous_engine = self.engine.clone();
-        self.loaded.insert(model_id);
-
-        if let Err(error) = self.rebuild_engine().await {
-            self.loaded = previous_loaded;
-            self.engine = previous_engine;
-            return Err(error);
-        }
-
-        Ok(())
+        self.ensure_engine().await?;
+        let engine = self
+            .engine
+            .clone()
+            .ok_or_else(|| "No inference engine configured".to_string())?;
+        engine
+            .load_model(&model_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     async fn unload_model(&mut self, model_id: &str) -> Result<bool, String> {
         let model_id = ModelId::from(model_id);
-        if !self.loaded.contains(&model_id) {
+        let Some(engine) = self.engine.clone() else {
             return Ok(false);
-        }
+        };
 
-        let previous_loaded = self.loaded.clone();
-        let previous_engine = self.engine.clone();
-        self.loaded.remove(&model_id);
-
-        if let Err(error) = self.rebuild_engine().await {
-            self.loaded = previous_loaded;
-            self.engine = previous_engine;
-            return Err(error);
-        }
-
-        Ok(true)
+        engine
+            .unload_model(&model_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     fn engine(&self) -> Result<NexoAi, String> {
@@ -151,21 +146,18 @@ impl LoadedModels {
             .ok_or_else(|| "No model loaded for inference".to_string())
     }
 
-    async fn rebuild_engine(&mut self) -> Result<(), String> {
-        if self.loaded.is_empty() {
-            self.engine = None;
+    async fn ensure_engine(&mut self) -> Result<(), String> {
+        if self.engine.is_some() {
+            return Ok(());
+        }
+        if self.available.is_empty() {
             return Ok(());
         }
 
-        let models = self
-            .loaded
-            .iter()
-            .filter_map(|model_id| self.available.get(model_id).cloned())
-            .collect::<Vec<_>>();
         self.engine = Some(
             NexoAi::from_config(NexoAiConfig {
                 runtime: self.runtime.clone(),
-                models,
+                models: self.available.values().cloned().collect(),
             })
             .await
             .map_err(|error| error.to_string())?,
@@ -176,9 +168,14 @@ impl LoadedModels {
 
 pub(super) fn shared_models(
     runtime: RuntimeConfig,
+    enable_tool_calling: bool,
     models: Vec<RegisteredModelConfig>,
 ) -> SharedModels {
-    Arc::new(Mutex::new(LoadedModels::new(runtime, models)))
+    Arc::new(Mutex::new(LoadedModels::new(
+        runtime,
+        enable_tool_calling,
+        models,
+    )))
 }
 
 pub(super) async fn load_startup_models(models: &SharedModels, config: &NodeConfig) {
@@ -219,7 +216,7 @@ pub(super) async fn push_model_status(writer: &mut WriteHalf, models: &SharedMod
     let (loaded_models, available_models) = {
         let models = models.lock().await;
         (
-            models.loaded_model_descriptors(),
+            models.loaded_model_descriptors().await,
             models.available_model_ids(),
         )
     };
@@ -358,16 +355,26 @@ pub(super) async fn queue_run_round(
         }
     };
 
-    tracing::debug!(
-        "queue_run_round {}: model_id={:?}, has_tools={}, session_id={}, messages={}",
+    let enable_tool_calling = {
+        let models = models.lock().await;
+        models.enable_tool_calling()
+    };
+    tracing::info!(
         request_id,
-        request.model_id,
-        !request.tools.is_empty(),
-        request.session_id,
-        request.messages.len(),
+        run_id = %request.run_id,
+        round_id = %request.round_id,
+        session_id = %request.session_id,
+        model_id = ?request.model_id,
+        messages = request.messages.len(),
+        tools = request.tools.len(),
+        has_tools = !request.tools.is_empty(),
+        tool_calling_enabled = enable_tool_calling,
+        tool_choice = ?request.tool_choice,
+        reasoning = ?request.reasoning,
+        "Starting round inference"
     );
 
-    let request = run_round_request(request_id, request);
+    let request = run_round_request(request_id, request, enable_tool_calling);
     let models = models.clone();
     let tx = tx.clone();
     let request_id = request_id.to_string();
@@ -417,8 +424,9 @@ async fn execute_run_round(
     models: &SharedModels,
     request: InferenceRequest,
 ) -> Result<serde_json::Value, String> {
+    let trace_label = request_trace_label(&request);
     let stream = submit(models, request).await?;
-    let response = run_round_response_from_stream(stream).await?;
+    let response = run_round_response_from_stream(stream, &trace_label).await?;
     serde_json::to_value(response).map_err(|error| error.to_string())
 }
 
@@ -426,8 +434,9 @@ async fn execute_image_analyze(
     models: &SharedModels,
     request: InferenceRequest,
 ) -> Result<serde_json::Value, String> {
+    let trace_label = request_trace_label(&request);
     let stream = submit(models, request).await?;
-    let response = image_analyze_response_from_stream(stream).await?;
+    let response = image_analyze_response_from_stream(stream, &trace_label).await?;
     serde_json::to_value(response).map_err(|error| error.to_string())
 }
 
@@ -440,13 +449,25 @@ async fn submit(
         models.engine()?
     };
 
-    tokio::task::spawn_blocking(move || engine.submit(request).map_err(|error| error.to_string()))
+    engine
+        .submit(request)
         .await
-        .map_err(|error| format!("Inference task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
-fn run_round_request(request_id: &str, round: RunRoundRequest) -> InferenceRequest {
-    let has_tools = !round.tools.is_empty();
+fn run_round_request(
+    request_id: &str,
+    round: RunRoundRequest,
+    enable_tool_calling: bool,
+) -> InferenceRequest {
+    let use_tools = enable_tool_calling
+        && !round.tools.is_empty()
+        && !matches!(round.tool_choice, ToolChoice::Disabled);
+    let tool_choice = if use_tools {
+        round.tool_choice
+    } else {
+        ToolChoice::Disabled
+    };
     InferenceRequest::Generate(GenerateRequest {
         request_id: Some(RequestId::from(request_id)),
         session_id: Some(SessionId::from(round.session_id)),
@@ -455,7 +476,7 @@ fn run_round_request(request_id: &str, round: RunRoundRequest) -> InferenceReque
         model: ModelSelection {
             specific_model: round.model_id.map(ModelId::from),
             required_capabilities: vec![ModelCapability::TextGeneration],
-            preferred_capabilities: if has_tools {
+            preferred_capabilities: if use_tools {
                 vec![ModelCapability::ToolCalling]
             } else {
                 Vec::new()
@@ -465,12 +486,8 @@ fn run_round_request(request_id: &str, round: RunRoundRequest) -> InferenceReque
             messages: round.messages,
             metadata: MetadataMap::new(),
         },
-        tools: round.tools,
-        tool_choice: if has_tools {
-            ToolChoice::Automatic
-        } else {
-            ToolChoice::Disabled
-        },
+        tools: if use_tools { round.tools } else { Vec::new() },
+        tool_choice,
         reasoning: round.reasoning,
         output_constraint: OutputConstraint::None,
         sampling: SamplingConfig::default(),
@@ -528,8 +545,10 @@ fn image_analyze_request(request_id: &str, params: ImageAnalyzeParams) -> Infere
 
 async fn run_round_response_from_stream(
     stream: InferenceStream,
+    trace_label: &str,
 ) -> Result<RunRoundResponse, String> {
-    let output = collect_generation(stream).await?;
+    let output = collect_generation(stream, trace_label).await?;
+    log_round_completion(trace_label, &output);
     Ok(RunRoundResponse {
         content: non_empty(output.content),
         rationale: non_empty(output.reasoning),
@@ -543,8 +562,9 @@ async fn run_round_response_from_stream(
 
 async fn image_analyze_response_from_stream(
     stream: InferenceStream,
+    trace_label: &str,
 ) -> Result<ImageAnalyzeResponse, String> {
-    let output = collect_generation(stream).await?;
+    let output = collect_generation(stream, trace_label).await?;
     Ok(ImageAnalyzeResponse {
         text: output.content,
         tokens_generated: output.usage.map_or(0, |usage| usage.output_tokens),
@@ -559,6 +579,7 @@ struct GenerationOutput {
     content: String,
     reasoning: String,
     tool_calls: Vec<ToolCall>,
+    finish_reason: Option<FinishReason>,
     usage: Option<TokenUsage>,
     performance: Option<PerformanceMetrics>,
 }
@@ -570,14 +591,53 @@ struct PartialToolCall {
     arguments: String,
 }
 
-async fn collect_generation(mut stream: InferenceStream) -> Result<GenerationOutput, String> {
+async fn collect_generation(
+    mut stream: InferenceStream,
+    trace_label: &str,
+) -> Result<GenerationOutput, String> {
     let mut output = GenerationOutput::default();
     let mut partial_tool_calls = BTreeMap::<usize, PartialToolCall>::new();
+    let mut failure: Option<String> = None;
 
     while let Some(response) = stream.next().await {
-        match response.map_err(|error| error.to_string())? {
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                let message = error.to_string();
+                if failure.is_none() {
+                    tracing::warn!(
+                        trace = %trace_label,
+                        error = %message,
+                        partial_content_chars = output.content.chars().count(),
+                        partial_reasoning_chars = output.reasoning.chars().count(),
+                        partial_tool_calls = output.tool_calls.len().max(partial_tool_calls.len()),
+                        partial_content_preview = preview_text(&output.content),
+                        partial_reasoning_preview = preview_text(&output.reasoning),
+                        "Generation stream item failed; draining response channel before returning error"
+                    );
+                    failure = Some(message);
+                } else {
+                    tracing::warn!(trace = %trace_label, error = %message, "Additional generation stream item failed after first failure");
+                }
+                continue;
+            }
+        };
+
+        if failure.is_some() {
+            tracing::debug!(
+                trace = %trace_label,
+                response_kind = inference_response_kind(&response),
+                "Drained late generation response after failure"
+            );
+            continue;
+        }
+
+        match response {
             InferenceResponse::GenerationStarted(_) => {}
             InferenceResponse::GenerationChunk(chunk) => {
+                if let Some(finish_reason) = chunk.finish_reason {
+                    output.finish_reason = Some(finish_reason);
+                }
                 apply_delta(&mut output, &mut partial_tool_calls, chunk.delta);
                 if let Some(usage) = chunk.usage {
                     output.usage = Some(usage);
@@ -597,12 +657,34 @@ async fn collect_generation(mut stream: InferenceStream) -> Result<GenerationOut
                 if !tool_calls.is_empty() {
                     output.tool_calls = tool_calls;
                 }
+                output.finish_reason = Some(completed.finish_reason);
                 output.usage = completed.usage;
                 output.performance = completed.performance;
             }
-            InferenceResponse::Failure(failure) => return Err(failure.message),
+            InferenceResponse::Failure(inference_failure) => {
+                tracing::warn!(
+                    trace = %trace_label,
+                    request_id = ?inference_failure.request_id,
+                    run_id = ?inference_failure.run_id,
+                    round_id = ?inference_failure.round_id,
+                    code = ?inference_failure.code,
+                    retryability = ?inference_failure.retryability,
+                    error = %inference_failure.message,
+                    partial_content_chars = output.content.chars().count(),
+                    partial_reasoning_chars = output.reasoning.chars().count(),
+                    partial_tool_calls = output.tool_calls.len().max(partial_tool_calls.len()),
+                    partial_content_preview = preview_text(&output.content),
+                    partial_reasoning_preview = preview_text(&output.reasoning),
+                    "Generation failed; draining response channel before returning error"
+                );
+                failure = Some(inference_failure.message);
+            }
             other => return Err(format!("Unsupported inference response: {other:?}")),
         }
+    }
+
+    if let Some(message) = failure {
+        return Err(message);
     }
 
     if output.tool_calls.is_empty() && !partial_tool_calls.is_empty() {
@@ -613,6 +695,38 @@ async fn collect_generation(mut stream: InferenceStream) -> Result<GenerationOut
     }
 
     Ok(output)
+}
+
+fn log_round_completion(trace_label: &str, output: &GenerationOutput) {
+    let usage = output.usage.as_ref();
+    let performance = output.performance.as_ref();
+    tracing::info!(
+        trace = %trace_label,
+        content_chars = output.content.chars().count(),
+        reasoning_chars = output.reasoning.chars().count(),
+        tool_calls = output.tool_calls.len(),
+        input_tokens = usage.map(|usage| usage.input_tokens).unwrap_or(0),
+        output_tokens = usage.map(|usage| usage.output_tokens).unwrap_or(0),
+        total_tokens = usage.map(|usage| usage.total_tokens).unwrap_or(0),
+        total_duration_ms = performance.map(|performance| performance.total_duration_ms).unwrap_or(0),
+        input_tokens_per_second = performance.and_then(|performance| performance.input_tokens_per_second).unwrap_or(0.0),
+        output_tokens_per_second = performance.and_then(|performance| performance.output_tokens_per_second).unwrap_or(0.0),
+        finish_reason = ?output.finish_reason,
+        "Completed round inference"
+    );
+}
+
+fn preview_text(value: &str) -> &str {
+    const MAX_PREVIEW_BYTES: usize = 200;
+    if value.len() <= MAX_PREVIEW_BYTES {
+        return value;
+    }
+
+    let mut end = MAX_PREVIEW_BYTES;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
 }
 
 fn apply_delta(
@@ -695,6 +809,61 @@ fn non_empty(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
+fn inference_response_kind(response: &InferenceResponse) -> &'static str {
+    match response {
+        InferenceResponse::GenerationStarted(_) => "generation_started",
+        InferenceResponse::GenerationChunk(_) => "generation_chunk",
+        InferenceResponse::GenerationCompleted(_) => "generation_completed",
+        InferenceResponse::Failure(_) => "failure",
+        InferenceResponse::Embeddings(_) => "embeddings",
+        InferenceResponse::Tokenization(_) => "tokenization",
+        InferenceResponse::Detokenization(_) => "detokenization",
+        InferenceResponse::Images(_) => "images",
+        InferenceResponse::Speech(_) => "speech",
+    }
+}
+
+fn request_trace_label(request: &InferenceRequest) -> String {
+    match request {
+        InferenceRequest::Generate(generate) => format!(
+            "request_id={} run_id={} round_id={} session_id={} model_id={}",
+            optional_id(generate.request_id.as_ref()),
+            optional_id(generate.run_id.as_ref()),
+            optional_id(generate.round_id.as_ref()),
+            optional_id(generate.session_id.as_ref()),
+            optional_id(generate.model.specific_model.as_ref())
+        ),
+        InferenceRequest::Embed(request) => {
+            format!(
+                "request_id={} kind=embed",
+                optional_id(request.request_id.as_ref())
+            )
+        }
+        InferenceRequest::Tokenize(request) => format!(
+            "request_id={} kind=tokenize",
+            optional_id(request.request_id.as_ref())
+        ),
+        InferenceRequest::Detokenize(request) => format!(
+            "request_id={} kind=detokenize",
+            optional_id(request.request_id.as_ref())
+        ),
+        InferenceRequest::GenerateImage(request) => format!(
+            "request_id={} kind=generate_image",
+            optional_id(request.request_id.as_ref())
+        ),
+        InferenceRequest::GenerateSpeech(request) => format!(
+            "request_id={} kind=generate_speech",
+            optional_id(request.request_id.as_ref())
+        ),
+    }
+}
+
+fn optional_id<T: ToString>(value: Option<&T>) -> String {
+    value
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "-".to_string())
+}
+
 async fn send_invalid_params_error(
     writer: &mut WriteHalf,
     request_id: &str,
@@ -727,8 +896,12 @@ fn internal_error_response<E: ToString>(request_id: &str) -> impl FnOnce(E) -> F
 mod tests {
     #![allow(clippy::unwrap_used)]
 
+    use futures_util::stream;
     use nexo_ai::{AutoModelLoader, ModelDataType, ModelLoader};
-    use nexo_core::{ModelModalities, RoleStrategy, SupportedModality};
+    use nexo_core::{
+        GenerateChunk, InferenceErrorCode, InferenceFailure, ModelModalities, Retryability,
+        RoleStrategy, SupportedModality,
+    };
 
     use super::*;
 
@@ -749,9 +922,11 @@ mod tests {
                     execution: nexo_core::ToolExecutionConstraints::default(),
                     metadata: MetadataMap::new(),
                 }],
+                tool_choice: ToolChoice::Automatic,
                 reasoning: ReasoningSettings::default(),
                 model_id: None,
             },
+            true,
         );
 
         let InferenceRequest::Generate(request) = request else {
@@ -767,9 +942,74 @@ mod tests {
     }
 
     #[test]
+    fn run_round_with_tool_calling_disabled_omits_tools() {
+        let request = run_round_request(
+            "request-1",
+            RunRoundRequest {
+                run_id: "run-1".to_string(),
+                round_id: "round-1".to_string(),
+                session_id: "session-1".to_string(),
+                messages: Vec::new(),
+                tools: vec![nexo_core::ToolDefinition {
+                    name: "ping".to_string(),
+                    description: "Ping".to_string(),
+                    parameters: serde_json::json!({"type": "object"}),
+                    contract_version: None,
+                    execution: nexo_core::ToolExecutionConstraints::default(),
+                    metadata: MetadataMap::new(),
+                }],
+                tool_choice: ToolChoice::Automatic,
+                reasoning: ReasoningSettings::default(),
+                model_id: None,
+            },
+            false,
+        );
+
+        let InferenceRequest::Generate(request) = request else {
+            panic!("expected generate request");
+        };
+        assert_eq!(request.tool_choice, ToolChoice::Disabled);
+        assert!(request.tools.is_empty());
+        assert!(request.model.preferred_capabilities.is_empty());
+    }
+
+    #[test]
+    fn run_round_with_disabled_tool_choice_omits_tools() {
+        let request = run_round_request(
+            "request-1",
+            RunRoundRequest {
+                run_id: "run-1".to_string(),
+                round_id: "round-1".to_string(),
+                session_id: "session-1".to_string(),
+                messages: Vec::new(),
+                tools: vec![nexo_core::ToolDefinition {
+                    name: "ping".to_string(),
+                    description: "Ping".to_string(),
+                    parameters: serde_json::json!({"type": "object"}),
+                    contract_version: None,
+                    execution: nexo_core::ToolExecutionConstraints::default(),
+                    metadata: MetadataMap::new(),
+                }],
+                tool_choice: ToolChoice::Disabled,
+                reasoning: ReasoningSettings::default(),
+                model_id: None,
+            },
+            true,
+        );
+
+        let InferenceRequest::Generate(request) = request else {
+            panic!("expected generate request");
+        };
+        assert_eq!(request.tool_choice, ToolChoice::Disabled);
+        assert!(request.tools.is_empty());
+        assert!(request.model.preferred_capabilities.is_empty());
+    }
+
+    #[test]
     fn startup_selection_deduplicates_model_capabilities() {
         let models = LoadedModels::new(
             RuntimeConfig::default(),
+            true,
             vec![model_config(
                 "multi",
                 vec![
@@ -798,6 +1038,7 @@ mod tests {
     fn startup_selection_uses_core_model_id_defaults() {
         let models = LoadedModels::new(
             RuntimeConfig::default(),
+            true,
             vec![
                 model_config("first", vec![ModelCapability::TextGeneration]),
                 model_config("second", vec![ModelCapability::TextGeneration]),
@@ -815,6 +1056,76 @@ mod tests {
             models.startup_model_ids(&config),
             vec![ModelId::from("second")]
         );
+    }
+
+    #[tokio::test]
+    async fn collect_generation_drains_late_responses_after_failure() {
+        let stream: InferenceStream = Box::pin(stream::iter(vec![
+            Ok(InferenceResponse::Failure(InferenceFailure {
+                request_id: Some(RequestId::from("request-1")),
+                run_id: Some(RunId::from("run-1")),
+                round_id: Some(RoundId::from("round-1")),
+                code: InferenceErrorCode::Internal,
+                message: "Invalid sampling probability at index 0: NaN".to_string(),
+                retryability: Retryability::Retryable,
+            })),
+            Ok(InferenceResponse::GenerationChunk(GenerateChunk {
+                request_id: Some(RequestId::from("request-1")),
+                run_id: Some(RunId::from("run-1")),
+                round_id: Some(RoundId::from("round-1")),
+                model_id: None,
+                delta: GenerateDelta {
+                    content_delta: Some("late".to_string()),
+                    ..GenerateDelta::default()
+                },
+                usage: None,
+                finish_reason: None,
+            })),
+        ]));
+
+        let error = match collect_generation(stream, "test-request").await {
+            Ok(_) => panic!("expected generation failure"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "Invalid sampling probability at index 0: NaN");
+    }
+
+    #[tokio::test]
+    async fn collect_generation_returns_error_after_partial_output() {
+        let stream: InferenceStream = Box::pin(stream::iter(vec![
+            Ok(InferenceResponse::GenerationChunk(GenerateChunk {
+                request_id: Some(RequestId::from("request-1")),
+                run_id: Some(RunId::from("run-1")),
+                round_id: Some(RoundId::from("round-1")),
+                model_id: None,
+                delta: GenerateDelta {
+                    content_delta: Some("partial output".to_string()),
+                    ..GenerateDelta::default()
+                },
+                usage: Some(TokenUsage {
+                    input_tokens: 8,
+                    output_tokens: 2,
+                    total_tokens: 10,
+                }),
+                finish_reason: None,
+            })),
+            Ok(InferenceResponse::Failure(InferenceFailure {
+                request_id: Some(RequestId::from("request-1")),
+                run_id: Some(RunId::from("run-1")),
+                round_id: Some(RoundId::from("round-1")),
+                code: InferenceErrorCode::Internal,
+                message: "runtime blew up".to_string(),
+                retryability: Retryability::Retryable,
+            })),
+        ]));
+
+        let error = match collect_generation(stream, "test-request").await {
+            Ok(_) => panic!("expected generation failure"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "runtime blew up");
     }
 
     fn model_config(id: &str, capabilities: Vec<ModelCapability>) -> RegisteredModelConfig {

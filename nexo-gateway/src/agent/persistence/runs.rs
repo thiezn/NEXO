@@ -1,7 +1,7 @@
 //! Run, round, and tool-trace persistence helpers.
 
 use super::db_types::{RoundStatus, RunSummaryKind, ToolTraceStatus, run_status_to_db};
-use nexo_core::ReasoningSettings;
+use nexo_core::{ReasoningSettings, ToolChoice};
 use nexo_ws_schema::{Frame, RunStatus};
 use sqlx::SqlitePool;
 
@@ -14,7 +14,29 @@ pub async fn create_run(
     model_id: Option<&str>,
     reasoning: &ReasoningSettings,
 ) -> Result<(), sqlx::Error> {
-    let reasoning_json = encode_reasoning_json(reasoning)?;
+    create_run_with_tool_choice(
+        pool,
+        run_id,
+        session_id,
+        idempotency_key,
+        model_id,
+        reasoning,
+        &ToolChoice::Automatic,
+    )
+    .await
+}
+
+/// Create a new run record with explicit tool-use policy.
+pub async fn create_run_with_tool_choice(
+    pool: &SqlitePool,
+    run_id: &str,
+    session_id: &str,
+    idempotency_key: &str,
+    model_id: Option<&str>,
+    reasoning: &ReasoningSettings,
+    tool_choice: &ToolChoice,
+) -> Result<(), sqlx::Error> {
+    let reasoning_json = encode_reasoning_json(reasoning, tool_choice)?;
     sqlx::query(
         "INSERT INTO runs (id, session_id, idempotency_key, model_id, reasoning)
          VALUES (?, ?, ?, ?, ?)",
@@ -36,8 +58,30 @@ pub(crate) fn decode_reasoning_json(
     serde_json::from_str(reasoning_json).map_err(|error| sqlx::Error::Decode(Box::new(error)))
 }
 
-fn encode_reasoning_json(reasoning: &ReasoningSettings) -> Result<String, sqlx::Error> {
-    serde_json::to_string(reasoning).map_err(|error| sqlx::Error::Encode(Box::new(error)))
+pub(crate) fn decode_tool_choice_json(reasoning_json: &str) -> Result<ToolChoice, sqlx::Error> {
+    let value: serde_json::Value =
+        serde_json::from_str(reasoning_json).map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
+    match value.get("toolChoice") {
+        Some(tool_choice) => serde_json::from_value(tool_choice.clone())
+            .map_err(|error| sqlx::Error::Decode(Box::new(error))),
+        None => Ok(ToolChoice::Automatic),
+    }
+}
+
+fn encode_reasoning_json(
+    reasoning: &ReasoningSettings,
+    tool_choice: &ToolChoice,
+) -> Result<String, sqlx::Error> {
+    let mut value = serde_json::to_value(reasoning)
+        .map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
+    if let serde_json::Value::Object(object) = &mut value {
+        object.insert(
+            "toolChoice".to_string(),
+            serde_json::to_value(tool_choice)
+                .map_err(|error| sqlx::Error::Encode(Box::new(error)))?,
+        );
+    }
+    serde_json::to_string(&value).map_err(|error| sqlx::Error::Encode(Box::new(error)))
 }
 
 /// Return the next round index that should be used for a run.
@@ -248,4 +292,27 @@ pub async fn finish_run(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn reasoning_json_roundtrips_tool_choice() {
+        let reasoning = ReasoningSettings {
+            thinking: nexo_core::ThinkingMode::Enabled,
+            effort: Some(nexo_core::ReasoningEffort::High),
+        };
+        let tool_choice = ToolChoice::Specific {
+            name: "echo.run".to_string(),
+        };
+
+        let encoded = encode_reasoning_json(&reasoning, &tool_choice).unwrap();
+
+        assert_eq!(decode_reasoning_json(&encoded).unwrap(), reasoning);
+        assert_eq!(decode_tool_choice_json(&encoded).unwrap(), tool_choice);
+    }
 }

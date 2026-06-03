@@ -26,5 +26,26 @@ base64 = { workspace = true }
 ratatui = { version = "0", features = ["crossterm"] }
 crossterm = "0"
 
+# Audio
+symphonia = { version = "0", features = [
+    "wav",
+    "mp3",
+    "ogg",
+    "flac",
+    "pcm",
+    "aac",
+    "isomp4",
+] }
+hound = "3"
+rubato = "0"
+cpal = "0"
+rodio = "0"
+rustfft = "6"
+
+# Vision
+image = { workspace = true }
+viuer = "0"
+
+
 [lints]
 workspace = true

@@ -7,14 +7,14 @@ use futures_util::{StreamExt, stream};
 use mistralrs_core::{
     AddModelConfig, AutoDeviceMapParams, DefaultSchedulerMethod, DeviceMapSetting,
     EngineConfig as MistralEngineConfig, GGUFLoaderBuilder, GGUFSpecificConfig, LoaderBuilder,
-    MistralRs, MistralRsBuilder, ModelPaths, ModelSelected, ModelStatus, Request,
+    MistralRs, MistralRsBuilder, ModelPaths, ModelSelected, Request, Response as MistralResponse,
     SchedulerConfig as MistralSchedulerConfig, TokenSource, UQFF_MULTI_FILE_DELIMITER,
     get_auto_device_map_params, get_model_dtype,
 };
 use nexo_core::inference::request::{EmbedRequest, GenerateRequest};
 use nexo_core::{
     DetokenizationRequest, InferenceRequest, InferenceResponse, InferenceStream, ModelDescriptor,
-    ModelId, ModelRuntimeState, TokenUsage, TokenizationRequest,
+    ModelId, TokenUsage, TokenizationRequest,
 };
 use nexo_model_mgmt::resolve_model_storage_dir;
 use tokio::sync::mpsc;
@@ -31,7 +31,7 @@ use crate::mapping::response::{
     ResponseContext, generation_started, map_embedding_response, map_generation_response,
     map_runtime_error,
 };
-use crate::{Error, NexoAiConfig, Result};
+use crate::{Error, Result};
 
 /// Shared `mistralrs-core` runtime state used by `NexoAi`.
 #[derive(Clone)]
@@ -47,36 +47,46 @@ impl std::fmt::Debug for MistralRuntime {
 }
 
 impl MistralRuntime {
-    /// Builds the backing `mistralrs-core` runtime from declarative configuration.
-    pub(crate) async fn from_config(config: &NexoAiConfig) -> Result<Self> {
-        let device = resolve_device(config.runtime.device)?;
-        let mut models = config.models.iter();
+    pub(crate) async fn from_model_config(
+        base_runtime_config: &RuntimeConfig,
+        model: &RegisteredModelConfig,
+    ) -> Result<Self> {
+        let device = resolve_device(base_runtime_config.device)?;
+        Self::from_models(base_runtime_config, &device, std::slice::from_ref(model)).await
+    }
+
+    async fn from_models(
+        runtime_config: &RuntimeConfig,
+        device: &Device,
+        models: &[RegisteredModelConfig],
+    ) -> Result<Self> {
+        let mut models = models.iter();
         let first = models.next().ok_or(Error::EmptyModelCatalog)?;
 
-        let first_pipeline = build_pipeline(first, &config.runtime, &device)?;
-        let scheduler = map_scheduler(config.runtime.scheduler);
+        let first_pipeline = build_pipeline(first, runtime_config, device)?;
+        let scheduler = map_scheduler(runtime_config.scheduler);
         let engine = MistralRsBuilder::new(
             first_pipeline,
             scheduler.clone(),
-            config.runtime.throughput_logging,
+            runtime_config.throughput_logging,
             None,
         )
         .with_model_id(first.descriptor.id.to_string())
-        .with_no_kv_cache(config.runtime.no_kv_cache)
-        .with_no_prefix_cache(config.runtime.no_prefix_cache)
-        .with_prefix_cache_n(config.runtime.prefix_cache_entries)
-        .with_disable_eos_stop(config.runtime.disable_eos_stop)
+        .with_no_kv_cache(runtime_config.no_kv_cache)
+        .with_no_prefix_cache(runtime_config.no_prefix_cache)
+        .with_prefix_cache_n(runtime_config.prefix_cache_entries)
+        .with_disable_eos_stop(runtime_config.disable_eos_stop)
         .build()
         .await;
 
         for model in models {
-            let pipeline = build_pipeline(model, &config.runtime, &device)?;
+            let pipeline = build_pipeline(model, runtime_config, device)?;
             engine
                 .add_model(
                     model.descriptor.id.to_string(),
                     pipeline,
                     scheduler.clone(),
-                    AddModelConfig::new(map_engine_config(&config.runtime)),
+                    AddModelConfig::new(map_engine_config(&runtime_config)),
                 )
                 .await
                 .map_err(|message| Error::MistralRuntime { message })?;
@@ -88,27 +98,14 @@ impl MistralRuntime {
         })
     }
 
-    /// Returns the runtime state for a configured model, if it is known by `mistralrs-core`.
-    pub(crate) fn model_state(&self, model_id: &ModelId) -> Option<ModelRuntimeState> {
-        self.engine
-            .get_model_status(model_id.as_str())
-            .ok()
-            .flatten()
-            .map(|status| match status {
-                ModelStatus::Loaded => ModelRuntimeState::Loaded,
-                ModelStatus::Unloaded => ModelRuntimeState::Unloaded,
-                ModelStatus::Reloading => ModelRuntimeState::Reloading,
-            })
-    }
-
     /// Submits a shared `nexo-core` request to the backing runtime.
-    pub(crate) fn submit(
+    pub(crate) async fn submit(
         &self,
         descriptor: ModelDescriptor,
         request: InferenceRequest,
     ) -> Result<InferenceStream> {
         match request {
-            InferenceRequest::Generate(request) => self.submit_generate(descriptor, request),
+            InferenceRequest::Generate(request) => self.submit_generate(descriptor, request).await,
             InferenceRequest::Embed(request) => self.submit_embed(descriptor, request),
             InferenceRequest::Tokenize(request) => self.submit_tokenize(descriptor, request),
             InferenceRequest::Detokenize(request) => self.submit_detokenize(descriptor, request),
@@ -121,7 +118,7 @@ impl MistralRuntime {
         }
     }
 
-    fn submit_generate(
+    async fn submit_generate(
         &self,
         descriptor: ModelDescriptor,
         request: GenerateRequest,
@@ -133,28 +130,79 @@ impl MistralRuntime {
             model_id: descriptor.id.clone(),
         };
         let (response_tx, response_rx) = mpsc::channel(32);
-        let mistral_request = map_generate_request(
-            &request,
-            &descriptor,
-            response_tx,
-            self.next_request_ordinal(),
-        )?;
+        let request_ordinal = self.next_request_ordinal();
+        tracing::debug!(
+            request_ordinal,
+            model_id = %descriptor.id,
+            request_id = ?request.request_id,
+            run_id = ?request.run_id,
+            round_id = ?request.round_id,
+            session_id = ?request.session_id,
+            messages = request.conversation.messages.len(),
+            tools = request.tools.len(),
+            streaming = ?request.streaming,
+            sampling = ?request.sampling,
+            "Submitting generate request to mistralrs"
+        );
 
-        self.dispatch_request(&descriptor.id, Request::Normal(Box::new(mistral_request)))?;
+        let mistral_request =
+            map_generate_request(&request, &descriptor, response_tx, request_ordinal)?;
+
+        if let Err(error) = self
+            .dispatch_request(&descriptor.id, Request::Normal(Box::new(mistral_request)))
+            .await
+        {
+            tracing::debug!(
+                request_ordinal,
+                model_id = %descriptor.id,
+                error = %error,
+                "Failed to dispatch generate request to mistralrs"
+            );
+            return Err(error);
+        }
+        tracing::debug!(
+            request_ordinal,
+            model_id = %descriptor.id,
+            "Dispatched generate request to mistralrs"
+        );
 
         let started = stream::once({
             let context = context.clone();
             async move { Ok(generation_started(&context)) }
         });
         let body = stream::unfold(
-            (response_rx, context),
-            |(mut response_rx, context)| async move {
-                response_rx.recv().await.map(|response| {
-                    (
-                        Ok(map_generation_response(response, &context)),
-                        (response_rx, context),
-                    )
-                })
+            (response_rx, context, request_ordinal),
+            |(mut response_rx, context, request_ordinal)| async move {
+                match response_rx.recv().await {
+                    Some(response) => {
+                        tracing::debug!(
+                            request_ordinal,
+                            model_id = %context.model_id,
+                            response_kind = mistral_response_kind(&response),
+                            "Received mistralrs generation response"
+                        );
+                        if let Some(error) = mistral_response_error(&response) {
+                            tracing::debug!(
+                                request_ordinal,
+                                model_id = %context.model_id,
+                                error = %error,
+                                "Received mistralrs generation error response"
+                            );
+                        }
+                        Some((
+                            Ok(map_generation_response(response, &context)),
+                            (response_rx, context, request_ordinal),
+                        ))
+                    }
+                    None => {
+                        tracing::debug!(
+                            request_ordinal,
+                            model_id = %context.model_id,
+                            "Mistralrs generation response channel closed"
+                        );
+                        None
+                    }
+                }
             },
         );
 
@@ -238,7 +286,8 @@ impl MistralRuntime {
             };
             let mistral_request =
                 map_embedding_request(input, &descriptor, response_tx, request_ordinal);
-            self.dispatch_request(&descriptor.id, Request::Normal(Box::new(mistral_request)))?;
+            self.dispatch_request(&descriptor.id, Request::Normal(Box::new(mistral_request)))
+                .await?;
 
             let Some(response) = response_rx.recv().await else {
                 return Err(Error::MistralRuntime {
@@ -291,7 +340,8 @@ impl MistralRuntime {
     ) -> Result<Vec<u32>> {
         let (response_tx, mut response_rx) = mpsc::channel(1);
         let mistral_request = map_tokenization_request(&request, &descriptor, response_tx)?;
-        self.dispatch_request(&descriptor.id, Request::Tokenize(mistral_request))?;
+        self.dispatch_request(&descriptor.id, Request::Tokenize(mistral_request))
+            .await?;
 
         match response_rx.recv().await {
             Some(Ok(tokens)) => Ok(tokens),
@@ -311,7 +361,8 @@ impl MistralRuntime {
     ) -> Result<String> {
         let (response_tx, mut response_rx) = mpsc::channel(1);
         let mistral_request = map_detokenization_request(&request, response_tx);
-        self.dispatch_request(&descriptor.id, Request::Detokenize(mistral_request))?;
+        self.dispatch_request(&descriptor.id, Request::Detokenize(mistral_request))
+            .await?;
 
         match response_rx.recv().await {
             Some(Ok(text)) => Ok(text),
@@ -325,7 +376,7 @@ impl MistralRuntime {
         }
     }
 
-    fn dispatch_request(&self, model_id: &ModelId, request: Request) -> Result {
+    async fn dispatch_request(&self, model_id: &ModelId, request: Request) -> Result {
         let sender = self
             .engine
             .get_sender(Some(model_id.as_str()))
@@ -333,7 +384,8 @@ impl MistralRuntime {
                 message: error.to_string(),
             })?;
         sender
-            .blocking_send(request)
+            .send(request)
+            .await
             .map_err(|_| Error::MistralRuntime {
                 message: format!("failed to dispatch request to model `{model_id}`"),
             })
@@ -486,10 +538,7 @@ fn resolve_uqff_selection(
     explicit: Option<&[PathBuf]>,
 ) -> Result<Option<String>> {
     let files = if let Some(files) = explicit {
-        files
-            .iter()
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
+        resolve_explicit_uqff_files(model_dir, files)?
     } else if model_dir.exists() {
         discover_local_uqff_files(model_dir)?
     } else {
@@ -501,6 +550,41 @@ fn resolve_uqff_selection(
     } else {
         Ok(Some(files.join(UQFF_MULTI_FILE_DELIMITER)))
     }
+}
+
+fn resolve_explicit_uqff_files(model_dir: &Path, selectors: &[PathBuf]) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    let mut discovered = None;
+
+    for selector in selectors {
+        if is_uqff_file(selector) {
+            files.push(selector.to_string_lossy().into_owned());
+            continue;
+        }
+
+        let prefix = selector.to_string_lossy();
+        if discovered.is_none() {
+            discovered = Some(discover_local_uqff_files(model_dir)?);
+        }
+        let local_files = discovered.as_ref().ok_or_else(|| Error::MistralRuntime {
+            message: "failed to discover local UQFF files".to_string(),
+        })?;
+        let mut matched = local_files
+            .iter()
+            .filter(|filename| filename.starts_with(prefix.as_ref()))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if matched.is_empty() {
+            return Err(missing_local_file(model_dir, &format!("{prefix}*.uqff")));
+        }
+
+        files.append(&mut matched);
+    }
+
+    files.sort();
+    files.dedup();
+    Ok(files)
 }
 
 fn discover_local_uqff_files(model_dir: &Path) -> Result<Vec<String>> {
@@ -725,6 +809,60 @@ fn metal_device() -> Result<Device> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::catalog::model_config_from_manifest;
+    use nexo_model_mgmt::registry::find_manifest;
+
+    use super::*;
+
+    #[test]
+    fn gemma_4_uqff_keeps_prefix_cache_default() {
+        let _model =
+            model_config_from_manifest(find_manifest("gemma-4-e4b-it-uqff-afq8").unwrap()).unwrap();
+        let runtime = RuntimeConfig::default();
+
+        assert!(!runtime.no_prefix_cache);
+    }
+
+    #[test]
+    fn gemma_4_gguf_keeps_prefix_cache_default() {
+        let _model =
+            model_config_from_manifest(find_manifest("gemma-4-e2b-it-q5").unwrap()).unwrap();
+        let runtime = RuntimeConfig::default();
+
+        assert!(!runtime.no_prefix_cache);
+    }
+
+    #[test]
+    fn explicit_uqff_prefix_resolves_only_matching_files() {
+        let model_dir = unique_test_dir("uqff-prefix");
+        fs::create_dir_all(&model_dir).unwrap();
+        fs::write(model_dir.join("afq6-0.uqff"), []).unwrap();
+        fs::write(model_dir.join("afq8-0.uqff"), []).unwrap();
+
+        let selected = resolve_uqff_selection(&model_dir, Some(&[PathBuf::from("afq8-")]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(selected, "afq8-0.uqff");
+        fs::remove_dir_all(&model_dir).unwrap();
+    }
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("nexo-ai-{name}-{}-{timestamp}", std::process::id()))
+    }
+}
+
 fn map_scheduler(policy: SchedulerPolicy) -> MistralSchedulerConfig {
     match policy {
         SchedulerPolicy::Fixed {
@@ -757,4 +895,35 @@ fn map_dtype(dtype: ModelDataType) -> mistralrs_core::ModelDType {
 
 fn path_to_string(path: Option<&PathBuf>) -> Option<String> {
     path.map(|path| path.to_string_lossy().into_owned())
+}
+
+fn mistral_response_kind(response: &MistralResponse) -> &'static str {
+    match response {
+        MistralResponse::Done(_) => "done",
+        MistralResponse::Chunk(_) => "chunk",
+        MistralResponse::CompletionDone(_) => "completion_done",
+        MistralResponse::CompletionChunk(_) => "completion_chunk",
+        MistralResponse::Raw { .. } => "raw",
+        MistralResponse::Embeddings { .. } => "embeddings",
+        MistralResponse::ImageGeneration(_) => "image_generation",
+        MistralResponse::Speech { .. } => "speech",
+        MistralResponse::AgenticToolCallProgress { .. } => "agentic_tool_call_progress",
+        MistralResponse::AgenticToolApprovalRequired { .. } => "agentic_tool_approval_required",
+        MistralResponse::File(_) => "file",
+        MistralResponse::InternalError(_) => "internal_error",
+        MistralResponse::ValidationError(_) => "validation_error",
+        MistralResponse::ModelError(_, _) => "model_error",
+        MistralResponse::CompletionModelError(_, _) => "completion_model_error",
+    }
+}
+
+fn mistral_response_error(response: &MistralResponse) -> Option<String> {
+    match response {
+        MistralResponse::InternalError(error) | MistralResponse::ValidationError(error) => {
+            Some(error.to_string())
+        }
+        MistralResponse::ModelError(message, _)
+        | MistralResponse::CompletionModelError(message, _) => Some(message.clone()),
+        _ => None,
+    }
 }

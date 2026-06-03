@@ -1,5 +1,5 @@
 use crate::{agent::persistence, server::state::SharedState, tools};
-use nexo_core::{MessageRole, ReasoningSettings};
+use nexo_core::{MessageRole, ReasoningSettings, ToolChoice};
 use nexo_ws_schema::{Frame, RunStatus};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
@@ -41,6 +41,7 @@ pub async fn start_run(
     model_id: Option<&str>,
     prompt_collection_id: Option<&str>,
     reasoning: ReasoningSettings,
+    tool_choice: ToolChoice,
 ) {
     if let Err(error) = persistence::insert_conversation_entry(
         db,
@@ -84,6 +85,7 @@ pub async fn start_run(
         model_id,
         prompt_collection_id,
         reasoning,
+        tool_choice,
     )
     .await;
 }
@@ -99,6 +101,7 @@ pub(crate) async fn run_existing(
     model_id: Option<&str>,
     prompt_collection_id: Option<&str>,
     reasoning: ReasoningSettings,
+    tool_choice: ToolChoice,
 ) {
     let _ = crate::agent::locks::reap_expired(db).await;
 
@@ -143,7 +146,7 @@ pub(crate) async fn run_existing(
         };
 
         let prepared_context = match context_manager
-            .prepare_round_context(db, session_id, &tool_entries)
+            .prepare_round_context(db, session_id)
             .await
         {
             Ok(context) => context,
@@ -177,6 +180,7 @@ pub(crate) async fn run_existing(
             &tool_entries,
             model_id,
             reasoning.clone(),
+            tool_choice.clone(),
             state,
             session_id,
         )

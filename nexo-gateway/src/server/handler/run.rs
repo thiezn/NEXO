@@ -2,6 +2,7 @@
 
 use crate::agent::{RunCommand, RunHandle};
 use crate::server::state::SharedState;
+use nexo_core::ToolChoice;
 use nexo_ws_schema::{
     EventKind, Frame, RunEventPayload, RunInstructionsAppendParams, RunInstructionsAppendResponse,
     RunStartParams, RunStatus, RunStopParams, RunStopResponse,
@@ -52,13 +53,15 @@ pub(super) async fn handle_run_start(
 
     let run_id = Frame::new_id();
     let reasoning = run_params.reasoning.unwrap_or_default();
-    if let Err(e) = crate::agent::persistence::create_run(
+    let tool_choice = run_params.tool_choice.unwrap_or(ToolChoice::Automatic);
+    if let Err(e) = crate::agent::persistence::create_run_with_tool_choice(
         db,
         &run_id,
         &session_id,
         &run_params.idempotency_key,
         run_params.model_id.as_deref(),
         &reasoning,
+        &tool_choice,
     )
     .await
     {
@@ -73,6 +76,7 @@ pub(super) async fn handle_run_start(
         model_id: run_params.model_id,
         prompt_collection_id,
         reasoning,
+        tool_choice,
     };
     if let Err(e) = run_handle.submit(cmd).await {
         tracing::error!("Failed to submit run command: {e}");

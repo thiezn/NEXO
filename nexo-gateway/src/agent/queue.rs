@@ -1,4 +1,5 @@
 use crate::server::state::SharedState;
+use nexo_core::ToolChoice;
 use nexo_ws_schema::{Frame, RunStatus};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
@@ -34,6 +35,7 @@ pub async fn drain_queue(
     };
 
     if queued.is_empty() {
+        tracing::info!("No queued runs to drain");
         return;
     }
 
@@ -83,6 +85,14 @@ pub async fn drain_queue(
                 continue;
             }
         };
+        let tool_choice = match crate::agent::persistence::decode_tool_choice_json(&reasoning_json)
+        {
+            Ok(tool_choice) => tool_choice,
+            Err(error) => {
+                tracing::error!("Failed to decode tool choice for queued run {run_id}: {error}");
+                ToolChoice::Automatic
+            }
+        };
 
         // If the node disappeared between the model.status update and this drain pass,
         // the run loop will cleanly queue the run again via `InferenceOutcome::NoLlmAvailable`.
@@ -95,6 +105,7 @@ pub async fn drain_queue(
             model_id.as_deref(),
             prompt_collection_id.as_deref(),
             reasoning,
+            tool_choice,
         )
         .await;
     }

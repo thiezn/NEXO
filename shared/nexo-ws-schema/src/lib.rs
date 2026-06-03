@@ -20,7 +20,7 @@ pub use connect::{ConnectParams, HelloOk, Policy};
 pub use error::{ErrorPayload, WsError};
 pub use events::{
     CronPayload, EventKind, HeartbeatPayload, MessagePayload, PresencePayload, RunEventPayload,
-    ShutdownPayload, TickPayload,
+    SessionClosedPayload, ShutdownPayload, TickPayload,
 };
 pub use frame::Frame;
 pub use methods::PromptCollection;

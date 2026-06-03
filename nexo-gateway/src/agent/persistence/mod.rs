@@ -19,8 +19,9 @@ pub use prompts::{
     list_prompt_collections, list_prompt_documents, upsert_prompt_collection,
 };
 pub use runs::{
-    create_round, create_run, create_tool_trace, finish_round, finish_run, finish_tool_trace,
-    is_run_cancelled, mark_run_queued, next_round_index, stop_run,
+    create_round, create_run, create_run_with_tool_choice, create_tool_trace, finish_round,
+    finish_run, finish_tool_trace, is_run_cancelled, mark_run_queued, next_round_index,
+    stop_run,
 };
 pub use sessions::{clear_session, create_session, get_session, list_sessions};
 
@@ -30,5 +31,6 @@ pub(crate) use conversations::insert_message;
 pub(crate) use runs::store_run_summary;
 
 pub(crate) use runs::decode_reasoning_json;
+pub(crate) use runs::decode_tool_choice_json;
 
 pub(crate) use prompts::load_prompt_collection_system_prompt;

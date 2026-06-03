@@ -33,6 +33,13 @@ pub enum Error {
         model_id: ModelId,
     },
 
+    /// The requested model is known but is not currently loaded into the runtime.
+    #[error("model `{model_id}` is not loaded")]
+    ModelNotLoaded {
+        /// The unloaded model identifier.
+        model_id: ModelId,
+    },
+
     /// The requested feature is not implemented for the current runtime setup.
     #[error("unsupported feature: {feature}")]
     UnsupportedFeature {
@@ -101,6 +108,9 @@ impl Error {
             }
             Self::UnsupportedRequest { kind } => nexo_core::Error::UnsupportedFeature {
                 feature: kind.to_string(),
+            },
+            Self::ModelNotLoaded { model_id } => nexo_core::Error::InvalidState {
+                message: format!("model `{model_id}` is not loaded"),
             },
             Self::UnknownModel { model_id } => nexo_core::Error::InvalidRequest {
                 message: format!("unknown model `{model_id}`"),

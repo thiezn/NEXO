@@ -2,7 +2,8 @@
 
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
-    ErrorPayload, Frame, SessionClearParams, SessionCreateParams, SessionGetParams,
+    ErrorPayload, EventKind, Frame, SessionClearParams, SessionClosedPayload,
+    SessionCreateParams, SessionGetParams,
 };
 use sqlx::SqlitePool;
 
@@ -87,6 +88,7 @@ pub(super) async fn handle_get(
 pub(super) async fn handle_clear(
     request_id: &str,
     params: serde_json::Value,
+    state: &SharedState,
     db: &SqlitePool,
 ) -> Frame {
     let clear_params: SessionClearParams = match parse_params(request_id, params, "session.clear") {
@@ -96,6 +98,18 @@ pub(super) async fn handle_clear(
 
     match crate::agent::persistence::clear_session(db, &clear_params.session_id).await {
         Ok(cleared) => {
+            if cleared {
+                let event = Frame::event(
+                    EventKind::SessionClosed,
+                    SessionClosedPayload {
+                        session_id: clear_params.session_id.clone(),
+                    },
+                );
+                if let Ok(event) = event {
+                    let state = state.read().await;
+                    let _ = state.event_tx.send(event);
+                }
+            }
             ok_or_internal_error(request_id, nexo_ws_schema::SessionClearResponse { cleared })
         }
         Err(error) => internal_error(request_id, format!("Failed to clear session: {error}")),

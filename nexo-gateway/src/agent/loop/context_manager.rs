@@ -2,7 +2,7 @@
 
 use crate::{agent::persistence, server::state::SharedState};
 use nexo_core::{ContentPart, ConversationMessage, MessageRole, MetadataMap, TextPart};
-use nexo_ws_schema::{SystemPrompt, ToolEntry};
+use nexo_ws_schema::SystemPrompt;
 use sqlx::SqlitePool;
 
 /// Prepared context for a single inference round.
@@ -28,15 +28,9 @@ impl ContextManager {
         &self,
         db: &SqlitePool,
         session_id: &str,
-        tool_entries: &[ToolEntry],
     ) -> Result<PreparedContext, sqlx::Error> {
         let conversation_messages = persistence::load_conversation_messages(db, session_id).await?;
-        let tool_prompt_section = build_tool_prompt_section(tool_entries);
-        let round_messages = assemble_round_messages(
-            &conversation_messages,
-            self.system_prompt.as_ref(),
-            &tool_prompt_section,
-        );
+        let round_messages = assemble_round_messages(&conversation_messages, self.system_prompt.as_ref());
 
         Ok(PreparedContext {
             persisted_message_count: conversation_messages.len(),
@@ -69,16 +63,12 @@ async fn load_system_prompt(
 fn assemble_round_messages(
     conversation_messages: &[ConversationMessage],
     system_prompt: Option<&SystemPrompt>,
-    tool_prompt_section: &str,
 ) -> Vec<ConversationMessage> {
     let mut system_parts = Vec::new();
     if let Some(system_prompt) = system_prompt
         && !system_prompt.content.is_empty()
     {
         system_parts.push(system_prompt.content.clone());
-    }
-    if !tool_prompt_section.is_empty() {
-        system_parts.push(tool_prompt_section.to_string());
     }
 
     let system_prompt = if system_parts.is_empty() {
@@ -100,66 +90,21 @@ fn assemble_round_messages(
         .collect()
 }
 
-fn build_tool_prompt_section(tools: &[ToolEntry]) -> String {
-    if tools.is_empty() {
-        return String::new();
-    }
-
-    let mut out = String::from("# Available Tools\n\n");
-    for tool in tools.iter().filter(|tool| tool.available) {
-        out.push_str(&format!("## {}\n", tool.spec.name));
-        out.push_str(&format!("{}\n", tool.spec.description));
-        out.push_str(&format!(
-            "Parameters: {}\n",
-            serde_json::to_string(&tool.spec.parameters).unwrap_or_default()
-        ));
-        out.push('\n');
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn build_tool_prompt_section_empty() {
-        let result = build_tool_prompt_section(&[]);
-        assert!(result.is_empty());
-    }
+    fn assemble_round_messages_does_not_render_tool_catalog() {
+        let messages = assemble_round_messages(&[], None);
+        let Some(ConversationMessage { parts, .. }) = messages.first() else {
+            panic!("expected system message");
+        };
 
-    #[test]
-    fn build_tool_prompt_section_formats_available_tools() {
-        let tools = vec![
-            ToolEntry::new(
-                nexo_ws_schema::ToolSpecEntry {
-                    name: "echo.run".into(),
-                    description: "Echoes input".into(),
-                    parameters: serde_json::json!({"type": "object"}),
-                    contract_version: Some("2026-05-22".into()),
-                    execution: Default::default(),
-                    metadata: Default::default(),
-                },
-                "node",
-                true,
-            ),
-            ToolEntry::new(
-                nexo_ws_schema::ToolSpecEntry {
-                    name: "offline.tool".into(),
-                    description: "Not available".into(),
-                    parameters: serde_json::json!({"type": "object"}),
-                    contract_version: None,
-                    execution: Default::default(),
-                    metadata: Default::default(),
-                },
-                "node",
-                false,
-            ),
-        ];
+        let Some(ContentPart::Text(TextPart { text })) = parts.first() else {
+            panic!("expected text system prompt");
+        };
 
-        let result = build_tool_prompt_section(&tools);
-        assert!(result.contains("echo.run"));
-        assert!(result.contains("Echoes input"));
-        assert!(!result.contains("offline.tool"));
+        assert!(!text.contains("# Available Tools"));
     }
 }

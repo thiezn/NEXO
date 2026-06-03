@@ -1,6 +1,7 @@
 //! Runtime construction and service adapters.
 
 mod builder;
+mod controller;
 mod engine;
 mod service;
 

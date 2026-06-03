@@ -268,6 +268,7 @@ fn parse_run(args: &str, context: CommandContext<'_>) -> Result<AppCommand, Stri
         instructions: None,
         model_id,
         reasoning: None,
+        tool_choice: None,
     }))
 }
 

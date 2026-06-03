@@ -1,6 +1,7 @@
 //! Catalog adapters from NEXO model manifests into `nexo-ai` runtime configs.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use nexo_model_mgmt::registry::{known_manifests, list_models};
 use nexo_model_mgmt::{ModelComponent, ModelFileSelector, ModelManifest};
@@ -60,13 +61,29 @@ fn loader_from_manifest(manifest: &ModelManifest) -> Result<ModelLoader> {
 
     Ok(ModelLoader::Auto(AutoModelLoader {
         model_id: manifest.id().to_string(),
-        from_uqff: None,
+        from_uqff: uqff_selectors(manifest),
         tokenizer_json: None,
         chat_template: None,
         jinja_explicit: None,
         dtype: ModelDataType::Auto,
         hf_cache_path: None,
     }))
+}
+
+fn uqff_selectors(manifest: &ModelManifest) -> Option<Vec<PathBuf>> {
+    let selectors = manifest
+        .files
+        .iter()
+        .filter(|file| file.component == ModelComponent::UqffShard)
+        .filter_map(|file| match &file.selector {
+            ModelFileSelector::Exact(path) | ModelFileSelector::Prefix(path) => {
+                Some(PathBuf::from(path))
+            }
+            ModelFileSelector::Suffix(_) => None,
+        })
+        .collect::<Vec<_>>();
+
+    (!selectors.is_empty()).then_some(selectors)
 }
 
 fn gguf_filenames(manifest: &ModelManifest) -> Result<Vec<String>> {
@@ -128,5 +145,18 @@ mod tests {
         let config = model_config_from_manifest(manifest).unwrap();
 
         assert!(matches!(config.loader, ModelLoader::Auto(_)));
+    }
+
+    #[test]
+    fn gemma_4_uqff_manifest_uses_auto_dtype() {
+        let manifest = find_manifest("gemma-4-e4b-it-uqff-afq8").unwrap();
+        let config = model_config_from_manifest(manifest).unwrap();
+
+        let ModelLoader::Auto(loader) = config.loader else {
+            panic!("expected auto loader");
+        };
+
+        assert_eq!(loader.dtype, ModelDataType::Auto);
+        assert_eq!(loader.from_uqff, Some(vec![PathBuf::from("afq8-")]));
     }
 }

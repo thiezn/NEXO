@@ -11,6 +11,9 @@ pub enum EventKind {
     Tick,
     /// Run lifecycle update event.
     Run,
+    /// Session lifecycle update event.
+    #[serde(rename = "session_closed")]
+    SessionClosed,
     /// Message delivery event.
     Message,
     /// Presence state update event.
@@ -57,6 +60,14 @@ pub struct RunEventPayload {
     /// Ephemeral thinking/reasoning content (not persisted in conversation history).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_content: Option<String>,
+}
+
+/// Payload for `session_closed` events.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClosedPayload {
+    /// Session identifier that was cleared.
+    pub session_id: String,
 }
 
 /// Payload for `presence` events.
@@ -115,6 +126,10 @@ mod tests {
     fn event_kind_serialization() {
         assert_eq!(serde_json::to_string(&EventKind::Tick).unwrap(), "\"tick\"");
         assert_eq!(
+            serde_json::to_string(&EventKind::SessionClosed).unwrap(),
+            "\"session_closed\""
+        );
+        assert_eq!(
             serde_json::to_string(&EventKind::Message).unwrap(),
             "\"message\""
         );
@@ -130,6 +145,7 @@ mod tests {
         for kind in [
             EventKind::Tick,
             EventKind::Run,
+            EventKind::SessionClosed,
             EventKind::Message,
             EventKind::Presence,
             EventKind::Shutdown,
@@ -229,6 +245,16 @@ mod tests {
         };
         let json = serde_json::to_string(&payload).unwrap();
         let decoded: RunEventPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload, decoded);
+    }
+
+    #[test]
+    fn session_closed_payload_roundtrip() {
+        let payload = SessionClosedPayload {
+            session_id: "sess-1".into(),
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let decoded: SessionClosedPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(payload, decoded);
     }
 }

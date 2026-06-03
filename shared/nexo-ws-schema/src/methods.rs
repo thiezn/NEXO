@@ -1,5 +1,5 @@
 use nexo_core::message::ConversationMessage;
-use nexo_core::{ModelDescriptor, ReasoningSettings, ToolCall, ToolDefinition};
+use nexo_core::{ModelDescriptor, ReasoningSettings, ToolCall, ToolChoice, ToolDefinition};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -157,6 +157,9 @@ pub struct RunStartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
     pub reasoning: Option<ReasoningSettings>,
+    /// Optional provider-agnostic tool-use policy for the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
 }
 
 /// Parameters for the `run.stop` method.
@@ -273,6 +276,9 @@ pub struct RunRoundRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     /// Field value.
     pub tools: Vec<ToolSpecEntry>,
+    #[serde(default)]
+    /// Tool use policy for the round.
+    pub tool_choice: ToolChoice,
     #[serde(default)]
     /// Reasoning controls for the round.
     pub reasoning: ReasoningSettings,
@@ -861,6 +867,9 @@ mod tests {
                 thinking: nexo_core::ThinkingMode::Enabled,
                 effort: Some(nexo_core::ReasoningEffort::High),
             }),
+            tool_choice: Some(ToolChoice::Specific {
+                name: "echo.run".into(),
+            }),
         };
         let json = serde_json::to_string(&params).unwrap();
         let decoded: RunStartParams = serde_json::from_str(&json).unwrap();
@@ -876,6 +885,7 @@ mod tests {
             instructions: None,
             model_id: None,
             reasoning: None,
+            tool_choice: None,
         };
         let json = serde_json::to_value(&params).unwrap();
         assert!(!json.as_object().unwrap().contains_key("sessionId"));
@@ -1099,6 +1109,9 @@ mod tests {
                 execution: ToolExecutionConstraints::default(),
                 metadata: BTreeMap::new(),
             }],
+            tool_choice: ToolChoice::Specific {
+                name: "echo.run".into(),
+            },
             reasoning: nexo_core::ReasoningSettings::default(),
             model_id: Some("gemma-4-e4b-it".into()),
         };

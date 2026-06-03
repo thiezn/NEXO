@@ -1,6 +1,8 @@
+mod audio;
 mod cli;
 mod config;
 mod tui;
+mod vision;
 
 use clap::Parser;
 use cli::base::Cli;

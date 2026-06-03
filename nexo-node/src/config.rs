@@ -29,6 +29,8 @@ pub struct NodeConfig {
     pub startup_capabilities: Vec<ModelCapability>,
     /// Default model for each startup capability. Missing values use catalog selection.
     pub default_models: HashMap<ModelCapability, ModelId>,
+    /// Enables forwarding tools to the model runtime for native tool calling.
+    pub enable_tool_calling: bool,
     /// Shared runtime settings forwarded to `nexo-ai`.
     pub runtime: RuntimeConfig,
 }
@@ -45,6 +47,7 @@ impl Default for NodeConfig {
             reconnect_interval_ms: 5000,
             startup_capabilities: vec![ModelCapability::TextGeneration],
             default_models: HashMap::new(),
+            enable_tool_calling: true,
             runtime: RuntimeConfig::default(),
         }
     }
@@ -95,6 +98,7 @@ mod tests {
             vec![ModelCapability::TextGeneration]
         );
         assert!(config.default_models.is_empty());
+        assert!(config.enable_tool_calling);
         assert_eq!(
             config.runtime.no_kv_cache,
             RuntimeConfig::default().no_kv_cache

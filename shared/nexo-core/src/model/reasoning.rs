@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingMode {
     /// Do not request hidden or structured thinking output.
-    #[default]
     Disabled,
 
     /// Enable model thinking for supported runtimes.
+    #[default]
     Enabled,
 }
 
@@ -22,10 +22,10 @@ pub enum ReasoningEffort {
     Low,
 
     /// Request balanced reasoning depth.
-    #[default]
     Medium,
 
     /// Request deeper reasoning for more thorough analysis.
+    #[default]
     High,
 }
 

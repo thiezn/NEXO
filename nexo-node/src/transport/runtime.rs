@@ -11,7 +11,7 @@ use nexo_core::ToolRegistry;
 use nexo_ws_client::{
     NexoConnection, ReadHalf, WriteHalf, default_node_connect_params, perform_handshake,
 };
-use nexo_ws_schema::{ErrorPayload, EventKind, Frame, Method};
+use nexo_ws_schema::{ErrorPayload, EventKind, Frame, Method, SessionClosedPayload};
 use std::time::Duration;
 
 enum MessageLoopAction {
@@ -42,7 +42,11 @@ pub async fn run_node(
     registry: &ToolRegistry,
     available_models: Vec<RegisteredModelConfig>,
 ) -> cli_helpers::Result {
-    let models = shared_models(config.runtime.clone(), available_models);
+    let models = shared_models(
+        config.runtime.clone(),
+        config.enable_tool_calling,
+        available_models,
+    );
     load_startup_models(&models, config).await;
 
     let mut attempt = 0u32;
@@ -246,6 +250,17 @@ async fn handle_gateway_frame(
                 .unwrap_or("unknown");
             tracing::info!("Received shutdown event: {reason}");
             Ok(MessageLoopAction::Stop)
+        }
+        Some(Frame::Event {
+            event: EventKind::SessionClosed,
+            payload,
+            ..
+        }) => {
+            match serde_json::from_value::<SessionClosedPayload>(payload) {
+                Ok(payload) => tracing::info!(session_id = %payload.session_id, "Session closed"),
+                Err(error) => tracing::warn!(error = %error, "Failed to decode session closed event payload"),
+            }
+            Ok(MessageLoopAction::Continue)
         }
         Some(Frame::Event { event, .. }) => {
             tracing::debug!("Received event: {event:?}");

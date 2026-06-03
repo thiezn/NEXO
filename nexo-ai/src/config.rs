@@ -54,6 +54,14 @@ pub struct RuntimeConfig {
     pub no_kv_cache: bool,
 
     /// Disables prefix caching in the underlying runtime when set.
+    ///
+    /// Prefix caching is an optimization that retains the activations
+    /// for the initial tokens of a sequence. This is often a system prompt
+    /// and will help time-to-first token for new sessions.
+    ///
+    /// However, at jun-3-2026 I am seeing issues occationally when this is
+    /// enabled, especially when a second inference is run in the same
+    /// session. I'm defaulting this to be disabled for now.
     pub no_prefix_cache: bool,
 
     /// The number of prefix-cache entries to retain when prefix caching is enabled.
@@ -72,7 +80,7 @@ impl Default for RuntimeConfig {
             device: DeviceSpec::BestAvailable,
             scheduler: SchedulerPolicy::default(),
             no_kv_cache: false,
-            no_prefix_cache: false,
+            no_prefix_cache: true,
             prefix_cache_entries: 16,
             disable_eos_stop: false,
             throughput_logging: false,
@@ -110,7 +118,8 @@ pub struct AutoModelLoader {
     /// The model identifier or local path understood by `mistralrs-core`.
     pub model_id: String,
 
-    /// Optional UQFF artifact filenames or paths. When omitted, local `.uqff` files are discovered.
+    /// Optional UQFF artifact filenames, paths, or local filename prefixes.
+    /// When omitted, local `.uqff` files are discovered.
     #[serde(default)]
     pub from_uqff: Option<Vec<PathBuf>>,
 

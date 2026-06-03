@@ -13,6 +13,11 @@ ALL_TARGETS=(
 	"nexo-ai"
 )
 
+GIT_UPDATE_PACKAGES=(
+	"cli-helpers"
+	"mistralrs-core"
+)
+
 print_usage() {
 	echo "Usage: ./scripts/deploy.sh [target ...]"
 	echo
@@ -64,8 +69,13 @@ else
 fi
 
 # Clean up build artifacts
-echo "Cleaning up previous build artifacts..."
+# echo "Cleaning up previous build artifacts..."
 # cargo clean
+
+echo "Refreshing git dependencies to their latest remote commits..."
+for git_package in "${GIT_UPDATE_PACKAGES[@]}"; do
+	cargo update -p "$git_package"
+done
 
 # First test and build the production apps
 # cargo test --release

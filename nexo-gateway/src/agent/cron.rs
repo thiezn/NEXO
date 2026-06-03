@@ -1,4 +1,4 @@
-use nexo_core::{ReasoningSettings, ThinkingMode};
+use nexo_core::{ReasoningSettings, ThinkingMode, ToolChoice};
 use nexo_ws_schema::{CronEntry, CronPayload, EventKind, Frame};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
@@ -159,6 +159,7 @@ pub async fn run_scheduler(
                     thinking: ThinkingMode::Disabled,
                     effort: None,
                 },
+                tool_choice: ToolChoice::Automatic,
             };
             if let Err(e) = run_handle.submit(cmd).await {
                 tracing::warn!("Failed to submit cron run command: {e}");

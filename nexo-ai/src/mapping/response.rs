@@ -80,6 +80,14 @@ pub(crate) fn map_generation_response(
             Retryability::Fatal,
             context,
         ),
+        Ok(ResponseOk::AgenticToolCallProgress { .. })
+        | Ok(ResponseOk::AgenticToolApprovalRequired { .. })
+        | Ok(ResponseOk::File(_)) => failure_response(
+            InferenceErrorCode::UnsupportedFeature,
+            "received unsupported agentic output for a text generation request".to_string(),
+            Retryability::Fatal,
+            context,
+        ),
         Err(error) => map_response_error(*error, context),
     }
 }
@@ -113,6 +121,7 @@ pub(crate) fn map_runtime_error(
             (InferenceErrorCode::UnsupportedFeature, Retryability::Fatal)
         }
         Error::UnknownModel { .. }
+        | Error::ModelNotLoaded { .. }
         | Error::UnresolvedModelSelection { .. }
         | Error::InvalidToolPayload { .. }
         | Error::Json(_) => (InferenceErrorCode::InvalidRequest, Retryability::Fatal),

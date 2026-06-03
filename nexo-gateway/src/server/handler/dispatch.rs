@@ -40,7 +40,7 @@ pub(crate) async fn dispatch_method(
         }
         Method::SessionList => session::handle_list(request_id, peer_id, state, db).await,
         Method::SessionGet => session::handle_get(request_id, params, db).await,
-        Method::SessionClear => session::handle_clear(request_id, params, db).await,
+        Method::SessionClear => session::handle_clear(request_id, params, state, db).await,
         Method::CronCreate => cron::handle_create(request_id, params, db).await,
         Method::CronList => cron::handle_list(request_id, db).await,
         Method::CronDelete => cron::handle_delete(request_id, params, db).await,

@@ -3,10 +3,11 @@ use nexo_ws_schema::{
     ImageAnalyzeResponse, MessagePayload, Method, PresencePayload, PromptCollectionListParams,
     PromptCollectionListResponse, PromptDocumentListParams, PromptDocumentListResponse,
     RunEventPayload, RunStartResponse, RunStatus, SendResponse, SessionClearResponse,
-    SessionCreateResponse, SessionGetResponse, SessionListParams, SessionListResponse,
-    ShutdownPayload, StatusParams, StatusResponse, ToolEntry, ToolsCatalogParams,
-    ToolsCatalogResponse, ToolsExecuteResponse,
+    SessionClosedPayload, SessionCreateResponse, SessionGetResponse, SessionListParams,
+    SessionListResponse, ShutdownPayload, StatusParams, StatusResponse, ToolEntry,
+    ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteResponse,
 };
+use tracing::Event;
 
 use super::command::{self, AppCommand, CommandContext};
 use super::message::Message;
@@ -652,6 +653,26 @@ fn handle_event(model: &mut Model, event: EventKind, payload: serde_json::Value)
                     LogKind::Error,
                     "cron",
                     format!("Invalid cron event payload: {error}"),
+                ),
+            }
+            Vec::new()
+        }
+        EventKind::SessionClosed => {
+            match serde_json::from_value::<SessionClosedPayload>(payload) {
+                Ok(session_closed) => {
+                    if model.current_session_id.as_deref() == Some(&session_closed.session_id) {
+                        model.current_session_id = None;
+                    }
+                    model.push_log(
+                        LogKind::Event,
+                        "session closed",
+                        format!("session_id={}", session_closed.session_id),
+                    );
+                }
+                Err(error) => model.push_log(
+                    LogKind::Error,
+                    "session closed",
+                    format!("Invalid session closed event payload: {error}"),
                 ),
             }
             Vec::new()

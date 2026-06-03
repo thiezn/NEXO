@@ -1,7 +1,7 @@
 //! Background run task spawning and command transport.
 
 use crate::server::state::SharedState;
-use nexo_core::ReasoningSettings;
+use nexo_core::{ReasoningSettings, ToolChoice};
 use nexo_ws_schema::Frame;
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
@@ -24,6 +24,8 @@ pub enum RunCommand {
         prompt_collection_id: Option<String>,
         /// Typed reasoning controls for the run.
         reasoning: ReasoningSettings,
+        /// Provider-agnostic tool-use policy for the run.
+        tool_choice: ToolChoice,
     },
     /// Drain queued runs when a compatible node becomes available.
     DrainQueue,
@@ -67,9 +69,10 @@ async fn run_task(
                 model_id,
                 prompt_collection_id,
                 reasoning,
+                tool_choice,
             } => {
                 tracing::info!(
-                    "Starting run {run_id} (session={session_id}, reasoning={reasoning:?})"
+                    "Starting run {run_id} (session={session_id}, reasoning={reasoning:?}, tool_choice={tool_choice:?})"
                 );
                 super::r#loop::start_run(
                     &run_id,
@@ -82,6 +85,7 @@ async fn run_task(
                     model_id.as_deref(),
                     prompt_collection_id.as_deref(),
                     reasoning,
+                    tool_choice,
                 )
                 .await;
             }

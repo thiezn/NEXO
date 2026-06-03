@@ -1,5 +1,5 @@
 use crate::server::state::SharedState;
-use nexo_core::{ConversationMessage, ReasoningSettings, ToolCall};
+use nexo_core::{ConversationMessage, ReasoningSettings, ToolCall, ToolChoice};
 use nexo_ws_schema::{Frame, Method, RunRoundRequest, RunRoundResponse, ToolEntry};
 
 use super::router::Router;
@@ -35,6 +35,7 @@ pub(super) async fn run_inference(
     tool_entries: &[ToolEntry],
     model_id: Option<&str>,
     reasoning: ReasoningSettings,
+    tool_choice: ToolChoice,
     state: &SharedState,
     session_id: &str,
 ) -> InferenceOutcome {
@@ -50,6 +51,11 @@ pub(super) async fn run_inference(
         session_id: session_id.to_string(),
         messages: round_messages,
         tools,
+        tool_choice: if tool_entries.iter().any(|tool| tool.available) {
+            tool_choice
+        } else {
+            ToolChoice::Disabled
+        },
         reasoning,
         model_id: model_id.map(str::to_owned),
     };
