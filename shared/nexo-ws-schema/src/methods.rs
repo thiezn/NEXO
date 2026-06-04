@@ -582,7 +582,7 @@ pub struct CronDeleteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelLoadParams {
-    /// Field value.
+    /// Stable ID for the model to load.
     pub model_id: String,
 }
 
@@ -590,12 +590,12 @@ pub struct ModelLoadParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelLoadResponse {
-    /// Field value.
+    /// Stable ID for the model.
     pub model_id: String,
-    /// Field value.
+    /// Indicates whether the model was successfully loaded.
     pub loaded: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    /// Field value.
+    /// Error message if the model failed to load.
     pub error: Option<String>,
 }
 
@@ -605,14 +605,14 @@ pub struct ModelLoadResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUnloadParams {
-    /// Field value.
+    /// Stable ID for the model to unload.
     pub model_id: String,
 }
 
 /// Response payload for `model.unload`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ModelUnloadResponse {
-    /// Field value.
+    /// Indicates whether the model was successfully unloaded.
     pub unloaded: bool,
 }
 
@@ -624,15 +624,12 @@ pub struct ModelUnloadResponse {
 pub struct ModelStatusParams {
     /// Models currently loaded with their categories.
     #[serde(default)]
-    /// Field value.
     pub loaded_models: Vec<ModelDescriptor>,
     /// All model IDs available on disk on this node.
     #[serde(default)]
-    /// Field value.
     pub available_models: Vec<String>,
     /// All model descriptors available on disk on this node.
     #[serde(default)]
-    /// Field value.
     pub available_model_descriptors: Vec<ModelDescriptor>,
 }
 
@@ -656,11 +653,9 @@ pub struct PromptCollection {
     pub name: String,
     /// Optional description shown in UIs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    /// Field value.
     pub description: Option<String>,
     /// Ordered prompt document IDs that compose the collection.
     #[serde(default)]
-    /// Field value.
     pub documents: Vec<String>,
 }
 
@@ -676,14 +671,14 @@ pub struct SystemPrompt {
 pub struct PromptDocumentCreateParams {
     /// Stable ID for the prompt document (for example `identity.md`).
     pub id: String,
-    /// Field value.
+    /// Markdown or plain text content of the prompt document.
     pub content: String,
 }
 
 /// Response payload for `prompt.document.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentCreateResponse {
-    /// Field value.
+    /// Stable ID for the prompt document (for example `identity.md`).
     pub id: String,
 }
 
@@ -696,14 +691,14 @@ pub struct PromptDocumentListParams {}
 /// A single prompt document entry.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentEntry {
-    /// Field value.
+    /// Stable ID for the prompt document (for example `identity.md`).
     pub id: String,
 }
 
 /// Response payload for `prompt.document.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentListResponse {
-    /// Field value.
+    /// List of prompt document entries.
     pub documents: Vec<PromptDocumentEntry>,
 }
 
@@ -712,14 +707,14 @@ pub struct PromptDocumentListResponse {
 /// Parameters for `prompt.document.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentDeleteParams {
-    /// Field value.
+    /// Stable ID for the prompt document (for example `identity.md`).
     pub id: String,
 }
 
 /// Response payload for `prompt.document.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptDocumentDeleteResponse {
-    /// Field value.
+    /// Indicates whether the prompt document was successfully deleted.
     pub deleted: bool,
 }
 
@@ -731,10 +726,10 @@ pub struct PromptDocumentDeleteResponse {
 pub struct PromptCollectionCreateParams {
     /// Unique ID for the collection.
     pub id: String,
-    /// Field value.
+    /// Human-readable display name.
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    /// Field value.
+    /// Optional description shown in UIs.
     pub description: Option<String>,
     /// Ordered list of prompt document IDs that form this collection.
     pub documents: Vec<String>,
@@ -743,7 +738,7 @@ pub struct PromptCollectionCreateParams {
 /// Response payload for `prompt.collection.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptCollectionCreateResponse {
-    /// Field value.
+    /// Stable ID for the collection.
     pub id: String,
 }
 
@@ -756,7 +751,7 @@ pub struct PromptCollectionListParams {}
 /// Response payload for `prompt.collection.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptCollectionListResponse {
-    /// Field value.
+    /// List of prompt collections.
     pub collections: Vec<PromptCollection>,
 }
 
@@ -765,14 +760,14 @@ pub struct PromptCollectionListResponse {
 /// Parameters for `prompt.collection.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptCollectionDeleteParams {
-    /// Field value.
+    /// Stable ID for the collection.
     pub id: String,
 }
 
 /// Response payload for `prompt.collection.delete`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PromptCollectionDeleteResponse {
-    /// Field value.
+    /// Indicates whether the collection was successfully deleted.
     pub deleted: bool,
 }
 
@@ -800,9 +795,8 @@ pub struct ImageAnalyzeParams {
     pub temperature: f64,
     /// Visual token budget for variable resolution. Common values: 70, 140, 280, 560, 1120.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    /// Field value.
     pub visual_token_budget: Option<u32>,
-    /// Field value.
+    /// Unique key to ensure idempotency of the request.
     pub idempotency_key: String,
 }
 
@@ -818,11 +812,11 @@ fn default_image_analyze_temperature() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageAnalyzeResponse {
-    /// Field value.
+    /// Textual analysis result of the image.
     pub text: String,
-    /// Field value.
+    /// Number of tokens generated during analysis.
     pub tokens_generated: usize,
-    /// Field value.
+    /// Time taken for inference in milliseconds.
     pub inference_time_ms: u64,
 }
 
@@ -854,7 +848,7 @@ pub struct AudioAnalyzeParams {
     #[serde(default = "default_audio_analyze_temperature")]
     /// Field value.
     pub temperature: f64,
-    /// Field value.
+    /// Unique key to ensure idempotency of the request.
     pub idempotency_key: String,
 }
 
@@ -870,11 +864,11 @@ fn default_audio_analyze_temperature() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioAnalyzeResponse {
-    /// Field value.
+    /// Textual analysis result of the audio.
     pub text: String,
-    /// Field value.
+    /// Number of tokens generated during analysis.
     pub tokens_generated: usize,
-    /// Field value.
+    /// Time taken for inference in milliseconds.
     pub inference_time_ms: u64,
 }
 
@@ -910,7 +904,7 @@ pub struct ImageGenerateParams {
     /// Optional deterministic random seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
-    /// Field value.
+    /// Unique key to ensure idempotency of the request.
     pub idempotency_key: String,
 }
 
@@ -951,7 +945,7 @@ pub struct GeneratedImagePayload {
 pub struct ImageGenerateResponse {
     /// Generated images.
     pub images: Vec<GeneratedImagePayload>,
-    /// Field value.
+    /// Time taken for inference in milliseconds.
     pub inference_time_ms: u64,
 }
 
@@ -975,7 +969,7 @@ pub struct AudioGenerateParams {
     /// Optional speaking speed multiplier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<f32>,
-    /// Field value.
+    /// Unique key to ensure idempotency of the request.
     pub idempotency_key: String,
 }
 
@@ -996,7 +990,7 @@ pub struct AudioGenerateResponse {
     /// Number of audio channels, if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_count: Option<u16>,
-    /// Field value.
+    /// Time taken for inference in milliseconds.
     pub inference_time_ms: u64,
 }
 
