@@ -5,6 +5,9 @@ Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, ve
 
 ## All kinds of random things to do
 
+
+- Consider removing the category creation when a new note gets created. Instead, only handle this in the update_categories tool call. This can be either called by cron, or with a list of notes to update. That allows us to better control when updates are happeing, and speed up note creation which is on the critical path of note taking. We can then also do more heavy lifting in the update_categories call, like looking at all notes and re-assigning categories based on content, merging categories, etc.
+- Update my notes tool: I want to add yaml frontmatter to each note. It should have a title, date and time and optionally I can add the place I was and the mood I was in when creating the note. For instance, i can prompt: create a note stating 'a b c d'. I am currently out for a run in the woods in Lelystad and my mood is great. It should also try to assign a category to the note based on the content. I will maintain a category.MD file in storage with a list of known categories. It can look at them and use the category that fits best, or create a new one. my cron job summarization can collapse or re-categorize notes on a schedule. This will happen once a night as this could take some time.
 - Fix my tracing output. I should not embed variables in the message but instead pass them as fields. This will allow me to do proper structured logging 
 - Update the events/status messages between nexo-node and gateway. The nexo-node should periodically, and on each change, update it's current state, that includes tools, model loaded, active session_id in kv cache, thinking/reasoning token output, etc.
 - AI should be a feature so we can compile without. This speeds up deployment to nodes only running tools

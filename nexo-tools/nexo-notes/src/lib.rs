@@ -1,4 +1,4 @@
-//! Note tools for creating, listing, reading, and summarizing markdown notes.
+//! Note tools for creating, categorizing, listing, reading, and summarizing markdown notes.
 
 mod storage;
 /// Tool definitions and executor implementation for note operations.
