@@ -133,6 +133,7 @@ pub fn list_models() -> Vec<ModelEntry> {
 static ALL_MANIFESTS: LazyLock<Vec<ModelManifest>> = LazyLock::new(|| {
     let mut manifests = vec![
         gemma_4_e2b_it_q5_manifest(),
+        gemma_4_12b_it_manifest(),
         gemma_4_26b_a4b_it_q4_manifest(),
     ];
 
@@ -284,6 +285,44 @@ fn gemma_4_26b_a4b_it_q4_manifest() -> ModelManifest {
     }
 }
 
+fn gemma_4_12b_it_manifest() -> ModelManifest {
+    let repo = "google/gemma-4-12B-it";
+    let mut files = files_for_hf_snapshot(repo, true);
+    files.push(file_chat_template_jinja(repo, true));
+
+    ModelManifest {
+        descriptor: descriptor(
+            "gemma-4-12b-it",
+            "Gemma 4 12B IT",
+            Some("google"),
+            "gemma4",
+            vec![
+                ModelCapability::TextGeneration,
+                ModelCapability::ToolCalling,
+                ModelCapability::ImageInput,
+                ModelCapability::VideoInput,
+                ModelCapability::AudioInput,
+                ModelCapability::StructuredOutput,
+                ModelCapability::Streaming,
+            ],
+            vec![
+                SupportedModality::Text,
+                SupportedModality::Image,
+                SupportedModality::Video,
+                SupportedModality::Audio,
+            ],
+            vec![SupportedModality::Text],
+            "Gemma 4 12B instruction-tuned safetensors multimodal chat model.",
+            repo,
+            "safetensors",
+            None,
+        ),
+        backend: "mistralrs-gemma4".to_string(),
+        size_gb: 26.0,
+        files,
+    }
+}
+
 fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
     [
         (
@@ -297,6 +336,12 @@ fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
             "Gemma 4 E4B IT UQFF",
             "google/gemma-4-E4B-it",
             7.0,
+        ),
+        (
+            "gemma-4-12b-it-uqff",
+            "Gemma 4 12B IT UQFF",
+            "google/gemma-4-12B-it",
+            12.0,
         ),
         (
             "gemma-4-26b-a4b-it-uqff",
@@ -857,8 +902,10 @@ mod tests {
     fn chat_models_include_chat_template_component() {
         let chat_manifest_ids = [
             "gemma-4-e2b-it-q5",
+            "gemma-4-12b-it",
             "gemma-4-26b-a4b-it-q4",
             "gemma-4-e2b-it-uqff-afq4",
+            "gemma-4-12b-it-uqff-afq4",
             "qwen3.5-27b-apple-metal-uqff-afq4",
             "voxtral-mini-3b-2507-asr-stt",
         ];
@@ -879,9 +926,11 @@ mod tests {
     fn gemma4_models_use_jinja_chat_template() {
         let gemma_manifest_ids = [
             "gemma-4-e2b-it-q5",
+            "gemma-4-12b-it",
             "gemma-4-26b-a4b-it-q4",
             "gemma-4-e2b-it-uqff-afq4",
             "gemma-4-e4b-it-uqff-afq4",
+            "gemma-4-12b-it-uqff-afq4",
             "gemma-4-26b-a4b-it-uqff-afq4",
             "gemma-4-31b-it-uqff-afq4",
         ];
@@ -896,6 +945,28 @@ mod tests {
                 "manifest {id} is missing chat_template.jinja"
             );
         }
+    }
+
+    #[test]
+    fn gemma_4_12b_manifests_are_cataloged() {
+        let manifest = find_manifest("gemma-4-12b-it").expect("missing Gemma 4 12B manifest");
+        assert_eq!(manifest.backend, "mistralrs-gemma4");
+        assert!(manifest.files.iter().any(|file| {
+            file.component == ModelComponent::Config
+                && matches!(file.selector, ModelFileSelector::Suffix(ref suffix) if suffix == ".json")
+        }));
+        assert!(manifest.files.iter().any(|file| {
+            file.component == ModelComponent::WeightShard
+                && matches!(file.selector, ModelFileSelector::Suffix(ref suffix) if suffix == ".safetensors")
+        }));
+
+        let uqff =
+            find_manifest("gemma-4-12b-it-uqff-afq8").expect("missing Gemma 4 12B UQFF manifest");
+        assert_eq!(uqff.backend, "mistralrs-uqff");
+        assert!(uqff.files.iter().any(|file| {
+            file.component == ModelComponent::UqffShard
+                && matches!(file.selector, ModelFileSelector::Prefix(ref prefix) if prefix == "afq8-")
+        }));
     }
 
     #[test]

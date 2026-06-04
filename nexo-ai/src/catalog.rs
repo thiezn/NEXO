@@ -178,6 +178,33 @@ mod tests {
     }
 
     #[test]
+    fn gemma_4_12b_safetensors_manifest_uses_auto_loader() {
+        let manifest = find_manifest("gemma-4-12b-it").unwrap();
+        let config = model_config_from_manifest(manifest).unwrap();
+
+        let ModelLoader::Auto(loader) = config.loader else {
+            panic!("expected auto loader");
+        };
+
+        assert_eq!(loader.model_id, "gemma-4-12b-it");
+        assert_eq!(loader.dtype, ModelDataType::Auto);
+        assert_eq!(loader.from_uqff, None);
+    }
+
+    #[test]
+    fn gemma_4_12b_uqff_manifest_uses_auto_loader() {
+        let manifest = find_manifest("gemma-4-12b-it-uqff-q4k").unwrap();
+        let config = model_config_from_manifest(manifest).unwrap();
+
+        let ModelLoader::Auto(loader) = config.loader else {
+            panic!("expected auto loader");
+        };
+
+        assert_eq!(loader.dtype, ModelDataType::Auto);
+        assert_eq!(loader.from_uqff, Some(vec![PathBuf::from("q4k-")]));
+    }
+
+    #[test]
     fn flux_manifest_uses_diffusion_loader() {
         let manifest = find_manifest("flux.2-klein-9b").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
