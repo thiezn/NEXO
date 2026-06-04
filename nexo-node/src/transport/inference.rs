@@ -5,16 +5,19 @@ use futures_util::StreamExt;
 use nexo_ai::{NexoAi, NexoAiConfig, RegisteredModelConfig, RuntimeConfig, StaticModelRegistry};
 use nexo_core::inference::request::GenerateRequest;
 use nexo_core::{
-    ContentPart, ConversationMessage, FinishReason, GenerateDelta, InferenceEngine,
-    InferenceRequest, InferenceResponse, InferenceStream, MessageRole, ModelCapability,
-    ModelDescriptor, ModelId, ModelSelection, PerformanceMetrics, RequestId, RoundId, RunId,
-    SessionId, TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId, ToolChoice,
+    AudioFormat, ContentPart, ConversationMessage, FinishReason, GenerateDelta, InferenceEngine,
+    InferenceRequest, InferenceResponse, InferenceStream, MediaSource, MessageRole,
+    ModelCapability, ModelDescriptor, ModelId, ModelSelection, PerformanceMetrics, RequestId,
+    RoundId, RunId, SessionId, TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId,
+    ToolChoice,
 };
 use nexo_ws_client::WriteHalf;
 use nexo_ws_schema::{
-    AudioAnalyzeParams, AudioAnalyzeResponse, ErrorPayload, Frame, ImageAnalyzeParams,
-    ImageAnalyzeResponse, Method, ModelLoadParams, ModelLoadResponse, ModelStatusParams,
-    ModelUnloadParams, ModelUnloadResponse, RunRoundRequest, RunRoundResponse, RunRoundToolCall,
+    AudioAnalyzeParams, AudioAnalyzeResponse, AudioGenerateParams, AudioGenerateResponse,
+    ErrorPayload, Frame, GeneratedImagePayload, ImageAnalyzeParams, ImageAnalyzeResponse,
+    ImageGenerateParams, ImageGenerateResponse, Method, ModelLoadParams, ModelLoadResponse,
+    ModelStatusParams, ModelUnloadParams, ModelUnloadResponse, RunRoundRequest, RunRoundResponse,
+    RunRoundToolCall,
 };
 use tokio::sync::Mutex;
 
@@ -505,6 +508,138 @@ pub(super) async fn queue_audio_analyze(
     Ok(())
 }
 
+pub(super) async fn queue_image_generate(
+    request_id: &str,
+    params: serde_json::Value,
+    models: &SharedModels,
+    tx: &InferenceSender,
+) -> cli_helpers::Result {
+    let params: ImageGenerateParams = match serde_json::from_value(params) {
+        Ok(params) => params,
+        Err(error) => {
+            let _ = tx
+                .send((
+                    request_id.to_string(),
+                    Err(format!("Invalid image.generate params: {error}")),
+                ))
+                .await;
+            return Ok(());
+        }
+    };
+
+    tracing::info!(
+        session_id = ?params.session_id,
+        width = params.width,
+        height = params.height,
+        sample_count = params.sample_count,
+        steps = ?params.steps,
+        guidance_scale = ?params.guidance_scale,
+        seed = ?params.seed,
+        "Generating image(s) (prompt: '{:.80}')",
+        params.prompt
+    );
+
+    let request = InferenceRequest::GenerateImage(nexo_core::ImageGenerationRequest {
+        request_id: Some(RequestId::from(request_id)),
+        session_id: params.session_id.map(SessionId::from),
+        model: ModelSelection {
+            specific_model: None,
+            required_capabilities: vec![ModelCapability::ImageGeneration],
+            preferred_capabilities: Vec::new(),
+        },
+        prompt: params.prompt,
+        negative_prompt: params.negative_prompt,
+        size: nexo_core::ImageGenerationSize {
+            width: params.width,
+            height: params.height,
+        },
+        sample_count: params.sample_count,
+        steps: params.steps,
+        guidance_scale: params.guidance_scale,
+        seed: params.seed,
+        metadata: nexo_core::MetadataMap::new(),
+    });
+
+    let models = models.clone();
+    let tx = tx.clone();
+    let request_id = request_id.to_string();
+
+    tokio::spawn(async move {
+        let result = execute_image_generate(&models, request).await;
+        match &result {
+            Ok(_) => tracing::info!(request_id, "Image generation inference completed"),
+            Err(error) => {
+                tracing::error!(request_id, error = %error, "Image generation inference failed")
+            }
+        }
+        let _ = tx.send((request_id, result)).await;
+    });
+
+    Ok(())
+}
+
+pub(super) async fn queue_audio_generate(
+    request_id: &str,
+    params: serde_json::Value,
+    models: &SharedModels,
+    tx: &InferenceSender,
+) -> cli_helpers::Result {
+    let params: AudioGenerateParams = match serde_json::from_value(params) {
+        Ok(params) => params,
+        Err(error) => {
+            let _ = tx
+                .send((
+                    request_id.to_string(),
+                    Err(format!("Invalid audio.generate params: {error}")),
+                ))
+                .await;
+            return Ok(());
+        }
+    };
+
+    tracing::info!(
+        session_id = ?params.session_id,
+        voice = ?params.voice,
+        sample_rate_hz = ?params.sample_rate_hz,
+        speed = ?params.speed,
+        "Generating audio (prompt: '{:.80}')",
+        params.prompt
+    );
+
+    let request = InferenceRequest::GenerateSpeech(nexo_core::SpeechGenerationRequest {
+        request_id: Some(RequestId::from(request_id)),
+        session_id: params.session_id.map(SessionId::from),
+        model: ModelSelection {
+            specific_model: None,
+            required_capabilities: vec![ModelCapability::SpeechGeneration],
+            preferred_capabilities: Vec::new(),
+        },
+        text: params.prompt,
+        voice: params.voice,
+        format: AudioFormat::Wav,
+        sample_rate_hz: params.sample_rate_hz,
+        speed: params.speed,
+        metadata: nexo_core::MetadataMap::new(),
+    });
+
+    let models = models.clone();
+    let tx = tx.clone();
+    let request_id = request_id.to_string();
+
+    tokio::spawn(async move {
+        let result = execute_audio_generate(&models, request).await;
+        match &result {
+            Ok(_) => tracing::info!(request_id, "Audio generation inference completed"),
+            Err(error) => {
+                tracing::error!(request_id, error = %error, "Audio generation inference failed")
+            }
+        }
+        let _ = tx.send((request_id, result)).await;
+    });
+
+    Ok(())
+}
+
 async fn execute_run_round(
     models: &SharedModels,
     request: InferenceRequest,
@@ -532,6 +667,26 @@ async fn execute_audio_analyze(
     let trace_label = request_trace_label(&request);
     let stream = submit(models, request).await?;
     let response = audio_analyze_response_from_stream(stream, &trace_label).await?;
+    serde_json::to_value(response).map_err(|error| error.to_string())
+}
+
+async fn execute_image_generate(
+    models: &SharedModels,
+    request: InferenceRequest,
+) -> Result<serde_json::Value, String> {
+    let trace_label = request_trace_label(&request);
+    let stream = submit(models, request).await?;
+    let response = image_generate_response_from_stream(stream, &trace_label).await?;
+    serde_json::to_value(response).map_err(|error| error.to_string())
+}
+
+async fn execute_audio_generate(
+    models: &SharedModels,
+    request: InferenceRequest,
+) -> Result<serde_json::Value, String> {
+    let trace_label = request_trace_label(&request);
+    let stream = submit(models, request).await?;
+    let response = audio_generate_response_from_stream(stream, &trace_label).await?;
     serde_json::to_value(response).map_err(|error| error.to_string())
 }
 
@@ -627,6 +782,109 @@ async fn audio_analyze_response_from_stream(
             .performance
             .map_or(0, |performance| performance.total_duration_ms),
     })
+}
+
+async fn image_generate_response_from_stream(
+    mut stream: InferenceStream,
+    trace_label: &str,
+) -> Result<ImageGenerateResponse, String> {
+    while let Some(response) = stream.next().await {
+        let response = response.map_err(|error| error.to_string())?;
+        match response {
+            InferenceResponse::Images(payload) => {
+                let images = payload
+                    .images
+                    .into_iter()
+                    .map(map_generated_image_payload)
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(ImageGenerateResponse {
+                    images,
+                    inference_time_ms: 0,
+                });
+            }
+            InferenceResponse::Failure(failure) => return Err(failure.message),
+            other => {
+                tracing::debug!(
+                    trace = %trace_label,
+                    response_kind = inference_response_kind(&other),
+                    "Ignoring non-image-generation response while waiting for image output"
+                );
+            }
+        }
+    }
+    Err("Image generation stream ended without image output".to_string())
+}
+
+async fn audio_generate_response_from_stream(
+    mut stream: InferenceStream,
+    trace_label: &str,
+) -> Result<AudioGenerateResponse, String> {
+    while let Some(response) = stream.next().await {
+        let response = response.map_err(|error| error.to_string())?;
+        match response {
+            InferenceResponse::Speech(payload) => {
+                let audio_data = media_source_to_base64(payload.audio.source)?;
+                let format = audio_format_name(payload.audio.format);
+                let media_type = match payload.audio.format {
+                    AudioFormat::Pcm => Some("audio/L16".to_string()),
+                    AudioFormat::Wav => Some("audio/wav".to_string()),
+                    AudioFormat::Mp3 => Some("audio/mpeg".to_string()),
+                };
+
+                return Ok(AudioGenerateResponse {
+                    audio_data,
+                    media_type,
+                    format,
+                    sample_rate_hz: payload.audio.sample_rate_hz,
+                    channel_count: payload.audio.channel_count,
+                    inference_time_ms: 0,
+                });
+            }
+            InferenceResponse::Failure(failure) => return Err(failure.message),
+            other => {
+                tracing::debug!(
+                    trace = %trace_label,
+                    response_kind = inference_response_kind(&other),
+                    "Ignoring non-speech-generation response while waiting for audio output"
+                );
+            }
+        }
+    }
+    Err("Audio generation stream ended without audio output".to_string())
+}
+
+fn map_generated_image_payload(
+    image: nexo_core::inference::request::GeneratedImage,
+) -> Result<GeneratedImagePayload, String> {
+    Ok(GeneratedImagePayload {
+        index: image.index,
+        image_data: media_source_to_base64(image.source)?,
+        media_type: image.media_type,
+        width: image.width,
+        height: image.height,
+    })
+}
+
+fn media_source_to_base64(source: MediaSource) -> Result<String, String> {
+    match source {
+        MediaSource::Base64(encoded) => Ok(encoded),
+        MediaSource::Bytes(bytes) => {
+            use base64::Engine;
+            Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+        }
+        MediaSource::Url(url) => Err(format!(
+            "Generation returned URL media source '{url}', expected inline content"
+        )),
+    }
+}
+
+fn audio_format_name(format: AudioFormat) -> String {
+    match format {
+        AudioFormat::Pcm => "pcm",
+        AudioFormat::Wav => "wav",
+        AudioFormat::Mp3 => "mp3",
+    }
+    .to_string()
 }
 
 #[derive(Default)]

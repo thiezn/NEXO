@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn token_range_selects_current_word() {
-        let (start, end) = token_range("/image analyze @docs/src", 20);
-        assert_eq!(&"/image analyze @docs/src"[start..end], "@docs/src");
+        let (start, end) = token_range("/analyze image @docs/src", 20);
+        assert_eq!(&"/analyze image @docs/src"[start..end], "@docs/src");
     }
 }

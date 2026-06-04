@@ -4,13 +4,16 @@ use either::Either;
 use indexmap::IndexMap;
 use mistralrs_core::Function as MistralFunction;
 use mistralrs_core::{
-    AudioInput as MistralAudioInput, Constraint,
+    AudioInput as MistralAudioInput, Constraint, DiffusionGenerationParams,
     DetokenizationRequest as MistralDetokenizationRequest, MessageContent,
     NormalRequest, ReasoningEffort as MistralReasoningEffort, RequestMessage, Response,
     SamplingParams, StopTokens, TokenizationRequest as MistralTokenizationRequest, Tool,
     ToolChoice as MistralToolChoice, ToolType,
 };
-use nexo_core::inference::request::{DetokenizationRequest, GenerateRequest, TokenizationRequest};
+use nexo_core::inference::request::{
+    DetokenizationRequest, GenerateRequest, ImageGenerationRequest, SpeechGenerationRequest,
+    TokenizationRequest,
+};
 use nexo_core::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
     MessageRole, ModelDescriptor, OutputConstraint, RoleStrategy, SamplingConfig,
@@ -80,6 +83,58 @@ pub(crate) fn map_embedding_request(
     request.constraint = Constraint::None;
     request.model_id = Some(descriptor.id.to_string());
     request
+}
+
+/// Builds a `mistralrs-core` normal request for image generation.
+pub(crate) fn map_image_generation_request(
+    request: &ImageGenerationRequest,
+    descriptor: &ModelDescriptor,
+    response: Sender<Response>,
+    request_ordinal: usize,
+) -> NormalRequest {
+    let mut normal_request = NormalRequest::new_simple(
+        RequestMessage::ImageGeneration {
+            prompt: request.prompt.clone(),
+            format: mistralrs_core::ImageGenerationResponseFormat::B64Json,
+            generation_params: DiffusionGenerationParams {
+                height: request.size.height as usize,
+                width: request.size.width as usize,
+            },
+            save_file: None,
+        },
+        SamplingParams::neutral(),
+        response,
+        request_ordinal,
+        None,
+        None,
+    );
+    normal_request.constraint = Constraint::None;
+    normal_request.model_id = Some(descriptor.id.to_string());
+    normal_request.session_id = request.session_id.as_ref().map(ToString::to_string);
+    normal_request
+}
+
+/// Builds a `mistralrs-core` normal request for speech generation.
+pub(crate) fn map_speech_generation_request(
+    request: &SpeechGenerationRequest,
+    descriptor: &ModelDescriptor,
+    response: Sender<Response>,
+    request_ordinal: usize,
+) -> NormalRequest {
+    let mut normal_request = NormalRequest::new_simple(
+        RequestMessage::SpeechGeneration {
+            prompt: request.text.clone(),
+        },
+        SamplingParams::neutral(),
+        response,
+        request_ordinal,
+        None,
+        None,
+    );
+    normal_request.constraint = Constraint::None;
+    normal_request.model_id = Some(descriptor.id.to_string());
+    normal_request.session_id = request.session_id.as_ref().map(ToString::to_string);
+    normal_request
 }
 
 /// Builds a `mistralrs-core` tokenization request.

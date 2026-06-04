@@ -13,7 +13,9 @@ use mistralrs_core::{
     paged_attn_supported,
     get_auto_device_map_params, get_model_dtype,
 };
-use nexo_core::inference::request::{EmbedRequest, GenerateRequest};
+use nexo_core::inference::request::{
+    EmbedRequest, GenerateRequest, ImageGenerationRequest, SpeechGenerationRequest,
+};
 use nexo_core::{
     DetokenizationRequest, InferenceRequest, InferenceResponse, InferenceStream, ModelDescriptor,
     ModelId, TokenUsage, TokenizationRequest,
@@ -28,11 +30,11 @@ use crate::config::{
 };
 use crate::mapping::request::{
     map_detokenization_request, map_embedding_request, map_generate_request,
-    map_tokenization_request,
+    map_image_generation_request, map_speech_generation_request, map_tokenization_request,
 };
 use crate::mapping::response::{
     ResponseContext, generation_started, map_embedding_response, map_generation_response,
-    map_runtime_error,
+    map_media_response, map_runtime_error,
 };
 use crate::{Error, Result};
 
@@ -112,14 +114,14 @@ impl MistralRuntime {
         match request {
             InferenceRequest::Generate(request) => self.submit_generate(descriptor, request).await,
             InferenceRequest::Embed(request) => self.submit_embed(descriptor, request),
+            InferenceRequest::GenerateImage(request) => {
+                self.submit_generate_image(descriptor, request).await
+            }
+            InferenceRequest::GenerateSpeech(request) => {
+                self.submit_generate_speech(descriptor, request).await
+            }
             InferenceRequest::Tokenize(request) => self.submit_tokenize(descriptor, request),
             InferenceRequest::Detokenize(request) => self.submit_detokenize(descriptor, request),
-            InferenceRequest::GenerateImage(_) => Err(Error::UnsupportedRequest {
-                kind: "generate_image",
-            }),
-            InferenceRequest::GenerateSpeech(_) => Err(Error::UnsupportedRequest {
-                kind: "generate_speech",
-            }),
         }
     }
 
@@ -246,6 +248,78 @@ impl MistralRuntime {
                     Ok(map_embedding_response(request_id, model_id, vectors, usage))
                 }
                 Err(error) => Ok(map_runtime_error(error, request_id, None, None)),
+            }
+        })
+        .boxed())
+    }
+
+    async fn submit_generate_image(
+        &self,
+        descriptor: ModelDescriptor,
+        request: ImageGenerationRequest,
+    ) -> Result<InferenceStream> {
+        let context = ResponseContext {
+            request_id: request.request_id.clone(),
+            run_id: None,
+            round_id: None,
+            model_id: descriptor.id.clone(),
+        };
+        let (response_tx, mut response_rx) = mpsc::channel(1);
+        let request_ordinal = self.next_request_ordinal();
+        let mistral_request =
+            map_image_generation_request(&request, &descriptor, response_tx, request_ordinal);
+        self.dispatch_request(&descriptor.id, Request::Normal(Box::new(mistral_request)))
+            .await?;
+
+        Ok(stream::once(async move {
+            match response_rx.recv().await {
+                Some(response) => Ok(map_media_response(response, &context)),
+                None => Ok(map_runtime_error(
+                    Error::MistralRuntime {
+                        message:
+                            "image generation response channel closed before producing output"
+                                .to_string(),
+                    },
+                    context.request_id,
+                    None,
+                    None,
+                )),
+            }
+        })
+        .boxed())
+    }
+
+    async fn submit_generate_speech(
+        &self,
+        descriptor: ModelDescriptor,
+        request: SpeechGenerationRequest,
+    ) -> Result<InferenceStream> {
+        let context = ResponseContext {
+            request_id: request.request_id.clone(),
+            run_id: None,
+            round_id: None,
+            model_id: descriptor.id.clone(),
+        };
+        let (response_tx, mut response_rx) = mpsc::channel(1);
+        let request_ordinal = self.next_request_ordinal();
+        let mistral_request =
+            map_speech_generation_request(&request, &descriptor, response_tx, request_ordinal);
+        self.dispatch_request(&descriptor.id, Request::Normal(Box::new(mistral_request)))
+            .await?;
+
+        Ok(stream::once(async move {
+            match response_rx.recv().await {
+                Some(response) => Ok(map_media_response(response, &context)),
+                None => Ok(map_runtime_error(
+                    Error::MistralRuntime {
+                        message:
+                            "speech generation response channel closed before producing output"
+                                .to_string(),
+                    },
+                    context.request_id,
+                    None,
+                    None,
+                )),
             }
         })
         .boxed())

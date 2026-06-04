@@ -2,10 +2,12 @@
 
 mod base;
 mod audio_analyze;
+mod audio_generate;
 mod connection;
 mod cron;
 mod dispatch;
 mod image_analyze;
+mod image_generate;
 mod prompt;
 mod run;
 mod send;

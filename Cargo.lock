@@ -4056,6 +4056,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "chrono",
  "clap",
  "cli-helpers",
  "cpal",
@@ -4164,6 +4165,7 @@ dependencies = [
 name = "nexo-node"
 version = "0.1.0"
 dependencies = [
+ "base64 0.13.1",
  "clap",
  "cli-helpers",
  "dirs",

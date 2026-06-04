@@ -1,14 +1,16 @@
-use nexo_ws_schema::{
-    AudioAnalyzeResponse, CronListParams, CronListResponse, CronPayload, EventKind, Frame,
-    HealthParams, HealthResponse, ImageAnalyzeResponse, MessagePayload, Method, PresencePayload,
-    PromptCollectionListParams, PromptCollectionListResponse, PromptDocumentListParams,
-    PromptDocumentListResponse, RunEventPayload, RunStartResponse, RunStatus, SendResponse,
-    SessionClearResponse, SessionClosedPayload, SessionCreateResponse, SessionGetResponse,
-    SessionListParams, SessionListResponse, ShutdownPayload, StatusParams, StatusResponse,
-    ToolEntry, ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteResponse,
-};
-use tracing::Event;
+use std::path::{Path, PathBuf};
 
+use chrono::Local;
+use nexo_ws_schema::{
+    AudioAnalyzeResponse, AudioGenerateResponse, CronListParams, CronListResponse, CronPayload,
+    EventKind, Frame, HealthParams, HealthResponse, ImageAnalyzeResponse, ImageGenerateResponse,
+    MessagePayload, Method, PresencePayload, PromptCollectionListParams,
+    PromptCollectionListResponse, PromptDocumentListParams, PromptDocumentListResponse,
+    RunEventPayload, RunStartResponse, RunStatus, SendResponse, SessionClearResponse,
+    SessionClosedPayload, SessionCreateResponse, SessionGetResponse, SessionListParams,
+    SessionListResponse, ShutdownPayload, StatusParams, StatusResponse, ToolEntry,
+    ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteResponse,
+};
 use super::command::{self, AppCommand, CommandContext};
 use super::message::Message;
 use super::model::{ActiveStream, ActivityButton, LogKind, Model, PendingRequest, RunningState};
@@ -322,6 +324,18 @@ fn execute_command(model: &mut Model, command: AppCommand) -> Vec<Effect> {
             Method::AudioAnalyze,
             params,
         ),
+        AppCommand::ImageGenerate(params) => single_request(
+            model,
+            PendingRequest::ImageGenerate,
+            Method::ImageGenerate,
+            params,
+        ),
+        AppCommand::AudioGenerate(params) => single_request(
+            model,
+            PendingRequest::AudioGenerate,
+            Method::AudioGenerate,
+            params,
+        ),
     }
 }
 
@@ -572,13 +586,13 @@ fn handle_success_response(
         }
         PendingRequest::ImageAnalyze => {
             let Some(response) =
-                decode_response::<ImageAnalyzeResponse>(model, "image analyze", payload)
+                decode_response::<ImageAnalyzeResponse>(model, "analyze image", payload)
             else {
                 return Vec::new();
             };
             model.push_log(
                 LogKind::Success,
-                "image analyze",
+                "analyze image",
                 format!(
                     "{}\n\n[{} tokens in {}ms]",
                     response.text, response.tokens_generated, response.inference_time_ms
@@ -587,18 +601,34 @@ fn handle_success_response(
         }
         PendingRequest::AudioAnalyze => {
             let Some(response) =
-                decode_response::<AudioAnalyzeResponse>(model, "audio analyze", payload)
+                decode_response::<AudioAnalyzeResponse>(model, "analyze audio", payload)
             else {
                 return Vec::new();
             };
             model.push_log(
                 LogKind::Success,
-                "audio analyze",
+                "analyze audio",
                 format!(
                     "{}\n\n[{} tokens in {}ms]",
                     response.text, response.tokens_generated, response.inference_time_ms
                 ),
             );
+        }
+        PendingRequest::ImageGenerate => {
+            let Some(response) =
+                decode_response::<ImageGenerateResponse>(model, "generate image", payload)
+            else {
+                return Vec::new();
+            };
+            handle_image_generate_response(model, response);
+        }
+        PendingRequest::AudioGenerate => {
+            let Some(response) =
+                decode_response::<AudioGenerateResponse>(model, "generate audio", payload)
+            else {
+                return Vec::new();
+            };
+            handle_audio_generate_response(model, response);
         }
         other => {
             model.push_log(LogKind::Response, other.label(), pretty_json(&payload));
@@ -986,6 +1016,182 @@ fn format_prompt_collection_list(response: &PromptCollectionListResponse) -> Str
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn handle_image_generate_response(model: &mut Model, response: ImageGenerateResponse) {
+    if response.images.is_empty() {
+        model.push_log(
+            LogKind::Warning,
+            "generate image",
+            "Gateway returned no images",
+        );
+        return;
+    }
+
+    let mut saved_paths = Vec::new();
+    for image in response.images {
+        match save_generated_image(&model.workspace_root, &image.image_data, image.media_type.as_deref()) {
+            Ok(path) => saved_paths.push(path),
+            Err(error) => {
+                model.push_log(
+                    LogKind::Error,
+                    "generate image",
+                    format!("Failed to save generated image: {error}"),
+                );
+                return;
+            }
+        }
+    }
+
+    let saved_list = saved_paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    model.push_log(
+        LogKind::Success,
+        "generate image",
+        format!(
+            "Saved {} image(s):\n{}\n\n[{}ms]",
+            saved_paths.len(),
+            saved_list,
+            response.inference_time_ms
+        ),
+    );
+}
+
+fn handle_audio_generate_response(model: &mut Model, response: AudioGenerateResponse) {
+    match save_generated_audio(
+        &model.workspace_root,
+        &response.audio_data,
+        response.media_type.as_deref(),
+        &response.format,
+    ) {
+        Ok(path) => model.push_log(
+            LogKind::Success,
+            "generate audio",
+            format!(
+                "Saved generated audio to {}\n\n[{}ms]",
+                path.display(),
+                response.inference_time_ms
+            ),
+        ),
+        Err(error) => model.push_log(
+            LogKind::Error,
+            "generate audio",
+            format!("Failed to save generated audio: {error}"),
+        ),
+    }
+}
+
+fn save_generated_image(
+    workspace_root: &Path,
+    base64_data: &str,
+    media_type: Option<&str>,
+) -> Result<PathBuf, String> {
+    let extension = extension_from_image_media_type(media_type).unwrap_or("png");
+    let target = generated_media_path(workspace_root, "datasets/images/generated", extension);
+    let bytes = decode_base64(base64_data)?;
+    save_bytes(&target, &bytes)?;
+    Ok(target)
+}
+
+fn save_generated_audio(
+    workspace_root: &Path,
+    base64_data: &str,
+    media_type: Option<&str>,
+    format: &str,
+) -> Result<PathBuf, String> {
+    let extension = extension_from_audio_media_type(media_type)
+        .or_else(|| extension_from_audio_format(format))
+        .unwrap_or("wav");
+    let target = generated_media_path(workspace_root, "datasets/audio/generated", extension);
+    let bytes = decode_base64(base64_data)?;
+    save_bytes(&target, &bytes)?;
+    Ok(target)
+}
+
+fn decode_base64(data: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|error| format!("Invalid base64 payload: {error}"))
+}
+
+fn generated_media_path(workspace_root: &Path, relative_dir: &str, extension: &str) -> PathBuf {
+    let timestamp = Local::now().format("%d-%m-%y_%H-%M").to_string();
+    let file_name = format!("{timestamp}.{extension}");
+    unique_path(workspace_root.join(relative_dir), file_name)
+}
+
+fn unique_path(dir: PathBuf, file_name: String) -> PathBuf {
+    let stem = file_name
+        .rsplit_once('.')
+        .map_or(file_name.as_str(), |(head, _)| head)
+        .to_string();
+    let ext = file_name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_string());
+
+    let mut candidate = dir.join(&file_name);
+    let mut suffix = 1usize;
+    while candidate.exists() {
+        let next_name = match &ext {
+            Some(ext) => format!("{stem}-{suffix}.{ext}"),
+            None => format!("{stem}-{suffix}"),
+        };
+        candidate = dir.join(next_name);
+        suffix += 1;
+    }
+    candidate
+}
+
+fn save_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let Some(parent) = path.parent() else {
+        return Err("Output path has no parent directory".to_string());
+    };
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("Failed to create output directory '{}': {error}", parent.display()))?;
+    std::fs::write(path, bytes)
+        .map_err(|error| format!("Failed to write '{}': {error}", path.display()))
+}
+
+fn extension_from_image_media_type(media_type: Option<&str>) -> Option<&'static str> {
+    match media_type {
+        Some("image/png") => Some("png"),
+        Some("image/jpeg") => Some("jpg"),
+        Some("image/webp") => Some("webp"),
+        Some("image/gif") => Some("gif"),
+        Some("image/bmp") => Some("bmp"),
+        Some("image/tiff") => Some("tiff"),
+        Some("image/avif") => Some("avif"),
+        Some("image/heic") => Some("heic"),
+        _ => None,
+    }
+}
+
+fn extension_from_audio_media_type(media_type: Option<&str>) -> Option<&'static str> {
+    match media_type {
+        Some("audio/wav") => Some("wav"),
+        Some("audio/mpeg") => Some("mp3"),
+        Some("audio/flac") => Some("flac"),
+        Some("audio/ogg") => Some("ogg"),
+        Some("audio/opus") => Some("opus"),
+        Some("audio/mp4") => Some("m4a"),
+        Some("audio/aac") => Some("aac"),
+        Some("audio/webm") => Some("webm"),
+        Some("audio/L16") => Some("pcm"),
+        _ => None,
+    }
+}
+
+fn extension_from_audio_format(format: &str) -> Option<&'static str> {
+    match format {
+        "wav" => Some("wav"),
+        "mp3" => Some("mp3"),
+        "pcm" => Some("pcm"),
+        _ => None,
+    }
 }
 
 fn pretty_json(value: &serde_json::Value) -> String {

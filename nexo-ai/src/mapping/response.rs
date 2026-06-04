@@ -3,11 +3,12 @@ use mistralrs_core::{
     CompletionResponse, Delta, Response, ResponseErr, ResponseMessage, ResponseOk,
     ToolCallResponse, Usage,
 };
+use nexo_core::inference::request::{GeneratedAudio, GeneratedImage};
 use nexo_core::{
-    ContentPart, ConversationMessage, FinishReason, GenerateChunk, GenerateCompleted,
+    AudioFormat, ContentPart, ConversationMessage, FinishReason, GenerateChunk, GenerateCompleted,
     GenerateDelta, GenerateStarted, InferenceErrorCode, InferenceFailure, InferenceResponse,
-    MessageRole, PerformanceMetrics, RequestId, Retryability, RoundId, RunId, TextPart, TokenUsage,
-    ToolCall, ToolCallDelta, ToolCallId,
+    MediaSource, MessageRole, PerformanceMetrics, RequestId, Retryability, RoundId, RunId,
+    TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId,
 };
 
 use crate::Error;
@@ -105,6 +106,68 @@ pub(crate) fn map_embedding_response(
         vectors,
         usage,
     })
+}
+
+/// Maps a media-generation response (image or speech) into the shared response enum.
+pub(crate) fn map_media_response(response: Response, context: &ResponseContext) -> InferenceResponse {
+    match response.as_result() {
+        Ok(ResponseOk::ImageGeneration(image_response)) => {
+            let images = image_response
+                .data
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, choice)| {
+                    if let Some(encoded) = choice.b64_json {
+                        Some(GeneratedImage {
+                            index,
+                            source: MediaSource::Base64(encoded),
+                            media_type: Some("image/png".to_string()),
+                            width: None,
+                            height: None,
+                        })
+                    } else {
+                        choice.url.map(|url| GeneratedImage {
+                            index,
+                            source: MediaSource::Url(url),
+                            media_type: None,
+                            width: None,
+                            height: None,
+                        })
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            InferenceResponse::Images(nexo_core::ImageGenerationResponse {
+                request_id: context.request_id.clone(),
+                model_id: Some(context.model_id.clone()),
+                images,
+            })
+        }
+        Ok(ResponseOk::Speech {
+            pcm,
+            rate,
+            channels,
+        }) => {
+            let audio = GeneratedAudio {
+                source: MediaSource::Bytes(wav_bytes_from_pcm_f32(&pcm, rate, channels)),
+                format: AudioFormat::Wav,
+                sample_rate_hz: u32::try_from(rate).ok(),
+                channel_count: u16::try_from(channels).ok(),
+            };
+            InferenceResponse::Speech(nexo_core::SpeechGenerationResponse {
+                request_id: context.request_id.clone(),
+                model_id: Some(context.model_id.clone()),
+                audio,
+            })
+        }
+        Ok(_) => failure_response(
+            InferenceErrorCode::UnsupportedFeature,
+            "received non-media output for a media generation request".to_string(),
+            Retryability::Fatal,
+            context,
+        ),
+        Err(error) => map_response_error(*error, context),
+    }
 }
 
 /// Creates a structured inference failure from a crate-local error.
@@ -305,6 +368,41 @@ fn map_delta(delta: Delta) -> GenerateDelta {
             .map(map_tool_call_delta)
             .collect(),
     }
+}
+
+fn wav_bytes_from_pcm_f32(pcm: &[f32], rate: usize, channels: usize) -> Vec<u8> {
+    let sample_rate = u32::try_from(rate).unwrap_or(24_000);
+    let channels = u16::try_from(channels).unwrap_or(1);
+    let bits_per_sample = 16_u16;
+    let block_align = channels.saturating_mul(bits_per_sample / 8);
+    let byte_rate = sample_rate.saturating_mul(u32::from(block_align));
+
+    let mut data = Vec::with_capacity(pcm.len().saturating_mul(2));
+    for sample in pcm {
+        let clamped = sample.clamp(-1.0, 1.0);
+        let quantized = (clamped * f32::from(i16::MAX)).round() as i16;
+        data.extend_from_slice(&quantized.to_le_bytes());
+    }
+
+    let data_len = u32::try_from(data.len()).unwrap_or(u32::MAX);
+    let chunk_size = 36_u32.saturating_add(data_len);
+
+    let mut wav = Vec::with_capacity(44 + data.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&chunk_size.to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16_u32.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&channels.to_le_bytes());
+    wav.extend_from_slice(&sample_rate.to_le_bytes());
+    wav.extend_from_slice(&byte_rate.to_le_bytes());
+    wav.extend_from_slice(&block_align.to_le_bytes());
+    wav.extend_from_slice(&bits_per_sample.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    wav.extend_from_slice(&data);
+    wav
 }
 
 fn map_tool_call_response(response: ToolCallResponse) -> ToolCall {

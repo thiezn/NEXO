@@ -87,6 +87,8 @@ pub enum PendingRequest {
     SystemPresence,
     ImageAnalyze,
     AudioAnalyze,
+    ImageGenerate,
+    AudioGenerate,
 }
 
 impl PendingRequest {
@@ -112,8 +114,10 @@ impl PendingRequest {
             Self::PromptCollectionList => "prompt collection list",
             Self::PromptCollectionDelete => "prompt collection delete",
             Self::SystemPresence => "system presence",
-            Self::ImageAnalyze => "image analyze",
-            Self::AudioAnalyze => "audio analyze",
+            Self::ImageAnalyze => "analyze image",
+            Self::AudioAnalyze => "analyze audio",
+            Self::ImageGenerate => "generate image",
+            Self::AudioGenerate => "generate audio",
         }
     }
 }

@@ -1,7 +1,7 @@
 use super::inference::{
     InferenceResult, InferenceSender, SharedModels, handle_model_load, handle_model_unload,
-    load_startup_models, push_model_status, queue_audio_analyze, queue_image_analyze,
-    queue_run_round, shared_models,
+    load_startup_models, push_model_status, queue_audio_analyze, queue_audio_generate,
+    queue_image_analyze, queue_image_generate, queue_run_round, shared_models,
 };
 use super::protocol::{send, send_busy_error};
 use crate::config::NodeConfig;
@@ -227,6 +227,32 @@ async fn handle_gateway_frame(
             } else {
                 *context.inference_busy = true;
                 queue_audio_analyze(&id, params, context.models, context.inference_tx).await?;
+            }
+            Ok(MessageLoopAction::Continue)
+        }
+        Some(Frame::Request {
+            id,
+            method: Method::ImageGenerate,
+            params,
+        }) => {
+            if *context.inference_busy {
+                send_busy_error(writer, &id).await?;
+            } else {
+                *context.inference_busy = true;
+                queue_image_generate(&id, params, context.models, context.inference_tx).await?;
+            }
+            Ok(MessageLoopAction::Continue)
+        }
+        Some(Frame::Request {
+            id,
+            method: Method::AudioGenerate,
+            params,
+        }) => {
+            if *context.inference_busy {
+                send_busy_error(writer, &id).await?;
+            } else {
+                *context.inference_busy = true;
+                queue_audio_generate(&id, params, context.models, context.inference_tx).await?;
             }
             Ok(MessageLoopAction::Continue)
         }

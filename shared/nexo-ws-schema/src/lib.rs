@@ -25,9 +25,10 @@ pub use events::{
 pub use frame::Frame;
 pub use methods::PromptCollection;
 pub use methods::{
-    AudioAnalyzeParams, AudioAnalyzeResponse, CronCreateParams, CronCreateResponse,
-    CronDeleteParams, CronDeleteResponse, CronEntry, CronListParams, CronListResponse,
-    HealthParams, HealthResponse, ImageAnalyzeParams, ImageAnalyzeResponse, Method,
+    AudioAnalyzeParams, AudioAnalyzeResponse, AudioGenerateParams, AudioGenerateResponse,
+    CronCreateParams, CronCreateResponse, CronDeleteParams, CronDeleteResponse, CronEntry,
+    CronListParams, CronListResponse, GeneratedImagePayload, HealthParams, HealthResponse,
+    ImageAnalyzeParams, ImageAnalyzeResponse, ImageGenerateParams, ImageGenerateResponse, Method,
     ModelLoadParams, ModelLoadResponse, ModelStatusParams, ModelUnloadParams, ModelUnloadResponse,
     PromptCollectionCreateParams, PromptCollectionCreateResponse, PromptCollectionDeleteParams,
     PromptCollectionDeleteResponse, PromptCollectionListParams, PromptCollectionListResponse,

@@ -92,6 +92,12 @@ pub enum Method {
     /// Client → gateway → node: analyze an audio clip using the model's audio capabilities.
     #[serde(rename = "audio.analyze")]
     AudioAnalyze,
+    /// Client → gateway → node: generate one or more images from a text prompt.
+    #[serde(rename = "image.generate")]
+    ImageGenerate,
+    /// Client → gateway → node: generate audio from a text prompt.
+    #[serde(rename = "audio.generate")]
+    AudioGenerate,
 }
 
 /// Run lifecycle status.
@@ -864,6 +870,128 @@ pub struct AudioAnalyzeResponse {
     pub text: String,
     /// Field value.
     pub tokens_generated: usize,
+    /// Field value.
+    pub inference_time_ms: u64,
+}
+
+// -- image.generate --
+
+/// Parameters for `image.generate`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageGenerateParams {
+    /// The positive prompt used for generation.
+    pub prompt: String,
+    /// Optional session identifier used to preserve runtime continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Optional negative prompt used to suppress unwanted attributes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub negative_prompt: Option<String>,
+    /// Requested image width in pixels.
+    #[serde(default = "default_image_generate_width")]
+    pub width: u32,
+    /// Requested image height in pixels.
+    #[serde(default = "default_image_generate_height")]
+    pub height: u32,
+    /// Number of images to generate.
+    #[serde(default = "default_image_generate_sample_count")]
+    pub sample_count: u32,
+    /// Optional diffusion step count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steps: Option<u32>,
+    /// Optional guidance scale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guidance_scale: Option<f32>,
+    /// Optional deterministic random seed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
+    /// Field value.
+    pub idempotency_key: String,
+}
+
+fn default_image_generate_width() -> u32 {
+    1024
+}
+
+fn default_image_generate_height() -> u32 {
+    1024
+}
+
+fn default_image_generate_sample_count() -> u32 {
+    1
+}
+
+/// A generated image returned by `image.generate`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedImagePayload {
+    /// Zero-based index of this image in the generated batch.
+    pub index: usize,
+    /// Base64-encoded image bytes.
+    pub image_data: String,
+    /// Optional media type of the generated image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// Generated image width, in pixels, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Generated image height, in pixels, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+}
+
+/// Response payload for `image.generate`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageGenerateResponse {
+    /// Generated images.
+    pub images: Vec<GeneratedImagePayload>,
+    /// Field value.
+    pub inference_time_ms: u64,
+}
+
+// -- audio.generate --
+
+/// Parameters for `audio.generate`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioGenerateParams {
+    /// The text prompt to synthesize into audio.
+    pub prompt: String,
+    /// Optional session identifier used to preserve runtime continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Optional voice label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<String>,
+    /// Optional output sample rate in hertz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_rate_hz: Option<u32>,
+    /// Optional speaking speed multiplier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<f32>,
+    /// Field value.
+    pub idempotency_key: String,
+}
+
+/// Response payload for `audio.generate`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioGenerateResponse {
+    /// Base64-encoded audio bytes.
+    pub audio_data: String,
+    /// Optional media type of the generated audio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// The generated audio format.
+    pub format: String,
+    /// Audio sample rate, in hertz, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_rate_hz: Option<u32>,
+    /// Number of audio channels, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_count: Option<u16>,
     /// Field value.
     pub inference_time_ms: u64,
 }

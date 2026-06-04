@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use nexo_ws_schema::{
-    AudioAnalyzeParams, CronCreateParams, CronDeleteParams, ImageAnalyzeParams,
-    PromptCollectionCreateParams, PromptCollectionDeleteParams, PromptDocumentCreateParams,
-    PromptDocumentDeleteParams, RunStartParams, SendParams, SessionClearParams,
-    SessionCreateParams, SessionGetParams, SystemPresenceParams, ToolsExecuteParams,
+    AudioAnalyzeParams, AudioGenerateParams, CronCreateParams, CronDeleteParams,
+    ImageAnalyzeParams, ImageGenerateParams, PromptCollectionCreateParams,
+    PromptCollectionDeleteParams, PromptDocumentCreateParams, PromptDocumentDeleteParams,
+    RunStartParams, SendParams, SessionClearParams, SessionCreateParams, SessionGetParams,
+    SystemPresenceParams, ToolsExecuteParams,
 };
 
 use crate::audio;
@@ -40,8 +41,10 @@ pub const COMMAND_NAMES: &[&str] = &[
     "prompt collection list",
     "prompt collection delete",
     "system presence",
-    "image analyze",
-    "audio analyze",
+    "analyze image",
+    "analyze audio",
+    "generate image",
+    "generate audio",
 ];
 
 #[derive(Debug, Clone)]
@@ -71,6 +74,8 @@ pub enum AppCommand {
     SystemPresence(SystemPresenceParams),
     ImageAnalyze(ImageAnalyzeParams),
     AudioAnalyze(AudioAnalyzeParams),
+    ImageGenerate(ImageGenerateParams),
+    AudioGenerate(AudioGenerateParams),
 }
 
 pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, String> {
@@ -136,12 +141,14 @@ pub fn parse(input: &str, context: CommandContext<'_>) -> Result<AppCommand, Str
                 args.to_string()
             },
         })),
-        "image analyze" => {
+        "analyze image" => {
             parse_image_analyze(args, context.workspace_root, context.current_session_id)
         }
-        "audio analyze" => {
+        "analyze audio" => {
             parse_audio_analyze(args, context.workspace_root, context.current_session_id)
         }
+        "generate image" => parse_image_generate(args, context.current_session_id),
+        "generate audio" => parse_audio_generate(args, context.current_session_id),
         _ => Err(format!(
             "Unknown command '/{command}'. Use /help to see available commands."
         )),
@@ -161,9 +168,11 @@ Core:
 Messaging:
 /send <target> <json>
 /run [--session <id>] [--model <id>] <prompt>
-/image analyze <@image-path|path> <prompt>
-/audio analyze <@audio-path|path> <prompt>
-/audio analyze --mic [--max-secs <seconds>] <prompt>
+/analyze image <@image-path|path> <prompt>
+/analyze audio <@audio-path|path> <prompt>
+/analyze audio --mic [--max-secs <seconds>] <prompt>
+/generate image <prompt>
+/generate audio <prompt>
 
 Sessions:
 /session create [name]
@@ -194,9 +203,9 @@ Autocomplete:
 - Use Up/Down or Shift+Tab to cycle suggestions.
 - Type plain text to run it as `/run <prompt>`.
 - Use @path in /run prompts to inline file contents.
-- Use @path as the image argument for /image analyze.
-- Use @path as the audio argument for /audio analyze.
-- Use /audio analyze --mic to record from microphone, then analyze.
+- Use @path as the image argument for /analyze image.
+- Use @path as the audio argument for /analyze audio.
+- Use /analyze audio --mic to record from microphone, then analyze.
 - Press F1 or type /help to open this help view.
 - Press Esc to close the help view or dismiss autocomplete.
 "
@@ -290,7 +299,7 @@ fn parse_image_analyze(
     current_session_id: Option<&str>,
 ) -> Result<AppCommand, String> {
     let Some((image_path, prompt)) = args.split_once(' ') else {
-        return Err("Usage: /image analyze <@image-path|path> <prompt>".into());
+        return Err("Usage: /analyze image <@image-path|path> <prompt>".into());
     };
 
     let image_path = resolve_path(workspace_root, image_path)?;
@@ -317,7 +326,7 @@ fn parse_audio_analyze(
 ) -> Result<AppCommand, String> {
     if args.is_empty() {
         return Err(
-            "Usage: /audio analyze <@audio-path|path> <prompt> OR /audio analyze --mic [--max-secs <seconds>] <prompt>"
+            "Usage: /analyze audio <@audio-path|path> <prompt> OR /analyze audio --mic [--max-secs <seconds>] <prompt>"
                 .into(),
         );
     }
@@ -328,7 +337,7 @@ fn parse_audio_analyze(
     }
 
     let Some((audio_path, prompt)) = trimmed.split_once(' ') else {
-        return Err("Usage: /audio analyze <@audio-path|path> <prompt>".into());
+        return Err("Usage: /analyze audio <@audio-path|path> <prompt>".into());
     };
     let audio_path = resolve_path(workspace_root, audio_path)?;
     let audio_bytes = std::fs::read(&audio_path)
@@ -361,7 +370,7 @@ fn parse_audio_analyze_mic(
         match token {
             "--max-secs" => {
                 let value = iter.next().ok_or_else(|| {
-                    "Missing value for --max-secs in /audio analyze --mic".to_string()
+                    "Missing value for --max-secs in /analyze audio --mic".to_string()
                 })?;
                 max_secs = value
                     .parse::<f64>()
@@ -375,7 +384,7 @@ fn parse_audio_analyze_mic(
     }
 
     if prompt_parts.is_empty() {
-        return Err("Usage: /audio analyze --mic [--max-secs <seconds>] <prompt>".into());
+        return Err("Usage: /analyze audio --mic [--max-secs <seconds>] <prompt>".into());
     }
 
     let config = audio::RecordConfig {
@@ -438,6 +447,42 @@ fn detect_audio_media_type(path: &Path) -> Option<String> {
         _ => return None,
     };
     Some(media_type.to_string())
+}
+
+fn parse_image_generate(args: &str, current_session_id: Option<&str>) -> Result<AppCommand, String> {
+    let prompt = args.trim();
+    if prompt.is_empty() {
+        return Err("Usage: /generate image <prompt>".to_string());
+    }
+
+    Ok(AppCommand::ImageGenerate(ImageGenerateParams {
+        prompt: prompt.to_string(),
+        session_id: current_session_id.map(ToOwned::to_owned),
+        negative_prompt: None,
+        width: 1024,
+        height: 1024,
+        sample_count: 1,
+        steps: None,
+        guidance_scale: None,
+        seed: None,
+        idempotency_key: nexo_ws_schema::Frame::new_id(),
+    }))
+}
+
+fn parse_audio_generate(args: &str, current_session_id: Option<&str>) -> Result<AppCommand, String> {
+    let prompt = args.trim();
+    if prompt.is_empty() {
+        return Err("Usage: /generate audio <prompt>".to_string());
+    }
+
+    Ok(AppCommand::AudioGenerate(AudioGenerateParams {
+        prompt: prompt.to_string(),
+        session_id: current_session_id.map(ToOwned::to_owned),
+        voice: None,
+        sample_rate_hz: None,
+        speed: None,
+        idempotency_key: nexo_ws_schema::Frame::new_id(),
+    }))
 }
 
 fn parse_json_args<T: serde::de::DeserializeOwned>(args: &str, usage: &str) -> Result<T, String> {
@@ -613,7 +658,7 @@ mod tests {
         image.save(&image_path).unwrap();
 
         let command = parse(
-            "/image analyze @sample.png what is this?",
+            "/analyze image @sample.png what is this?",
             context(&temp_root),
         )
         .unwrap();
@@ -654,7 +699,7 @@ mod tests {
         }
 
         let command = parse(
-            "/audio analyze @sample.wav summarize this clip",
+            "/analyze audio @sample.wav summarize this clip",
             context(&temp_root),
         )
         .unwrap();
@@ -673,6 +718,38 @@ mod tests {
 
         let _ = fs::remove_file(audio_path);
         let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn parses_generate_image_prompt() {
+        let command = parse("/generate image paint a red lighthouse", context(Path::new(".")))
+            .unwrap();
+
+        match command {
+            AppCommand::ImageGenerate(params) => {
+                assert_eq!(params.session_id.as_deref(), Some("sess-1"));
+                assert_eq!(params.prompt, "paint a red lighthouse");
+                assert_eq!(params.width, 1024);
+                assert_eq!(params.height, 1024);
+                assert_eq!(params.sample_count, 1);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_generate_audio_prompt() {
+        let command =
+            parse("/generate audio ocean waves at sunset", context(Path::new("."))).unwrap();
+
+        match command {
+            AppCommand::AudioGenerate(params) => {
+                assert_eq!(params.session_id.as_deref(), Some("sess-1"));
+                assert_eq!(params.prompt, "ocean waves at sunset");
+                assert!(params.voice.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]
