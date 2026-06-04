@@ -4,6 +4,8 @@ NEXO - Neural Extension Operator
 
 The end-all tool for myself to work on my projects.
 
+**UPDATE Jun 4 2026, This repo is intended only for personal use, the code is a mess, docs are not up to date and often are more internal dialogue with myself and intended for public use. However, perhaps there's just a small snippet of an idea that would be helpful to others so made the repo public. Good luck, don't use it, be careful out there!**
+
 Not sure yet what i'm going to use to build but I know rougly what I want. A sort of OpenClaw that will work on my projects independently on my macbook M1 POro Max64gb.
 
 

@@ -1046,6 +1046,16 @@ fn log_round_completion(trace_label: &str, output: &GenerationOutput) {
         finish_reason = ?output.finish_reason,
         "Completed round inference"
     );
+    tracing::info!(
+        trace = %trace_label,
+        assistant_reasoning = %output.reasoning,
+        "Assistant reasoning"
+    );
+    tracing::info!(
+        trace = %trace_label,
+        assistant_answer = %output.content,
+        "Assistant answer"
+    );
 }
 
 fn preview_text(value: &str) -> &str {

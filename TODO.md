@@ -5,7 +5,6 @@ Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, ve
 
 ## All kinds of random things to do
 
-- Add both Voxtral and Dia TTS models. Note that Dia is smaller and simpler. It relies on specific tags in the chat template to steer the conversation. Voxtral allows you to provide an audio snippet so you can clone voices with it. However it also comes with pre-build presets so you can just prompt it.
 - Fix my tracing output. I should not embed variables in the message but instead pass them as fields. This will allow me to do proper structured logging 
 - Update the events/status messages between nexo-node and gateway. The nexo-node should periodically, and on each change, update it's current state, that includes tools, model loaded, active session_id in kv cache, thinking/reasoning token output, etc.
 - AI should be a feature so we can compile without. This speeds up deployment to nodes only running tools

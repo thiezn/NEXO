@@ -64,6 +64,8 @@ impl MistralRuntime {
         device: &Device,
         models: &[RegisteredModelConfig],
     ) -> Result<Self> {
+        let runtime_config = effective_runtime_config(runtime_config, models);
+        let runtime_config = &runtime_config;
         let mut models = models.iter();
         let first = models.next().ok_or(Error::EmptyModelCatalog)?;
         let paged_attn_config = resolve_paged_attention_config(runtime_config, device)?;
@@ -503,6 +505,29 @@ fn build_pipeline(
             build_gguf_pipeline(loader, runtime_config, device, paged_attn_config)
         }
     }
+}
+
+fn effective_runtime_config(
+    runtime_config: &RuntimeConfig,
+    models: &[RegisteredModelConfig],
+) -> RuntimeConfig {
+    let mut effective = runtime_config.clone();
+    if !effective.no_prefix_cache && models.iter().any(is_gemma_4_model) {
+        tracing::warn!(
+            "Disabling prefix cache for Gemma 4 runtime because sequence-level prefix caching can produce invalid reasoning/content on the locked mistral.rs backend"
+        );
+        effective.no_prefix_cache = true;
+    }
+    effective
+}
+
+fn is_gemma_4_model(model: &RegisteredModelConfig) -> bool {
+    model
+        .descriptor
+        .metadata
+        .get("family")
+        .and_then(serde_json::Value::as_str)
+        == Some("gemma4")
 }
 
 fn build_diffusion_pipeline(
@@ -999,21 +1024,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gemma_4_uqff_keeps_prefix_cache_default() {
+    fn gemma_4_uqff_disables_prefix_cache_by_default() {
         let _model =
             model_config_from_manifest(find_manifest("gemma-4-e4b-it-uqff-afq8").unwrap()).unwrap();
         let runtime = RuntimeConfig::default();
 
-        assert!(!runtime.no_prefix_cache);
+        assert!(runtime.no_prefix_cache);
     }
 
     #[test]
-    fn gemma_4_gguf_keeps_prefix_cache_default() {
+    fn gemma_4_gguf_disables_prefix_cache_by_default() {
         let _model =
             model_config_from_manifest(find_manifest("gemma-4-e2b-it-q5").unwrap()).unwrap();
         let runtime = RuntimeConfig::default();
 
-        assert!(!runtime.no_prefix_cache);
+        assert!(runtime.no_prefix_cache);
+    }
+
+    #[test]
+    fn gemma_4_forces_prefix_cache_disabled_when_config_enables_it() {
+        let model =
+            model_config_from_manifest(find_manifest("gemma-4-e4b-it-uqff-afq8").unwrap()).unwrap();
+        let runtime = RuntimeConfig {
+            no_prefix_cache: false,
+            ..RuntimeConfig::default()
+        };
+
+        let effective = effective_runtime_config(&runtime, &[model]);
+
+        assert!(effective.no_prefix_cache);
+    }
+
+    #[test]
+    fn non_gemma_model_preserves_prefix_cache_setting() {
+        let model = model_config_from_manifest(find_manifest("flux.2-klein-9b").unwrap()).unwrap();
+        let runtime = RuntimeConfig {
+            no_prefix_cache: false,
+            ..RuntimeConfig::default()
+        };
+
+        let effective = effective_runtime_config(&runtime, &[model]);
+
+        assert!(!effective.no_prefix_cache);
     }
 
     #[test]
