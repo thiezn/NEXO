@@ -4,7 +4,7 @@ mod context_manager;
 mod engine;
 mod events;
 mod inference;
-mod router;
+pub(crate) mod router;
 
 pub(crate) use engine::run_existing;
 pub use engine::start_run;

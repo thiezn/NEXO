@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ModelCapability;
 use crate::common::MetadataMap;
 use crate::ids::{RequestId, RoundId, RunId, SessionId};
 use crate::message::{
@@ -8,7 +9,6 @@ use crate::message::{
 };
 use crate::model::{ModelSelection, ReasoningSettings};
 use crate::tools::{ToolChoice, ToolDefinition};
-use crate::ModelCapability;
 
 use super::{OutputConstraint, SamplingConfig, StreamingMode};
 

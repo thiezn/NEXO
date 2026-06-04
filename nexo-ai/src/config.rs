@@ -175,6 +175,9 @@ pub enum ModelLoader {
     /// Use `mistralrs-core` automatic loader detection for a local path or HF repository.
     Auto(AutoModelLoader),
 
+    /// Load a diffusion model for image generation.
+    Diffusion(DiffusionModelLoader),
+
     /// Load a quantized GGUF model with an explicit weight file list.
     Gguf(GgufModelLoader),
 }
@@ -204,6 +207,20 @@ pub struct AutoModelLoader {
 
     /// An optional explicit Hugging Face cache directory.
     pub hf_cache_path: Option<PathBuf>,
+}
+
+/// Loader settings for diffusion image-generation models.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffusionModelLoader {
+    /// The local model identifier under NEXO's model store.
+    pub model_id: String,
+
+    /// Prefer the offloaded FLUX loader variant when supported by the runtime.
+    #[serde(default)]
+    pub offload: bool,
+
+    /// The preferred model data type for model loading.
+    pub dtype: ModelDataType,
 }
 
 /// Loader settings for GGUF-based models.

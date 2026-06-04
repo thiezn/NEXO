@@ -59,6 +59,8 @@ pub struct GatewayState {
     pub loaded_models: HashMap<PeerId, Vec<ModelDescriptor>>,
     /// Model IDs available on disk per node (declared at connect time).
     pub available_models: HashMap<PeerId, Vec<String>>,
+    /// Model descriptors available on disk per node (reported by model.status).
+    pub available_model_descriptors: HashMap<PeerId, Vec<ModelDescriptor>>,
     /// Queued multimodal generation request counts keyed by session ID.
     pub queued_generation_by_session: HashMap<String, usize>,
     /// Notified whenever a node's loaded model changes (used to wake the queue drain watcher).
@@ -84,6 +86,7 @@ impl GatewayState {
             started_at: chrono::Utc::now(),
             loaded_models: HashMap::new(),
             available_models: HashMap::new(),
+            available_model_descriptors: HashMap::new(),
             queued_generation_by_session: HashMap::new(),
             model_ready_notify: Arc::new(Notify::new()),
             storage_root,
@@ -117,11 +120,19 @@ impl GatewayState {
         self.deregister_tools_for_peer(id);
         self.loaded_models.remove(id);
         self.available_models.remove(id);
+        self.available_model_descriptors.remove(id);
     }
 
     /// Update the set of models available on disk for a peer.
     pub fn set_available_models(&mut self, peer_id: &str, models: Vec<String>) {
         self.available_models.insert(peer_id.to_string(), models);
+    }
+
+    /// Update the set of model descriptors available on disk for a peer.
+    pub fn set_available_model_descriptors(&mut self, peer_id: &str, models: Vec<ModelDescriptor>) {
+        self.available_model_descriptors
+            .insert(peer_id.to_string(), models);
+        self.model_ready_notify.notify_waiters();
     }
 
     /// Update the loaded models for a node. Notifies queue drain waiters.

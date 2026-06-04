@@ -2,8 +2,8 @@
 
 use crate::server::state::SharedState;
 use nexo_ws_schema::{
-    ErrorPayload, EventKind, Frame, SessionClearParams, SessionClosedPayload,
-    SessionCreateParams, SessionGetParams,
+    ErrorPayload, EventKind, Frame, SessionClearParams, SessionClosedPayload, SessionCreateParams,
+    SessionGetParams,
 };
 use sqlx::SqlitePool;
 

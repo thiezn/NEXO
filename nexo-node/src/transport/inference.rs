@@ -62,6 +62,13 @@ impl LoadedModels {
         self.available.keys().map(ToString::to_string).collect()
     }
 
+    pub(super) fn available_model_descriptors(&self) -> Vec<ModelDescriptor> {
+        self.available
+            .values()
+            .map(|model| model.descriptor.clone())
+            .collect()
+    }
+
     async fn loaded_model_descriptors(&self) -> Vec<ModelDescriptor> {
         match &self.engine {
             Some(engine) => engine.loaded_models().await,
@@ -214,17 +221,19 @@ pub(super) async fn load_startup_models(models: &SharedModels, config: &NodeConf
 }
 
 pub(super) async fn push_model_status(writer: &mut WriteHalf, models: &SharedModels) {
-    let (loaded_models, available_models) = {
+    let (loaded_models, available_models, available_model_descriptors) = {
         let models = models.lock().await;
         (
             models.loaded_model_descriptors().await,
             models.available_model_ids(),
+            models.available_model_descriptors(),
         )
     };
 
     let status = ModelStatusParams {
         loaded_models,
         available_models,
+        available_model_descriptors,
     };
     if let Ok(frame) = Frame::request(Method::ModelStatus, &status) {
         let _ = writer.send_frame(&frame).await;
@@ -266,13 +275,23 @@ pub(super) async fn handle_model_load(
         let mut models = models.lock().await;
         models.load_model(model_id).await
     };
+    let (loaded, error) = match result {
+        Ok(()) => {
+            tracing::info!(model_id, "Model loaded");
+            (true, None)
+        }
+        Err(error) => {
+            tracing::error!(model_id, error = %error, "Failed to load model");
+            (false, Some(error))
+        }
+    };
 
     let response = Frame::ok_response(
         request_id,
         &ModelLoadResponse {
             model_id: model_id.to_string(),
-            loaded: result.is_ok(),
-            error: result.err(),
+            loaded,
+            error,
         },
     )
     .unwrap_or_else(internal_error_response(request_id));

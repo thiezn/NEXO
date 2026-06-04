@@ -100,6 +100,7 @@ async fn push_model_status(
     let status = ModelStatusParams {
         loaded_models: loaded,
         available_models: available,
+        available_model_descriptors: Vec::new(),
     };
     let frame = Frame::request(Method::ModelStatus, &status).expect("build model status frame");
     conn.send_frame(&frame).await.expect("send model status");

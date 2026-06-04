@@ -6,12 +6,11 @@ use candle_core::Device;
 use futures_util::{StreamExt, stream};
 use mistralrs_core::{
     AddModelConfig, AutoDeviceMapParams, DefaultSchedulerMethod, DeviceMapSetting,
-    EngineConfig as MistralEngineConfig, GGUFLoaderBuilder, GGUFSpecificConfig, LoaderBuilder,
-    MemoryGpuConfig, MistralRs, MistralRsBuilder, ModelPaths, ModelSelected,
-    PagedAttentionConfig, PagedCacheType, Request, Response as MistralResponse,
+    DiffusionLoaderType, EngineConfig as MistralEngineConfig, GGUFLoaderBuilder,
+    GGUFSpecificConfig, LoaderBuilder, MemoryGpuConfig, MistralRs, MistralRsBuilder, ModelPaths,
+    ModelSelected, PagedAttentionConfig, PagedCacheType, Request, Response as MistralResponse,
     SchedulerConfig as MistralSchedulerConfig, TokenSource, UQFF_MULTI_FILE_DELIMITER,
-    paged_attn_supported,
-    get_auto_device_map_params, get_model_dtype,
+    get_auto_device_map_params, get_model_dtype, paged_attn_supported,
 };
 use nexo_core::inference::request::{
     EmbedRequest, GenerateRequest, ImageGenerationRequest, SpeechGenerationRequest,
@@ -24,7 +23,7 @@ use nexo_model_mgmt::resolve_model_storage_dir;
 use tokio::sync::mpsc;
 
 use crate::config::{
-    AutoModelLoader, DeviceSpec, GgufModelLoader, ModelDataType, ModelLoader,
+    AutoModelLoader, DeviceSpec, DiffusionModelLoader, GgufModelLoader, ModelDataType, ModelLoader,
     PagedAttentionCacheType, PagedAttentionMode, RegisteredModelConfig, RuntimeConfig,
     SchedulerPolicy,
 };
@@ -276,9 +275,8 @@ impl MistralRuntime {
                 Some(response) => Ok(map_media_response(response, &context)),
                 None => Ok(map_runtime_error(
                     Error::MistralRuntime {
-                        message:
-                            "image generation response channel closed before producing output"
-                                .to_string(),
+                        message: "image generation response channel closed before producing output"
+                            .to_string(),
                     },
                     context.request_id,
                     None,
@@ -499,10 +497,51 @@ fn build_pipeline(
         ModelLoader::Auto(loader) => {
             build_auto_pipeline(loader, runtime_config, device, paged_attn_config)
         }
+        ModelLoader::Diffusion(loader) => build_diffusion_pipeline(loader, device),
         ModelLoader::Gguf(loader) => {
             build_gguf_pipeline(loader, runtime_config, device, paged_attn_config)
         }
     }
+}
+
+fn build_diffusion_pipeline(
+    loader: &DiffusionModelLoader,
+    device: &Device,
+) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
+    let model_dir = resolve_model_storage_dir(&loader.model_id);
+    let selected = ModelSelected::DiffusionPlain {
+        model_id: model_dir.to_string_lossy().into_owned(),
+        arch: if loader.offload {
+            DiffusionLoaderType::FluxOffloaded
+        } else {
+            DiffusionLoaderType::Flux
+        },
+        dtype: map_dtype(loader.dtype),
+    };
+
+    let built_loader = LoaderBuilder::new(selected.clone())
+        .build()
+        .map_err(|error| Error::MistralRuntime {
+            message: error.to_string(),
+        })?;
+    let dtype = get_model_dtype(&selected).map_err(|error| Error::MistralRuntime {
+        message: error.to_string(),
+    })?;
+
+    built_loader
+        .load_model_from_hf(
+            None,
+            TokenSource::None,
+            &dtype,
+            device,
+            true,
+            DeviceMapSetting::Auto(AutoDeviceMapParams::default_text()),
+            None,
+            None,
+        )
+        .map_err(|error| Error::MistralRuntime {
+            message: error.to_string(),
+        })
 }
 
 fn build_auto_pipeline(
@@ -973,7 +1012,12 @@ async fn map_scheduler(
             max_running_sequences,
         } => {
             if paged_attn_config.is_some() {
-                let cache_config = first_pipeline.lock().await.get_metadata().cache_config.clone();
+                let cache_config = first_pipeline
+                    .lock()
+                    .await
+                    .get_metadata()
+                    .cache_config
+                    .clone();
                 if let Some(config) = cache_config {
                     return MistralSchedulerConfig::PagedAttentionMeta {
                         max_num_seqs: max_running_sequences.get(),

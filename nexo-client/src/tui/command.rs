@@ -449,7 +449,10 @@ fn detect_audio_media_type(path: &Path) -> Option<String> {
     Some(media_type.to_string())
 }
 
-fn parse_image_generate(args: &str, current_session_id: Option<&str>) -> Result<AppCommand, String> {
+fn parse_image_generate(
+    args: &str,
+    current_session_id: Option<&str>,
+) -> Result<AppCommand, String> {
     let prompt = args.trim();
     if prompt.is_empty() {
         return Err("Usage: /generate image <prompt>".to_string());
@@ -469,7 +472,10 @@ fn parse_image_generate(args: &str, current_session_id: Option<&str>) -> Result<
     }))
 }
 
-fn parse_audio_generate(args: &str, current_session_id: Option<&str>) -> Result<AppCommand, String> {
+fn parse_audio_generate(
+    args: &str,
+    current_session_id: Option<&str>,
+) -> Result<AppCommand, String> {
     let prompt = args.trim();
     if prompt.is_empty() {
         return Err("Usage: /generate audio <prompt>".to_string());
@@ -722,8 +728,11 @@ mod tests {
 
     #[test]
     fn parses_generate_image_prompt() {
-        let command = parse("/generate image paint a red lighthouse", context(Path::new(".")))
-            .unwrap();
+        let command = parse(
+            "/generate image paint a red lighthouse",
+            context(Path::new(".")),
+        )
+        .unwrap();
 
         match command {
             AppCommand::ImageGenerate(params) => {
@@ -739,8 +748,11 @@ mod tests {
 
     #[test]
     fn parses_generate_audio_prompt() {
-        let command =
-            parse("/generate audio ocean waves at sunset", context(Path::new("."))).unwrap();
+        let command = parse(
+            "/generate audio ocean waves at sunset",
+            context(Path::new(".")),
+        )
+        .unwrap();
 
         match command {
             AppCommand::AudioGenerate(params) => {

@@ -109,7 +109,10 @@ pub(crate) fn map_embedding_response(
 }
 
 /// Maps a media-generation response (image or speech) into the shared response enum.
-pub(crate) fn map_media_response(response: Response, context: &ResponseContext) -> InferenceResponse {
+pub(crate) fn map_media_response(
+    response: Response,
+    context: &ResponseContext,
+) -> InferenceResponse {
     match response.as_result() {
         Ok(ResponseOk::ImageGeneration(image_response)) => {
             let images = image_response

@@ -1,5 +1,5 @@
 use crate::server::state::{GatewayState, PeerId, SharedState};
-use nexo_core::ModelCapability;
+use nexo_core::{ModelCapability, ModelDescriptor};
 use nexo_ws_schema::{
     ConnectionRole, Frame, Method, ModelLoadParams, ModelLoadResponse, ModelUnloadParams,
 };
@@ -11,7 +11,13 @@ use super::inference::InferenceOutcome;
 const MODEL_LOAD_TIMEOUT_SECS: u64 = 300;
 
 /// Stateless inference node selection and model preparation.
-pub(super) struct Router;
+pub(crate) struct Router;
+
+#[derive(Debug)]
+pub(crate) enum RouteError {
+    NoCapableNode,
+    Error(String),
+}
 
 impl Router {
     /// Select a node for inference or return a terminal inference outcome when routing cannot proceed.
@@ -27,22 +33,90 @@ impl Router {
                         .map(RoutedPeer::Ready)
                         .or_else(|| {
                             Self::find_available_model(&state_read, model_id)
-                                .map(RoutedPeer::NeedsLoad)
+                                .map(RoutedPeer::NeedsModelLoad)
                         })
                 };
 
                 match selected {
                     Some(RoutedPeer::Ready(selection)) => Ok(selection),
-                    Some(RoutedPeer::NeedsLoad((peer_id, node_sender))) => {
+                    Some(RoutedPeer::NeedsModelLoad((peer_id, node_sender))) => {
                         Self::ensure_model_loaded(model_id, peer_id, node_sender, state).await
                     }
+                    Some(RoutedPeer::NeedsCapabilityLoad { .. }) => Err(InferenceOutcome::Error(
+                        "Unexpected capability route during explicit model routing".into(),
+                    )),
                     None => Err(InferenceOutcome::NoLlmAvailable),
                 }
             }
             None => {
-                let state_read = state.read().await;
-                Self::find_loaded_llm(&state_read).ok_or(InferenceOutcome::NoLlmAvailable)
+                let selected = {
+                    let state_read = state.read().await;
+                    Self::find_loaded_llm(&state_read)
+                        .map(RoutedPeer::Ready)
+                        .or_else(|| {
+                            Self::find_available_capability(
+                                &state_read,
+                                ModelCapability::TextGeneration,
+                            )
+                            .map(|(model_id, peer_id, sender)| {
+                                RoutedPeer::NeedsCapabilityLoad {
+                                    model_id,
+                                    peer_id,
+                                    sender,
+                                }
+                            })
+                        })
+                };
+
+                match selected {
+                    Some(RoutedPeer::Ready(selection)) => Ok(selection),
+                    Some(RoutedPeer::NeedsCapabilityLoad {
+                        model_id,
+                        peer_id,
+                        sender,
+                    }) => Self::ensure_model_loaded(&model_id, peer_id, sender, state).await,
+                    Some(RoutedPeer::NeedsModelLoad(_)) => Err(InferenceOutcome::Error(
+                        "Unexpected explicit model route during default LLM routing".into(),
+                    )),
+                    None => Err(InferenceOutcome::NoLlmAvailable),
+                }
             }
+        }
+    }
+
+    /// Select a node that can satisfy a model capability, loading that model first when needed.
+    pub(crate) async fn route_capability(
+        state: &SharedState,
+        capability: ModelCapability,
+    ) -> Result<(PeerId, mpsc::Sender<Frame>), RouteError> {
+        let selected = {
+            let state_read = state.read().await;
+            Self::find_loaded_capability(&state_read, capability)
+                .map(RoutedPeer::Ready)
+                .or_else(|| {
+                    Self::find_available_capability(&state_read, capability).map(
+                        |(model_id, peer_id, sender)| RoutedPeer::NeedsCapabilityLoad {
+                            model_id,
+                            peer_id,
+                            sender,
+                        },
+                    )
+                })
+        };
+
+        match selected {
+            Some(RoutedPeer::Ready(selection)) => Ok(selection),
+            Some(RoutedPeer::NeedsCapabilityLoad {
+                model_id,
+                peer_id,
+                sender,
+            }) => Self::ensure_model_loaded(&model_id, peer_id, sender, state)
+                .await
+                .map_err(RouteError::from),
+            Some(RoutedPeer::NeedsModelLoad(_)) => Err(RouteError::Error(
+                "Unexpected explicit model route during capability routing".into(),
+            )),
+            None => Err(RouteError::NoCapableNode),
         }
     }
 
@@ -84,6 +158,48 @@ impl Router {
                 })
             })
         })
+    }
+
+    fn find_loaded_capability(
+        state: &GatewayState,
+        capability: ModelCapability,
+    ) -> Option<(PeerId, mpsc::Sender<Frame>)> {
+        Self::find_node_peer(state, |peer_id| {
+            state.loaded_models.get(peer_id).is_some_and(|models| {
+                models
+                    .iter()
+                    .any(|model| Self::supports_capability(model, capability))
+            })
+        })
+    }
+
+    fn find_available_capability(
+        state: &GatewayState,
+        capability: ModelCapability,
+    ) -> Option<(String, PeerId, mpsc::Sender<Frame>)> {
+        state.peers.iter().find_map(|(peer_id, peer)| {
+            if peer.role != ConnectionRole::Node {
+                return None;
+            }
+
+            let model_id = state
+                .available_model_descriptors
+                .get(peer_id)?
+                .iter()
+                .find(|model| Self::supports_capability(model, capability))?
+                .id
+                .to_string();
+
+            state
+                .peer_senders
+                .get(peer_id)
+                .cloned()
+                .map(|sender| (model_id, peer_id.clone(), sender))
+        })
+    }
+
+    fn supports_capability(model: &ModelDescriptor, capability: ModelCapability) -> bool {
+        model.capabilities.contains(&capability)
     }
 
     fn find_node_peer(
@@ -145,8 +261,53 @@ impl Router {
                     .await
                     .pending_requests
                     .remove(&unload_request_id);
+                tracing::error!(
+                    peer_id,
+                    model_id = old_model,
+                    "Failed to send ModelUnload request to node"
+                );
             } else {
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await;
+                match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+                    Ok(Ok(Frame::Response { ok: true, .. })) => {
+                        tracing::info!(peer_id, model_id = old_model, "Model unloaded");
+                    }
+                    Ok(Ok(Frame::Response {
+                        ok: false, error, ..
+                    })) => {
+                        let message = error
+                            .map(|payload| payload.message)
+                            .unwrap_or_else(|| "ModelUnload failed without error payload".into());
+                        tracing::error!(
+                            peer_id,
+                            model_id = old_model,
+                            error = %message,
+                            "Node failed to unload model"
+                        );
+                    }
+                    Ok(Ok(other)) => {
+                        tracing::error!(
+                            peer_id,
+                            model_id = old_model,
+                            frame = ?other,
+                            "Unexpected frame type from node during model unload"
+                        );
+                    }
+                    Ok(Err(_)) => {
+                        tracing::error!(
+                            peer_id,
+                            model_id = old_model,
+                            "Node disconnected during model unload"
+                        );
+                    }
+                    Err(_) => {
+                        state
+                            .write()
+                            .await
+                            .pending_requests
+                            .remove(&unload_request_id);
+                        tracing::error!(peer_id, model_id = old_model, "Model unload timed out");
+                    }
+                }
             }
         }
 
@@ -177,6 +338,11 @@ impl Router {
                 .await
                 .pending_requests
                 .remove(&load_request_id);
+            tracing::error!(
+                peer_id,
+                model_id,
+                "Failed to send ModelLoad request to node"
+            );
             return Err(InferenceOutcome::Error(format!(
                 "Failed to send ModelLoad request to node {peer_id}"
             )));
@@ -191,40 +357,58 @@ impl Router {
             Ok(Ok(Frame::Response {
                 ok: true, payload, ..
             })) => {
-                let loaded = payload
-                    .as_ref()
-                    .and_then(|payload| {
-                        serde_json::from_value::<ModelLoadResponse>(payload.clone()).ok()
-                    })
-                    .map(|response| response.loaded)
-                    .unwrap_or(true);
-                if loaded {
+                let response = payload.as_ref().and_then(|payload| {
+                    serde_json::from_value::<ModelLoadResponse>(payload.clone()).ok()
+                });
+                if response.as_ref().is_none_or(|response| response.loaded) {
+                    tracing::info!(peer_id, model_id, "Model loaded on node");
                     Ok((peer_id, node_sender))
                 } else {
+                    let message =
+                        response
+                            .and_then(|response| response.error)
+                            .unwrap_or_else(|| {
+                                format!("Node {peer_id} failed to load model '{model_id}'")
+                            });
+                    tracing::error!(peer_id, model_id, error = %message, "Node failed to load model");
                     Err(InferenceOutcome::Error(format!(
-                        "Node {peer_id} failed to load model '{model_id}'"
+                        "Node {peer_id} failed to load model '{model_id}': {message}"
                     )))
                 }
             }
             Ok(Ok(Frame::Response {
                 ok: false, error, ..
-            })) => Err(InferenceOutcome::Error(
-                error
+            })) => {
+                let message = error
                     .map(|payload| format!("ModelLoad error: {}", payload.message))
-                    .unwrap_or_else(|| format!("ModelLoad failed on node {peer_id}")),
-            )),
-            Ok(Ok(_)) => Err(InferenceOutcome::Error(
-                "Unexpected frame type from node during model load".into(),
-            )),
-            Ok(Err(_)) => Err(InferenceOutcome::Error(
-                "Node disconnected during model load".into(),
-            )),
+                    .unwrap_or_else(|| format!("ModelLoad failed on node {peer_id}"));
+                tracing::error!(peer_id, model_id, error = %message, "Node rejected model load");
+                Err(InferenceOutcome::Error(message))
+            }
+            Ok(Ok(other)) => {
+                tracing::error!(peer_id, model_id, frame = ?other, "Unexpected frame type from node during model load");
+                Err(InferenceOutcome::Error(
+                    "Unexpected frame type from node during model load".into(),
+                ))
+            }
+            Ok(Err(_)) => {
+                tracing::error!(peer_id, model_id, "Node disconnected during model load");
+                Err(InferenceOutcome::Error(
+                    "Node disconnected during model load".into(),
+                ))
+            }
             Err(_) => {
                 state
                     .write()
                     .await
                     .pending_requests
                     .remove(&load_request_id);
+                tracing::error!(
+                    peer_id,
+                    model_id,
+                    timeout_secs = MODEL_LOAD_TIMEOUT_SECS,
+                    "Model load timed out"
+                );
                 Err(InferenceOutcome::Error(format!(
                     "Model load timed out after {MODEL_LOAD_TIMEOUT_SECS}s"
                 )))
@@ -235,7 +419,24 @@ impl Router {
 
 enum RoutedPeer {
     Ready((PeerId, mpsc::Sender<Frame>)),
-    NeedsLoad((PeerId, mpsc::Sender<Frame>)),
+    NeedsModelLoad((PeerId, mpsc::Sender<Frame>)),
+    NeedsCapabilityLoad {
+        model_id: String,
+        peer_id: PeerId,
+        sender: mpsc::Sender<Frame>,
+    },
+}
+
+impl From<InferenceOutcome> for RouteError {
+    fn from(outcome: InferenceOutcome) -> Self {
+        match outcome {
+            InferenceOutcome::NoLlmAvailable => Self::NoCapableNode,
+            InferenceOutcome::Error(error) => Self::Error(error),
+            InferenceOutcome::Reply(_) | InferenceOutcome::ToolCalls(_) => {
+                Self::Error("Unexpected inference outcome during routing".into())
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -395,6 +596,96 @@ mod tests {
         };
 
         assert_eq!(peer_id, "n-chat");
+    }
+
+    #[tokio::test]
+    async fn route_inference_without_explicit_model_loads_available_llm() {
+        let state = shared_state();
+        let (node_tx, mut node_rx) = mpsc::channel(4);
+        {
+            let mut state_write = state.write().await;
+            state_write.add_peer(make_node_peer("n1"), node_tx);
+            state_write.set_loaded_models(
+                "n1",
+                vec![make_loaded_model(
+                    "image-gen",
+                    vec![ModelCapability::ImageGeneration],
+                )],
+            );
+            state_write.set_available_model_descriptors(
+                "n1",
+                vec![
+                    make_loaded_model("image-gen", vec![ModelCapability::ImageGeneration]),
+                    make_loaded_model("chatty", vec![ModelCapability::TextGeneration]),
+                ],
+            );
+        }
+
+        let state_for_response = state.clone();
+        tokio::spawn(async move {
+            let unload_id = match node_rx.recv().await.unwrap() {
+                Frame::Request { id, method, params } => {
+                    assert_eq!(method, Method::ModelUnload);
+                    assert_eq!(params["modelId"], "image-gen");
+                    id
+                }
+                _ => panic!("expected model unload request"),
+            };
+
+            let unload_tx = {
+                let mut state_write = state_for_response.write().await;
+                state_write.pending_requests.remove(&unload_id).unwrap()
+            };
+            unload_tx
+                .send(Frame::Response {
+                    id: unload_id,
+                    ok: true,
+                    payload: Some(
+                        serde_json::to_value(nexo_ws_schema::ModelUnloadResponse {
+                            unloaded: true,
+                        })
+                        .unwrap(),
+                    ),
+                    error: None,
+                })
+                .unwrap();
+
+            let load_id = match node_rx.recv().await.unwrap() {
+                Frame::Request { id, method, params } => {
+                    assert_eq!(method, Method::ModelLoad);
+                    assert_eq!(params["modelId"], "chatty");
+                    id
+                }
+                _ => panic!("expected model load request"),
+            };
+
+            let load_tx = {
+                let mut state_write = state_for_response.write().await;
+                state_write.pending_requests.remove(&load_id).unwrap()
+            };
+            load_tx
+                .send(Frame::Response {
+                    id: load_id,
+                    ok: true,
+                    payload: Some(
+                        serde_json::to_value(ModelLoadResponse {
+                            model_id: "chatty".into(),
+                            loaded: true,
+                            error: None,
+                        })
+                        .unwrap(),
+                    ),
+                    error: None,
+                })
+                .unwrap();
+        });
+
+        let (peer_id, _sender) = match Router::route_inference(&state, None).await {
+            Ok(selection) => selection,
+            Err(_) => panic!("expected loadable default llm route"),
+        };
+
+        assert_eq!(peer_id, "n1");
     }
 
     #[tokio::test]

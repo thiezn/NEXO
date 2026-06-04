@@ -5,7 +5,9 @@ use crate::server::state::{GatewayState, PeerInfo, SharedState, dummy_sender};
 use nexo_core::{
     MetadataMap, ModelCapability, ModelId, ModelModalities, RoleStrategy, SupportedModality,
 };
-use nexo_ws_schema::{ConnectionRole, EventKind, Frame, Method};
+use nexo_ws_schema::{
+    ConnectionRole, EventKind, Frame, Method, ModelLoadResponse, ModelUnloadResponse,
+};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -470,6 +472,165 @@ async fn dispatch_image_generate_queues_until_capable_node_is_ready(pool: Sqlite
             .unwrap_or(0)
     };
     assert_eq!(queued_count, 0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn dispatch_image_generate_loads_available_capability_before_forwarding(pool: SqlitePool) {
+    let state = make_state();
+    let ah = make_run_handle(&state, &pool);
+    let (node_tx, mut node_rx) = mpsc::channel(8);
+    {
+        let mut s = state.write().await;
+        s.add_peer(
+            PeerInfo {
+                id: "n1".into(),
+                client_id: "node-1".into(),
+                role: ConnectionRole::Node,
+                scopes: vec![],
+                capabilities: vec![],
+                commands: vec![],
+                device_id: None,
+                connected_at: chrono::Utc::now(),
+            },
+            node_tx,
+        );
+        s.set_loaded_models(
+            "n1",
+            vec![make_loaded_model(
+                "chatty",
+                vec![ModelCapability::TextGeneration],
+            )],
+        );
+        s.set_available_models("n1", vec!["chatty".into(), "flux.2-klein-9b".into()]);
+        s.set_available_model_descriptors(
+            "n1",
+            vec![
+                make_loaded_model("chatty", vec![ModelCapability::TextGeneration]),
+                make_loaded_model("flux.2-klein-9b", vec![ModelCapability::ImageGeneration]),
+            ],
+        );
+    }
+
+    let state_for_dispatch = state.clone();
+    let pool_for_dispatch = pool.clone();
+    let ah_for_dispatch = ah.clone();
+    let response_task = tokio::spawn(async move {
+        dispatch(
+            "req-img-switch",
+            &Method::ImageGenerate,
+            serde_json::json!({
+                "prompt": "a generated image after text",
+                "idempotencyKey": "idem-img-switch",
+                "sessionId": "sess-switch-1"
+            }),
+            "p1",
+            &state_for_dispatch,
+            &pool_for_dispatch,
+            &ah_for_dispatch,
+        )
+        .await
+    });
+
+    let unload_id = match timeout(Duration::from_secs(2), node_rx.recv())
+        .await
+        .expect("timed out waiting for model unload")
+        .expect("node channel closed")
+    {
+        Frame::Request { id, method, params } => {
+            assert_eq!(method, Method::ModelUnload);
+            assert_eq!(params["modelId"], "chatty");
+            id
+        }
+        other => panic!("Expected model.unload request, got {other:?}"),
+    };
+    let unload_tx = {
+        let mut s = state.write().await;
+        s.pending_requests
+            .remove(&unload_id)
+            .expect("expected pending unload sender")
+    };
+    unload_tx
+        .send(Frame::Response {
+            id: unload_id,
+            ok: true,
+            payload: Some(serde_json::to_value(ModelUnloadResponse { unloaded: true }).unwrap()),
+            error: None,
+        })
+        .expect("failed to send simulated unload response");
+
+    let load_id = match timeout(Duration::from_secs(2), node_rx.recv())
+        .await
+        .expect("timed out waiting for model load")
+        .expect("node channel closed")
+    {
+        Frame::Request { id, method, params } => {
+            assert_eq!(method, Method::ModelLoad);
+            assert_eq!(params["modelId"], "flux.2-klein-9b");
+            id
+        }
+        other => panic!("Expected model.load request, got {other:?}"),
+    };
+    let load_tx = {
+        let mut s = state.write().await;
+        s.pending_requests
+            .remove(&load_id)
+            .expect("expected pending load sender")
+    };
+    load_tx
+        .send(Frame::Response {
+            id: load_id,
+            ok: true,
+            payload: Some(
+                serde_json::to_value(ModelLoadResponse {
+                    model_id: "flux.2-klein-9b".into(),
+                    loaded: true,
+                    error: None,
+                })
+                .unwrap(),
+            ),
+            error: None,
+        })
+        .expect("failed to send simulated load response");
+
+    let forwarded_id = match timeout(Duration::from_secs(2), node_rx.recv())
+        .await
+        .expect("timed out waiting for forwarded request")
+        .expect("node channel closed")
+    {
+        Frame::Request { id, method, .. } => {
+            assert_eq!(method, Method::ImageGenerate);
+            id
+        }
+        other => panic!("Expected forwarded image.generate request, got {other:?}"),
+    };
+    let pending_tx = {
+        let mut s = state.write().await;
+        s.pending_requests
+            .remove(&forwarded_id)
+            .expect("expected pending image generate sender")
+    };
+    pending_tx
+        .send(Frame::Response {
+            id: forwarded_id,
+            ok: true,
+            payload: Some(serde_json::json!({
+                "images": [{"index": 0, "imageData": "ZmFrZQ==", "mediaType": "image/png"}],
+                "inferenceTimeMs": 10
+            })),
+            error: None,
+        })
+        .expect("failed to send simulated node response");
+
+    let response = timeout(Duration::from_secs(2), response_task)
+        .await
+        .expect("timed out waiting for gateway response")
+        .expect("dispatch task failed to join");
+    if let Frame::Response { ok, payload, .. } = response {
+        assert!(ok);
+        assert_eq!(payload.unwrap()["images"][0]["index"], 0);
+    } else {
+        panic!("Expected response");
+    }
 }
 
 #[sqlx::test(migrations = "./migrations")]

@@ -1,9 +1,9 @@
 //! WebSocket handler for image generation requests.
 
-use crate::server::state::{GatewayState, SharedState};
+use crate::agent::r#loop::router::{RouteError, Router};
+use crate::server::state::SharedState;
 use nexo_core::ModelCapability;
-use nexo_ws_schema::{ConnectionRole, EventKind, Frame, MessagePayload, Method};
-use tokio::sync::mpsc;
+use nexo_ws_schema::{ErrorPayload, EventKind, Frame, MessagePayload, Method};
 
 use super::base::{ForwardErrorCodes, IMAGE_GENERATION_TIMEOUT, forward_to_node};
 
@@ -22,28 +22,37 @@ pub(super) async fn handle(
 
     let mut is_queued = false;
     let node_sender = loop {
-        let (candidate_sender, notify) = {
+        let notify = {
             let state_read = state.read().await;
-            (
-                find_image_generate_sender(&state_read).map(|(_, sender)| sender),
-                state_read.model_ready_notify.clone(),
-            )
+            state_read.model_ready_notify.clone()
         };
 
-        if let Some(sender) = candidate_sender {
-            if is_queued {
-                let remaining = {
-                    let mut state_write = state.write().await;
-                    state_write.decrement_generation_queue(&session_id)
-                };
-                tracing::info!(
+        match Router::route_capability(state, ModelCapability::ImageGeneration).await {
+            Ok((_peer_id, sender)) => {
+                if is_queued {
+                    let remaining = {
+                        let mut state_write = state.write().await;
+                        state_write.decrement_generation_queue(&session_id)
+                    };
+                    tracing::info!(
+                        request_id,
+                        session_id,
+                        queued_count = remaining,
+                        "Resuming queued image.generate request"
+                    );
+                }
+                break sender;
+            }
+            Err(RouteError::Error(message)) => {
+                return Frame::error_response(
                     request_id,
-                    session_id,
-                    queued_count = remaining,
-                    "Resuming queued image.generate request"
+                    ErrorPayload {
+                        code: "image_generation_unavailable".into(),
+                        message,
+                    },
                 );
             }
-            break sender;
+            Err(RouteError::NoCapableNode) => {}
         }
 
         if !is_queued {
@@ -110,31 +119,4 @@ async fn emit_generation_queued_event(
     if let Ok(frame) = Frame::event(EventKind::Message, &payload) {
         let _ = event_tx.send(frame);
     }
-}
-
-fn find_image_generate_sender(state: &GatewayState) -> Option<(String, mpsc::Sender<Frame>)> {
-    state.peers.iter().find_map(|(peer_id, peer)| {
-        if peer.role != ConnectionRole::Node {
-            return None;
-        }
-
-        let supports_image_generation = state.loaded_models.get(peer_id).is_some_and(|models| {
-            models.iter().any(|model| {
-                model
-                    .capabilities
-                    .iter()
-                    .any(|capability| matches!(capability, ModelCapability::ImageGeneration))
-            })
-        });
-
-        if !supports_image_generation {
-            return None;
-        }
-
-        state
-            .peer_senders
-            .get(peer_id)
-            .cloned()
-            .map(|sender| (peer_id.clone(), sender))
-    })
 }

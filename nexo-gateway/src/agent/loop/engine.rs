@@ -145,10 +145,7 @@ pub(crate) async fn run_existing(
             state_read.all_tool_entries()
         };
 
-        let prepared_context = match context_manager
-            .prepare_round_context(db, session_id)
-            .await
-        {
+        let prepared_context = match context_manager.prepare_round_context(db, session_id).await {
             Ok(context) => context,
             Err(error) => {
                 let _ = persistence::finish_round(

@@ -1,5 +1,6 @@
 //! Built-in model registry used by the reusable `models` command.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -122,7 +123,8 @@ pub fn list_models() -> Vec<ModelEntry> {
                     && manifest
                         .files
                         .iter()
-                        .all(|file| local_selector_present(&model_dir, &file.selector)),
+                        .all(|file| local_selector_present(&model_dir, &file.selector))
+                    && local_safetensors_indexes_complete(&model_dir),
             }
         })
         .collect()
@@ -719,6 +721,64 @@ fn any_local_file_matches(model_dir: &Path, selector: &ModelFileSelector) -> boo
     }
 
     false
+}
+
+fn local_safetensors_indexes_complete(model_dir: &Path) -> bool {
+    let mut stack = vec![model_dir.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+
+            if path
+                .file_name()
+                .and_then(|filename| filename.to_str())
+                .is_some_and(|filename| filename.ends_with(".safetensors.index.json"))
+                && !safetensors_index_shards_present(&path)
+            {
+                tracing::warn!(
+                    index = %path.display(),
+                    "Safetensors index references missing local shards"
+                );
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn safetensors_index_shards_present(index_path: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(index_path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_reader::<_, Value>(file) else {
+        return false;
+    };
+    let Some(weight_map) = value.get("weight_map").and_then(Value::as_object) else {
+        return true;
+    };
+
+    let Some(parent) = index_path.parent() else {
+        return false;
+    };
+
+    let shard_paths = weight_map
+        .values()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+
+    shard_paths
+        .into_iter()
+        .all(|shard_path| parent.join(shard_path).exists())
 }
 
 #[cfg(test)]

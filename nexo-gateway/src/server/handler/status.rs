@@ -67,6 +67,7 @@ pub(super) async fn handle_model_status(
         let mut sw = state.write().await;
         sw.set_loaded_models(peer_id, status_params.loaded_models);
         sw.set_available_models(peer_id, status_params.available_models);
+        sw.set_available_model_descriptors(peer_id, status_params.available_model_descriptors);
     }
     if model_became_available && let Err(e) = run_handle.submit(RunCommand::DrainQueue).await {
         tracing::warn!("Failed to submit DrainQueue after ModelStatus: {e}");

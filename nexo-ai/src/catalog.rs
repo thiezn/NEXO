@@ -7,8 +7,8 @@ use nexo_model_mgmt::registry::{known_manifests, list_models};
 use nexo_model_mgmt::{ModelComponent, ModelFileSelector, ModelManifest};
 
 use crate::{
-    AutoModelLoader, Error, GgufModelLoader, ModelDataType, ModelLoader, RegisteredModelConfig,
-    Result,
+    AutoModelLoader, DiffusionModelLoader, Error, GgufModelLoader, ModelDataType, ModelLoader,
+    RegisteredModelConfig, Result,
 };
 
 /// Build runtime configs for every downloaded model known to `nexo-model-mgmt`.
@@ -55,6 +55,14 @@ fn loader_from_manifest(manifest: &ModelManifest) -> Result<ModelLoader> {
             quantized_filenames: gguf_filenames(manifest)?,
             chat_template: None,
             jinja_explicit: None,
+            dtype: ModelDataType::Auto,
+        }));
+    }
+
+    if manifest.backend == "mistralrs-flux" {
+        return Ok(ModelLoader::Diffusion(DiffusionModelLoader {
+            model_id: manifest.id().to_string(),
+            offload: false,
             dtype: ModelDataType::Auto,
         }));
     }
@@ -158,5 +166,18 @@ mod tests {
 
         assert_eq!(loader.dtype, ModelDataType::Auto);
         assert_eq!(loader.from_uqff, Some(vec![PathBuf::from("afq8-")]));
+    }
+
+    #[test]
+    fn flux_manifest_uses_diffusion_loader() {
+        let manifest = find_manifest("flux.2-klein-9b").unwrap();
+        let config = model_config_from_manifest(manifest).unwrap();
+
+        let ModelLoader::Diffusion(loader) = config.loader else {
+            panic!("expected diffusion loader");
+        };
+
+        assert_eq!(loader.model_id, "flux.2-klein-9b");
+        assert_eq!(loader.dtype, ModelDataType::Auto);
     }
 }

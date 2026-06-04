@@ -630,6 +630,10 @@ pub struct ModelStatusParams {
     #[serde(default)]
     /// Field value.
     pub available_models: Vec<String>,
+    /// All model descriptors available on disk on this node.
+    #[serde(default)]
+    /// Field value.
+    pub available_model_descriptors: Vec<ModelDescriptor>,
 }
 
 // -- prompt.document.create --

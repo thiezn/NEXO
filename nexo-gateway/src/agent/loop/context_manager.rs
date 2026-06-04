@@ -30,7 +30,8 @@ impl ContextManager {
         session_id: &str,
     ) -> Result<PreparedContext, sqlx::Error> {
         let conversation_messages = persistence::load_conversation_messages(db, session_id).await?;
-        let round_messages = assemble_round_messages(&conversation_messages, self.system_prompt.as_ref());
+        let round_messages =
+            assemble_round_messages(&conversation_messages, self.system_prompt.as_ref());
 
         Ok(PreparedContext {
             persisted_message_count: conversation_messages.len(),

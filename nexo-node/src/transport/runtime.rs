@@ -298,7 +298,9 @@ async fn handle_gateway_frame(
         }) => {
             match serde_json::from_value::<SessionClosedPayload>(payload) {
                 Ok(payload) => tracing::info!(session_id = %payload.session_id, "Session closed"),
-                Err(error) => tracing::warn!(error = %error, "Failed to decode session closed event payload"),
+                Err(error) => {
+                    tracing::warn!(error = %error, "Failed to decode session closed event payload")
+                }
             }
             Ok(MessageLoopAction::Continue)
         }

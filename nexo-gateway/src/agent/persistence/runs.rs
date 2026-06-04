@@ -59,8 +59,8 @@ pub(crate) fn decode_reasoning_json(
 }
 
 pub(crate) fn decode_tool_choice_json(reasoning_json: &str) -> Result<ToolChoice, sqlx::Error> {
-    let value: serde_json::Value =
-        serde_json::from_str(reasoning_json).map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
+    let value: serde_json::Value = serde_json::from_str(reasoning_json)
+        .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
     match value.get("toolChoice") {
         Some(tool_choice) => serde_json::from_value(tool_choice.clone())
             .map_err(|error| sqlx::Error::Decode(Box::new(error))),
@@ -72,8 +72,8 @@ fn encode_reasoning_json(
     reasoning: &ReasoningSettings,
     tool_choice: &ToolChoice,
 ) -> Result<String, sqlx::Error> {
-    let mut value = serde_json::to_value(reasoning)
-        .map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
+    let mut value =
+        serde_json::to_value(reasoning).map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
     if let serde_json::Value::Object(object) = &mut value {
         object.insert(
             "toolChoice".to_string(),

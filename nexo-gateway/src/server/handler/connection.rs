@@ -55,18 +55,37 @@ pub async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
             msg = ws.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Some(response) = handle_incoming_message(&text, &peer_id, &state, &db, &run_handle).await {
-                            let json = match serde_json::to_string(&response) {
-                                Ok(json) => json,
-                                Err(error) => {
-                                    tracing::error!("Failed to serialize response: {error}");
-                                    continue;
-                                }
+                        let text = text.to_string();
+                        let peer_id = peer_id.clone();
+                        let state = state.clone();
+                        let db = db.clone();
+                        let run_handle = run_handle.clone();
+                        let response_sender = {
+                            let state_read = state.read().await;
+                            state_read.peer_senders.get(&peer_id).cloned()
+                        };
+
+                        tokio::spawn(async move {
+                            let Some(response) = handle_incoming_message(
+                                &text,
+                                &peer_id,
+                                &state,
+                                &db,
+                                &run_handle,
+                            )
+                            .await else {
+                                return;
                             };
-                            if ws.send(Message::Text(json.into())).await.is_err() {
-                                break;
+
+                            let Some(response_sender) = response_sender else {
+                                tracing::debug!(peer_id, "No response sender for peer");
+                                return;
+                            };
+
+                            if response_sender.send(response).await.is_err() {
+                                tracing::debug!(peer_id, "Failed to send response to peer");
                             }
-                        }
+                        });
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => continue,

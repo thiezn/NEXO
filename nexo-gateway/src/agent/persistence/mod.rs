@@ -20,8 +20,7 @@ pub use prompts::{
 };
 pub use runs::{
     create_round, create_run, create_run_with_tool_choice, create_tool_trace, finish_round,
-    finish_run, finish_tool_trace, is_run_cancelled, mark_run_queued, next_round_index,
-    stop_run,
+    finish_run, finish_tool_trace, is_run_cancelled, mark_run_queued, next_round_index, stop_run,
 };
 pub use sessions::{clear_session, create_session, get_session, list_sessions};
 
