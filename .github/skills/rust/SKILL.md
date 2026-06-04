@@ -1,30 +1,38 @@
 ---
 name: rust
-description: Rust coding conventions for the project. Use when writing, reviewing, or refactoring any Rust code in the workspace. Covers project-specific patterns beyond generic Rust best practices.
+description: Rust coding conventions. Use when writing, reviewing, or refactoring any Rust code in the workspace.
 ---
 
-# Rust Development
+- Only specify major version in Cargo.toml dependencies. Use workspace dependencies to manage versions across crates.
+- Prefer proper refactoring instead of small additive changes to maintain backwards compatibility.
 
-- **Rust edition:** 2024 (resolver = "3")
-- **Workspace lints:** `clippy::unwrap_used = "warn"`, `clippy::expect_used = "warn"`, `clippy::panic = "warn"`
-- **Release profile:** `codegen-units = 1`, `lto = "fat"`, `debug = true`
-- **Minimal dependencies:** Prefer `std` over crates. Only add external crates when essential.
-- **Dependencies:** Leverage workspace dependencies when applicable. Only specify the latest major version of a crate, for instance `dep = "2"` instead of `dep = "2.0.130"`.
-- **Platform targets:** ARM Linux + macOS. Use `#[cfg(...)]` for platform-specific code.
-- **No backwards compatibility:** Aggressive refactoring preferred
-
-## Quality Gates
+# Quality Gates
 
 ```bash
 cargo fmt -- --check && cargo clippy -- -D warnings && cargo test
 ```
 
-## Module Structure
+# Module Organization
 
-- Always prefer to split crates up into submodules
+- Split crates up into submodules
 - Keep mod.rs files minimal, only defining modules and exports. The logic should reside in separate files within the module
 
-## Error Handling Pattern
+# Naming Conventions
+
+- Getter Prefixes by Cost and Ownership
+
+| Prefix  | Cost      | Ownership                                                              | example                                               |
+| ------- | --------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
+| `as_`   | Free      | borrowed → borrowed                                                    | fn as_bytes(&self) -> &[u8] { &self.data }            |
+| `to_`   | Expensive | borrowed → borrowed, borrowed → owned (non-Copy), owned → owned (Copy) | fn to_string(&self) -> String { format!("{}", self) } |
+| `into_` | Variable  | owned → owned (non-Copy)                                               | fn into_inner(self) -> Vec<u8> { self.data }          |
+
+# Boolean Naming
+
+- Prefix with `is_`, `has_`, `can_`, `should_`
+- Avoid bare boolean parameters - use enums instead
+
+# Error Handling
 
 Every library crate defines its own `Error` enum and `Result<T>` alias:
 
@@ -45,13 +53,44 @@ pub enum Error {
 
 See `best-practices/error-handling.md` for full pattern.
 
-## Best Practices Index
+# Documentation
 
-| Topic                | File                                       |
-| -------------------- | ------------------------------------------ |
-| Error handling       | `best-practices/error-handling.md`         |
-| Naming conventions   | `best-practices/naming.md`                 |
-| Criterion benchmarks | `best-practices/benchmarks.md`             |
-| Memory & performance | `best-practices/memory-and-performance.md` |
-| API design patterns  | `best-practices/api-design.md`             |
-| Documentation        | `best-practices/documentation.md`          |
+- Use `//!` (inner doc comments) at the top of `lib.rs` or `mod.rs` for module/crate documentation.
+- Document functions:
+
+````rust
+/// Summary.
+///
+/// # Arguments
+///
+/// * `param` - A param
+///
+/// # Examples
+///
+/// ```ignore
+/// some code
+/// ```
+pub fn new(param: u16) -> Result { ...}
+````
+
+# Tracing
+
+- Use `tracing` for all logging and instrumentation
+- Always define structured events with fields instead of embedding variables in messages
+- Use appropriate levels (`trace`, `debug`, `info`, `warn`, `error`)
+
+# Collections & Iterators
+
+- Prefer Iterators Over Loops
+- Use `collect()` Type Inference
+
+# Anti-Patterns
+
+| Anti-Pattern                             | Better Approach                      |
+| ---------------------------------------- | ------------------------------------ |
+| Boolean parameters                       | Use enums                            |
+| `String` parameters when `&str` suffices | Accept `&str` or `impl Into<String>` |
+| Long function bodies (>50 lines)         | Extract to smaller functions         |
+| Deep nesting (>3 levels)                 | Use early returns                    |
+| Magic numbers                            | Use named constants                  |
+| `clone()` to satisfy borrow checker      | Restructure ownership                |

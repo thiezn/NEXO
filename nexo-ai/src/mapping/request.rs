@@ -4,10 +4,10 @@ use either::Either;
 use indexmap::IndexMap;
 use mistralrs_core::Function as MistralFunction;
 use mistralrs_core::{
-    AudioInput as MistralAudioInput, Constraint, DiffusionGenerationParams,
-    DetokenizationRequest as MistralDetokenizationRequest, MessageContent,
-    NormalRequest, ReasoningEffort as MistralReasoningEffort, RequestMessage, Response,
-    SamplingParams, StopTokens, TokenizationRequest as MistralTokenizationRequest, Tool,
+    AudioInput as MistralAudioInput, Constraint,
+    DetokenizationRequest as MistralDetokenizationRequest, DiffusionGenerationParams,
+    MessageContent, NormalRequest, ReasoningEffort as MistralReasoningEffort, RequestMessage,
+    Response, SamplingParams, StopTokens, TokenizationRequest as MistralTokenizationRequest, Tool,
     ToolChoice as MistralToolChoice, ToolType,
 };
 use nexo_core::inference::request::{
@@ -634,8 +634,8 @@ fn map_reasoning_effort(
 mod tests {
     use nexo_core::{
         ConversationMessage, MetadataMap, ModelCapability, ModelId, ModelModalities,
-        ReasoningSettings, RequestId, SupportedModality, ToolChoice,
-        ToolExecutionConstraints, ToolParallelism, ToolSideEffectLevel,
+        ReasoningSettings, RequestId, SupportedModality, ToolChoice, ToolExecutionConstraints,
+        ToolParallelism, ToolSideEffectLevel,
     };
 
     use super::*;

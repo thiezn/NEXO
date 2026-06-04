@@ -1,5 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use super::command::{self, AppCommand, CommandContext};
+use super::message::Message;
+use super::model::{ActiveStream, ActivityButton, LogKind, Model, PendingRequest, RunningState};
+use super::network::NetworkEvent;
 use chrono::Local;
 use nexo_ws_schema::{
     AudioAnalyzeResponse, AudioGenerateResponse, CronListParams, CronListResponse, CronPayload,
@@ -11,10 +15,6 @@ use nexo_ws_schema::{
     SessionListResponse, ShutdownPayload, StatusParams, StatusResponse, ToolEntry,
     ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteResponse,
 };
-use super::command::{self, AppCommand, CommandContext};
-use super::message::Message;
-use super::model::{ActiveStream, ActivityButton, LogKind, Model, PendingRequest, RunningState};
-use super::network::NetworkEvent;
 
 #[derive(Debug)]
 pub enum Effect {
@@ -644,11 +644,39 @@ fn handle_event(model: &mut Model, event: EventKind, payload: serde_json::Value)
         EventKind::Message => {
             match serde_json::from_value::<MessagePayload>(payload) {
                 Ok(message) => {
-                    model.push_log(
-                        LogKind::Event,
-                        format!("message from {}", message.from),
-                        pretty_json(&message.payload),
-                    );
+                    if message.from == "gateway"
+                        && message.payload.get("kind")
+                            == Some(&serde_json::Value::String("generation.queued".to_string()))
+                    {
+                        let method = message
+                            .payload
+                            .get("method")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown");
+                        let session_id = message
+                            .payload
+                            .get("sessionId")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("default");
+                        let queued_count = message
+                            .payload
+                            .get("queuedCount")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0);
+                        model.push_log(
+                            LogKind::Info,
+                            "generation queued",
+                            format!(
+                                "method={method} session_id={session_id} queued_count={queued_count}"
+                            ),
+                        );
+                    } else {
+                        model.push_log(
+                            LogKind::Event,
+                            format!("message from {}", message.from),
+                            pretty_json(&message.payload),
+                        );
+                    }
                 }
                 Err(error) => model.push_log(
                     LogKind::Error,
@@ -1030,7 +1058,11 @@ fn handle_image_generate_response(model: &mut Model, response: ImageGenerateResp
 
     let mut saved_paths = Vec::new();
     for image in response.images {
-        match save_generated_image(&model.workspace_root, &image.image_data, image.media_type.as_deref()) {
+        match save_generated_image(
+            &model.workspace_root,
+            &image.image_data,
+            image.media_type.as_deref(),
+        ) {
             Ok(path) => saved_paths.push(path),
             Err(error) => {
                 model.push_log(
@@ -1129,9 +1161,7 @@ fn unique_path(dir: PathBuf, file_name: String) -> PathBuf {
         .rsplit_once('.')
         .map_or(file_name.as_str(), |(head, _)| head)
         .to_string();
-    let ext = file_name
-        .rsplit_once('.')
-        .map(|(_, ext)| ext.to_string());
+    let ext = file_name.rsplit_once('.').map(|(_, ext)| ext.to_string());
 
     let mut candidate = dir.join(&file_name);
     let mut suffix = 1usize;
@@ -1150,8 +1180,12 @@ fn save_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let Some(parent) = path.parent() else {
         return Err("Output path has no parent directory".to_string());
     };
-    std::fs::create_dir_all(parent)
-        .map_err(|error| format!("Failed to create output directory '{}': {error}", parent.display()))?;
+    std::fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "Failed to create output directory '{}': {error}",
+            parent.display()
+        )
+    })?;
     std::fs::write(path, bytes)
         .map_err(|error| format!("Failed to write '{}': {error}", path.display()))
 }

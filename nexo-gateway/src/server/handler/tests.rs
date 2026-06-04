@@ -2,11 +2,15 @@
 use super::*;
 use crate::agent::RunHandle;
 use crate::server::state::{GatewayState, PeerInfo, SharedState, dummy_sender};
+use nexo_core::{
+    MetadataMap, ModelCapability, ModelId, ModelModalities, RoleStrategy, SupportedModality,
+};
 use nexo_ws_schema::{ConnectionRole, EventKind, Frame, Method};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
+use tokio::time::{Duration, timeout};
 
 fn make_state() -> SharedState {
     Arc::new(RwLock::new(GatewayState::new(std::path::PathBuf::from(
@@ -20,6 +24,26 @@ fn make_run_handle(state: &SharedState, db: &SqlitePool) -> RunHandle {
         st.event_tx.clone()
     };
     RunHandle::spawn(db.clone(), state.clone(), event_tx)
+}
+
+fn make_loaded_model(
+    model_id: &str,
+    capabilities: Vec<ModelCapability>,
+) -> nexo_core::ModelDescriptor {
+    nexo_core::ModelDescriptor {
+        id: ModelId::from(model_id),
+        display_name: model_id.into(),
+        provider: Some("test".into()),
+        capabilities,
+        modalities: ModelModalities {
+            input: vec![SupportedModality::Text],
+            output: vec![SupportedModality::Image],
+        },
+        role_strategy: RoleStrategy::Default,
+        context_window_tokens: Some(4096),
+        max_output_tokens: Some(1024),
+        metadata: MetadataMap::new(),
+    }
 }
 
 // Helper: dispatch with a real DB pool
@@ -322,6 +346,130 @@ async fn dispatch_send_routes_message_to_target_user(pool: SqlitePool) {
         }
         other => panic!("Expected message event, got {other:?}"),
     }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn dispatch_image_generate_queues_until_capable_node_is_ready(pool: SqlitePool) {
+    let state = make_state();
+    let ah = make_run_handle(&state, &pool);
+    let (node_tx, mut node_rx) = mpsc::channel(1);
+    {
+        let mut s = state.write().await;
+        s.add_peer(
+            PeerInfo {
+                id: "n1".into(),
+                client_id: "node-1".into(),
+                role: ConnectionRole::Node,
+                scopes: vec![],
+                capabilities: vec![],
+                commands: vec![],
+                device_id: None,
+                connected_at: chrono::Utc::now(),
+            },
+            node_tx,
+        );
+    }
+
+    let mut event_rx = {
+        let s = state.read().await;
+        s.event_tx.subscribe()
+    };
+
+    let state_for_dispatch = state.clone();
+    let pool_for_dispatch = pool.clone();
+    let ah_for_dispatch = ah.clone();
+    let response_task = tokio::spawn(async move {
+        dispatch(
+            "req-img",
+            &Method::ImageGenerate,
+            serde_json::json!({
+                "prompt": "a smiley face",
+                "idempotencyKey": "idem-img-1",
+                "sessionId": "sess-queue-1"
+            }),
+            "p1",
+            &state_for_dispatch,
+            &pool_for_dispatch,
+            &ah_for_dispatch,
+        )
+        .await
+    });
+
+    let queued_event = timeout(Duration::from_secs(2), event_rx.recv())
+        .await
+        .expect("timed out waiting for queued event")
+        .expect("failed to receive queued event");
+    match queued_event {
+        Frame::Event { event, payload, .. } => {
+            assert_eq!(event, EventKind::Message);
+            assert_eq!(payload["payload"]["kind"], "generation.queued");
+            assert_eq!(payload["payload"]["method"], "image.generate");
+            assert_eq!(payload["payload"]["sessionId"], "sess-queue-1");
+            assert_eq!(payload["payload"]["queuedCount"], 1);
+        }
+        other => panic!("Expected queued message event, got {other:?}"),
+    }
+
+    {
+        let mut s = state.write().await;
+        s.set_loaded_models(
+            "n1",
+            vec![make_loaded_model(
+                "flux.2-klein-9b",
+                vec![ModelCapability::ImageGeneration],
+            )],
+        );
+    }
+
+    let forwarded = timeout(Duration::from_secs(2), node_rx.recv())
+        .await
+        .expect("timed out waiting for forwarded request")
+        .expect("node channel closed");
+    let forwarded_id = match forwarded {
+        Frame::Request { id, method, .. } => {
+            assert_eq!(method, Method::ImageGenerate);
+            id
+        }
+        other => panic!("Expected forwarded image.generate request, got {other:?}"),
+    };
+
+    let pending_tx = {
+        let mut s = state.write().await;
+        s.pending_requests
+            .remove(&forwarded_id)
+            .expect("expected pending request sender")
+    };
+    pending_tx
+        .send(Frame::Response {
+            id: forwarded_id,
+            ok: true,
+            payload: Some(serde_json::json!({
+                "images": [{"index": 0, "imageData": "ZmFrZQ==", "mediaType": "image/png"}],
+                "inferenceTimeMs": 10
+            })),
+            error: None,
+        })
+        .expect("failed to send simulated node response");
+
+    let response = timeout(Duration::from_secs(2), response_task)
+        .await
+        .expect("timed out waiting for gateway response")
+        .expect("dispatch task failed to join");
+    if let Frame::Response { ok, payload, .. } = response {
+        assert!(ok);
+        assert_eq!(payload.unwrap()["images"][0]["index"], 0);
+    } else {
+        panic!("Expected response");
+    }
+
+    let queued_count = {
+        let s = state.read().await;
+        s.queued_generation_by_session
+            .get("sess-queue-1")
+            .copied()
+            .unwrap_or(0)
+    };
+    assert_eq!(queued_count, 0);
 }
 
 #[sqlx::test(migrations = "./migrations")]

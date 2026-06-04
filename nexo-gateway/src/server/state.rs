@@ -59,6 +59,8 @@ pub struct GatewayState {
     pub loaded_models: HashMap<PeerId, Vec<ModelDescriptor>>,
     /// Model IDs available on disk per node (declared at connect time).
     pub available_models: HashMap<PeerId, Vec<String>>,
+    /// Queued multimodal generation request counts keyed by session ID.
+    pub queued_generation_by_session: HashMap<String, usize>,
     /// Notified whenever a node's loaded model changes (used to wake the queue drain watcher).
     pub model_ready_notify: Arc<Notify>,
     /// Resolved path to the storage root (~/.nexo/storage).
@@ -82,6 +84,7 @@ impl GatewayState {
             started_at: chrono::Utc::now(),
             loaded_models: HashMap::new(),
             available_models: HashMap::new(),
+            queued_generation_by_session: HashMap::new(),
             model_ready_notify: Arc::new(Notify::new()),
             storage_root,
             gateway_tools: Arc::new(ToolRegistry::new()),
@@ -125,6 +128,30 @@ impl GatewayState {
     pub fn set_loaded_models(&mut self, peer_id: &str, models: Vec<ModelDescriptor>) {
         self.loaded_models.insert(peer_id.to_string(), models);
         self.model_ready_notify.notify_waiters();
+    }
+
+    /// Increment queued generation count for a session and return the new value.
+    pub fn increment_generation_queue(&mut self, session_id: &str) -> usize {
+        let entry = self
+            .queued_generation_by_session
+            .entry(session_id.to_string())
+            .or_insert(0);
+        *entry += 1;
+        *entry
+    }
+
+    /// Decrement queued generation count for a session and return the remaining value.
+    pub fn decrement_generation_queue(&mut self, session_id: &str) -> usize {
+        let Some(count) = self.queued_generation_by_session.get_mut(session_id) else {
+            return 0;
+        };
+        if *count <= 1 {
+            self.queued_generation_by_session.remove(session_id);
+            return 0;
+        }
+
+        *count -= 1;
+        *count
     }
 
     /// Find all connected user peers for a routing identity, excluding the origin peer.
