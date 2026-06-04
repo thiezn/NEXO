@@ -359,12 +359,15 @@ fn media_source_bytes(source: &MediaSource, part: &str) -> Result<Vec<u8>> {
 }
 
 fn decode_base64_bytes(encoded: &str, part: &str) -> Result<Vec<u8>> {
-    base64::decode(encoded).map_err(|error| {
-        nexo_core::Error::InvalidRequest {
-            message: format!("invalid {part} base64 payload: {error}"),
-        }
-        .into()
-    })
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| {
+            nexo_core::Error::InvalidRequest {
+                message: format!("invalid {part} base64 payload: {error}"),
+            }
+            .into()
+        })
 }
 
 fn map_message(
@@ -729,7 +732,10 @@ mod tests {
         let descriptor = descriptor(RoleStrategy::MergeDeveloperIntoSystem);
         let request = GenerateRequest::new_image_analyze(
             RequestId::from("request-1"),
-            base64::encode(tiny_png_bytes()),
+            {
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD.encode(tiny_png_bytes())
+            },
             Some("image/png".to_string()),
             "Describe this image".to_string(),
             64,
@@ -758,7 +764,10 @@ mod tests {
         let descriptor = descriptor(RoleStrategy::MergeDeveloperIntoSystem);
         let request = GenerateRequest::new_audio_analyze(
             RequestId::from("request-2"),
-            base64::encode(tiny_wav_bytes()),
+            {
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD.encode(tiny_wav_bytes())
+            },
             Some("audio/wav".to_string()),
             Some(16_000),
             Some(1),

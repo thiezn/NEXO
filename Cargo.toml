@@ -26,7 +26,7 @@ nexo-ws-schema = { path = "shared/nexo-ws-schema" }
 
 anyhow = "1"
 async-trait = "0"
-base64 = "0"
+base64 = "0.22"
 # Keep this pinned to the same Candle Git revision that `mistralrs-core` master
 # uses. Otherwise Cargo resolves two different `candle_core` crates (registry and
 # git), and `nexo-ai` hits `Device`/`Tensor` type mismatches at the mistralrs API boundary.

@@ -4031,7 +4031,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.13.1",
+ "base64 0.22.1",
  "candle-core",
  "clap",
  "cli-helpers",
@@ -4165,7 +4165,7 @@ dependencies = [
 name = "nexo-node"
 version = "0.1.0"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.22.1",
  "clap",
  "cli-helpers",
  "dirs",
