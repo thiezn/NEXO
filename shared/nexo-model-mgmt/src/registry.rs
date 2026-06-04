@@ -123,7 +123,7 @@ pub fn list_models() -> Vec<ModelEntry> {
                     && manifest
                         .files
                         .iter()
-                        .all(|file| local_selector_present(&model_dir, &file.selector))
+                        .all(|file| local_file_present(&model_dir, file))
                     && local_safetensors_indexes_complete(&model_dir),
             }
         })
@@ -139,6 +139,7 @@ static ALL_MANIFESTS: LazyLock<Vec<ModelManifest>> = LazyLock::new(|| {
     manifests.extend(gemma_4_uqff_manifests());
     manifests.extend(qwen_3_5_apple_metal_manifests());
     manifests.push(voxtral_mini_asr_stt_manifest());
+    manifests.push(dia_1_6b_tts_manifest());
     manifests.extend(flux_2_manifests());
     manifests.push(embedding_gemma_manifest());
     manifests
@@ -480,6 +481,46 @@ fn voxtral_mini_asr_stt_manifest() -> ModelManifest {
     }
 }
 
+fn dia_1_6b_tts_manifest() -> ModelManifest {
+    let repo = "nari-labs/Dia-1.6B";
+    let dac_repo = "EricB/dac_44khz";
+    ModelManifest {
+        descriptor: descriptor(
+            "dia-1.6b-tts",
+            "Dia 1.6B TTS",
+            Some("nari-labs"),
+            "dia",
+            vec![ModelCapability::SpeechGeneration],
+            vec![SupportedModality::Text],
+            vec![SupportedModality::Audio],
+            "Dia text-to-speech model for synthesizing audio from text prompts.",
+            repo,
+            "safetensors",
+            None,
+        ),
+        backend: "mistralrs-dia".to_string(),
+        size_gb: 3.5,
+        files: vec![
+            file_exact(ModelComponent::Config, repo, "config.json", None, false),
+            file_exact(
+                ModelComponent::Weights,
+                repo,
+                "model.safetensors",
+                None,
+                false,
+            ),
+            file_exact_at(
+                ModelComponent::Weights,
+                dac_repo,
+                "model.safetensors",
+                "dac/model.safetensors",
+                None,
+                false,
+            ),
+        ],
+    }
+}
+
 fn flux_2_manifests() -> Vec<ModelManifest> {
     [
         (
@@ -607,6 +648,26 @@ fn file_exact(
         component,
         hf_repo: hf_repo.to_string(),
         selector: ModelFileSelector::Exact(filename.to_string()),
+        local_path: None,
+        size_bytes,
+        gated,
+        sha256: None,
+    }
+}
+
+fn file_exact_at(
+    component: ModelComponent,
+    hf_repo: &str,
+    filename: &str,
+    local_path: &str,
+    size_bytes: Option<u64>,
+    gated: bool,
+) -> ModelFile {
+    ModelFile {
+        component,
+        hf_repo: hf_repo.to_string(),
+        selector: ModelFileSelector::Exact(filename.to_string()),
+        local_path: Some(local_path.to_string()),
         size_bytes,
         gated,
         sha256: None,
@@ -618,6 +679,7 @@ fn file_chat_template_exact(hf_repo: &str, filename: &str, gated: bool) -> Model
         component: ModelComponent::ChatTemplate,
         hf_repo: hf_repo.to_string(),
         selector: ModelFileSelector::Exact(filename.to_string()),
+        local_path: None,
         size_bytes: None,
         gated,
         sha256: None,
@@ -637,6 +699,7 @@ fn file_suffix(component: ModelComponent, hf_repo: &str, suffix: &str, gated: bo
         component,
         hf_repo: hf_repo.to_string(),
         selector: ModelFileSelector::Suffix(suffix.to_string()),
+        local_path: None,
         size_bytes: None,
         gated,
         sha256: None,
@@ -648,6 +711,7 @@ fn file_prefix(component: ModelComponent, hf_repo: &str, prefix: &str, gated: bo
         component,
         hf_repo: hf_repo.to_string(),
         selector: ModelFileSelector::Prefix(prefix.to_string()),
+        local_path: None,
         size_bytes: None,
         gated,
         sha256: None,
@@ -688,11 +752,15 @@ fn metadata_string(metadata: &MetadataMap, key: &str) -> String {
         .to_string()
 }
 
-fn local_selector_present(model_dir: &Path, selector: &ModelFileSelector) -> bool {
-    match selector {
+fn local_file_present(model_dir: &Path, file: &ModelFile) -> bool {
+    if let Some(local_path) = &file.local_path {
+        return model_dir.join(local_path).exists();
+    }
+
+    match &file.selector {
         ModelFileSelector::Exact(path) => model_dir.join(path).exists(),
         ModelFileSelector::Suffix(_) | ModelFileSelector::Prefix(_) => {
-            any_local_file_matches(model_dir, selector)
+            any_local_file_matches(model_dir, &file.selector)
         }
     }
 }
@@ -828,5 +896,31 @@ mod tests {
                 "manifest {id} is missing chat_template.jinja"
             );
         }
+    }
+
+    #[test]
+    fn dia_manifest_supports_speech_generation_and_dac_sidecar() {
+        let manifest = find_manifest("dia-1.6b-tts").expect("missing Dia manifest");
+
+        assert_eq!(manifest.backend, "mistralrs-dia");
+        assert!(
+            manifest
+                .descriptor
+                .capabilities
+                .contains(&ModelCapability::SpeechGeneration)
+        );
+        assert_eq!(
+            manifest.descriptor.modalities.input,
+            vec![SupportedModality::Text]
+        );
+        assert_eq!(
+            manifest.descriptor.modalities.output,
+            vec![SupportedModality::Audio]
+        );
+        assert!(manifest.files.iter().any(|file| {
+            file.hf_repo == "EricB/dac_44khz"
+                && file.selector.exact_path() == Some("model.safetensors")
+                && file.local_path.as_deref() == Some("dac/model.safetensors")
+        }));
     }
 }

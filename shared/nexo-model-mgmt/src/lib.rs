@@ -11,6 +11,7 @@ pub use command::{ModelsAction, ModelsCommand};
 pub use error::{Error, Result};
 pub use manifest::{
     ModelComponent, ModelFile, ModelFileSelector, ModelManifest, sanitize_model_name, storage_path,
+    storage_path_for_file,
 };
 pub use paths::{default_models_dir, model_storage_dir, resolve_model_storage_dir};
 pub use pull::{DownloadError, pull_model, verify_sha256};

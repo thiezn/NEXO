@@ -107,6 +107,8 @@ pub struct ModelFile {
     pub hf_repo: String,
     /// Path selector inside the Hugging Face repository.
     pub selector: ModelFileSelector,
+    /// Optional clean path under this manifest's local storage directory.
+    pub local_path: Option<String>,
     /// Expected file size in bytes, when known.
     pub size_bytes: Option<u64>,
     /// Whether the source repository is gated.
@@ -159,6 +161,21 @@ pub fn storage_path(manifest: &ModelManifest, remote_filename: impl AsRef<Path>)
     PathBuf::from(manifest.storage_id()).join(remote_filename)
 }
 
+/// Determine the clean storage path for a remote file, honoring per-file local path overrides.
+#[must_use]
+pub fn storage_path_for_file(
+    manifest: &ModelManifest,
+    file: &ModelFile,
+    remote_filename: impl AsRef<Path>,
+) -> PathBuf {
+    let relative_path = file
+        .local_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| remote_filename.as_ref().to_path_buf());
+    PathBuf::from(manifest.storage_id()).join(relative_path)
+}
+
 fn base_storage_id(source_model: &str) -> String {
     let basename = source_model
         .rsplit_once('/')
@@ -201,6 +218,7 @@ mod tests {
             component: ModelComponent::Weights,
             hf_repo: "org/test".to_string(),
             selector: ModelFileSelector::Exact("subdir/model.gguf".to_string()),
+            local_path: None,
             size_bytes: Some(1),
             gated: false,
             sha256: None,
@@ -241,5 +259,42 @@ mod tests {
         };
 
         assert_eq!(manifest.storage_id(), "gemma-4-e4b-it");
+    }
+
+    #[test]
+    fn storage_path_uses_file_local_path_override() {
+        let manifest = ModelManifest {
+            descriptor: nexo_core::ModelDescriptor {
+                id: "dia-1.6b-tts".into(),
+                display_name: "Dia 1.6B TTS".to_string(),
+                provider: Some("nari-labs".to_string()),
+                capabilities: vec![nexo_core::ModelCapability::SpeechGeneration],
+                modalities: nexo_core::ModelModalities {
+                    input: vec![nexo_core::SupportedModality::Text],
+                    output: vec![nexo_core::SupportedModality::Audio],
+                },
+                role_strategy: nexo_core::RoleStrategy::Default,
+                context_window_tokens: None,
+                max_output_tokens: None,
+                metadata: Default::default(),
+            },
+            backend: "mistralrs-dia".to_string(),
+            size_gb: 1.0,
+            files: Vec::new(),
+        };
+        let file = ModelFile {
+            component: ModelComponent::Weights,
+            hf_repo: "EricB/dac_44khz".to_string(),
+            selector: ModelFileSelector::Exact("model.safetensors".to_string()),
+            local_path: Some("dac/model.safetensors".to_string()),
+            size_bytes: None,
+            gated: false,
+            sha256: None,
+        };
+
+        assert_eq!(
+            storage_path_for_file(&manifest, &file, "model.safetensors"),
+            PathBuf::from("dia-1.6b-tts/dac/model.safetensors")
+        );
     }
 }

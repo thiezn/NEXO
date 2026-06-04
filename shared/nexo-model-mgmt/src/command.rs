@@ -196,6 +196,9 @@ fn manifests_for_query(query: &str) -> Option<Vec<&'static crate::manifest::Mode
         "listen" | "audio" | "speech" | "stt" | "asr" => {
             Some(manifests_for_modality(SupportedModality::Audio))
         }
+        "talk" | "tts" | "speech-generation" => {
+            Some(manifests_for_capability(ModelCapability::SpeechGeneration))
+        }
         "flux" | "image-generation" => {
             Some(manifests_for_capability(ModelCapability::ImageGeneration))
         }
@@ -240,5 +243,16 @@ mod tests {
             .count();
 
         assert_eq!(flux_dev_count, 1);
+    }
+
+    #[test]
+    fn manifests_to_pull_includes_dia_for_tts_category() {
+        let manifests = manifests_to_pull(&["tts".to_string()]).unwrap();
+
+        assert!(
+            manifests
+                .iter()
+                .any(|manifest| manifest.id() == "dia-1.6b-tts")
+        );
     }
 }

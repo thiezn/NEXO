@@ -13,7 +13,7 @@ use thiserror::Error;
 use tokio::task::JoinSet;
 use tracing::debug;
 
-use crate::manifest::{ModelComponent, ModelFile, ModelManifest, storage_path};
+use crate::manifest::{ModelComponent, ModelFile, ModelManifest};
 use crate::paths::{default_models_dir, hf_cache_dir};
 
 /// Errors that can occur during model download.
@@ -70,6 +70,7 @@ struct ResolvedModelFile {
     component: ModelComponent,
     hf_repo: String,
     hf_filename: String,
+    local_path: Option<PathBuf>,
     size_bytes: Option<u64>,
     sha256: Option<&'static str>,
 }
@@ -108,7 +109,7 @@ pub async fn pull_model(
 
     let mut resolved_by_path = BTreeMap::new();
     for file in resolved_files {
-        let clean_path = models_dir.join(storage_path(manifest, &file.hf_filename));
+        let clean_path = models_dir.join(storage_path_for_resolved_file(manifest, &file));
         resolved_by_path.insert(clean_path, file);
     }
 
@@ -181,6 +182,14 @@ pub async fn pull_model(
     Ok(downloads)
 }
 
+fn storage_path_for_resolved_file(manifest: &ModelManifest, file: &ResolvedModelFile) -> PathBuf {
+    let relative_path = file
+        .local_path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(&file.hf_filename));
+    PathBuf::from(manifest.storage_id()).join(relative_path)
+}
+
 fn spawn_download_task(
     join_set: &mut JoinSet<std::result::Result<(ModelComponent, PathBuf), DownloadError>>,
     api: Api,
@@ -222,6 +231,7 @@ async fn resolve_model_file(
             component: file.component,
             hf_repo: file.hf_repo.clone(),
             hf_filename: filename.to_string(),
+            local_path: file.local_path.as_ref().map(PathBuf::from),
             size_bytes: file.size_bytes,
             sha256: file.sha256,
         }]);
@@ -258,6 +268,7 @@ async fn resolve_model_file(
             component: file.component,
             hf_repo: file.hf_repo.clone(),
             hf_filename,
+            local_path: file.local_path.as_ref().map(PathBuf::from),
             size_bytes: file.size_bytes,
             sha256: file.sha256,
         })

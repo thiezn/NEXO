@@ -8,7 +8,7 @@ use nexo_model_mgmt::{ModelComponent, ModelFileSelector, ModelManifest};
 
 use crate::{
     AutoModelLoader, DiffusionModelLoader, Error, GgufModelLoader, ModelDataType, ModelLoader,
-    RegisteredModelConfig, Result,
+    RegisteredModelConfig, Result, SpeechModelLoader,
 };
 
 /// Build runtime configs for every downloaded model known to `nexo-model-mgmt`.
@@ -63,6 +63,15 @@ fn loader_from_manifest(manifest: &ModelManifest) -> Result<ModelLoader> {
         return Ok(ModelLoader::Diffusion(DiffusionModelLoader {
             model_id: manifest.id().to_string(),
             offload: false,
+            dtype: ModelDataType::Auto,
+        }));
+    }
+
+    if manifest.backend == "mistralrs-dia" {
+        let model_dir = nexo_model_mgmt::resolve_model_storage_dir(manifest.id());
+        return Ok(ModelLoader::Speech(SpeechModelLoader {
+            model_id: manifest.id().to_string(),
+            dac_model_id: Some(model_dir.join("dac").to_string_lossy().into_owned()),
             dtype: ModelDataType::Auto,
         }));
     }
@@ -178,6 +187,25 @@ mod tests {
         };
 
         assert_eq!(loader.model_id, "flux.2-klein-9b");
+        assert_eq!(loader.dtype, ModelDataType::Auto);
+    }
+
+    #[test]
+    fn dia_manifest_uses_speech_loader() {
+        let manifest = find_manifest("dia-1.6b-tts").unwrap();
+        let config = model_config_from_manifest(manifest).unwrap();
+
+        let ModelLoader::Speech(loader) = config.loader else {
+            panic!("expected speech loader");
+        };
+
+        assert_eq!(loader.model_id, "dia-1.6b-tts");
+        assert!(
+            loader
+                .dac_model_id
+                .as_deref()
+                .is_some_and(|path| path.ends_with("dia-1.6b/dac"))
+        );
         assert_eq!(loader.dtype, ModelDataType::Auto);
     }
 }

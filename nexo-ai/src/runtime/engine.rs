@@ -9,8 +9,8 @@ use mistralrs_core::{
     DiffusionLoaderType, EngineConfig as MistralEngineConfig, GGUFLoaderBuilder,
     GGUFSpecificConfig, LoaderBuilder, MemoryGpuConfig, MistralRs, MistralRsBuilder, ModelPaths,
     ModelSelected, PagedAttentionConfig, PagedCacheType, Request, Response as MistralResponse,
-    SchedulerConfig as MistralSchedulerConfig, TokenSource, UQFF_MULTI_FILE_DELIMITER,
-    get_auto_device_map_params, get_model_dtype, paged_attn_supported,
+    SchedulerConfig as MistralSchedulerConfig, SpeechLoaderType, TokenSource,
+    UQFF_MULTI_FILE_DELIMITER, get_auto_device_map_params, get_model_dtype, paged_attn_supported,
 };
 use nexo_core::inference::request::{
     EmbedRequest, GenerateRequest, ImageGenerationRequest, SpeechGenerationRequest,
@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use crate::config::{
     AutoModelLoader, DeviceSpec, DiffusionModelLoader, GgufModelLoader, ModelDataType, ModelLoader,
     PagedAttentionCacheType, PagedAttentionMode, RegisteredModelConfig, RuntimeConfig,
-    SchedulerPolicy,
+    SchedulerPolicy, SpeechModelLoader,
 };
 use crate::mapping::request::{
     map_detokenization_request, map_embedding_request, map_generate_request,
@@ -498,6 +498,7 @@ fn build_pipeline(
             build_auto_pipeline(loader, runtime_config, device, paged_attn_config)
         }
         ModelLoader::Diffusion(loader) => build_diffusion_pipeline(loader, device),
+        ModelLoader::Speech(loader) => build_speech_pipeline(loader, device),
         ModelLoader::Gguf(loader) => {
             build_gguf_pipeline(loader, runtime_config, device, paged_attn_config)
         }
@@ -516,6 +517,43 @@ fn build_diffusion_pipeline(
         } else {
             DiffusionLoaderType::Flux
         },
+        dtype: map_dtype(loader.dtype),
+    };
+
+    let built_loader = LoaderBuilder::new(selected.clone())
+        .build()
+        .map_err(|error| Error::MistralRuntime {
+            message: error.to_string(),
+        })?;
+    let dtype = get_model_dtype(&selected).map_err(|error| Error::MistralRuntime {
+        message: error.to_string(),
+    })?;
+
+    built_loader
+        .load_model_from_hf(
+            None,
+            TokenSource::None,
+            &dtype,
+            device,
+            true,
+            DeviceMapSetting::Auto(AutoDeviceMapParams::default_text()),
+            None,
+            None,
+        )
+        .map_err(|error| Error::MistralRuntime {
+            message: error.to_string(),
+        })
+}
+
+fn build_speech_pipeline(
+    loader: &SpeechModelLoader,
+    device: &Device,
+) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
+    let model_dir = resolve_model_storage_dir(&loader.model_id);
+    let selected = ModelSelected::Speech {
+        model_id: model_dir.to_string_lossy().into_owned(),
+        dac_model_id: loader.dac_model_id.clone(),
+        arch: SpeechLoaderType::Dia,
         dtype: map_dtype(loader.dtype),
     };
 

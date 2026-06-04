@@ -178,6 +178,9 @@ pub enum ModelLoader {
     /// Load a diffusion model for image generation.
     Diffusion(DiffusionModelLoader),
 
+    /// Load a speech synthesis model.
+    Speech(SpeechModelLoader),
+
     /// Load a quantized GGUF model with an explicit weight file list.
     Gguf(GgufModelLoader),
 }
@@ -218,6 +221,19 @@ pub struct DiffusionModelLoader {
     /// Prefer the offloaded FLUX loader variant when supported by the runtime.
     #[serde(default)]
     pub offload: bool,
+
+    /// The preferred model data type for model loading.
+    pub dtype: ModelDataType,
+}
+
+/// Loader settings for speech synthesis models.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpeechModelLoader {
+    /// The local model identifier under NEXO's model store.
+    pub model_id: String,
+
+    /// Optional local DAC model identifier or path.
+    pub dac_model_id: Option<String>,
 
     /// The preferred model data type for model loading.
     pub dtype: ModelDataType,

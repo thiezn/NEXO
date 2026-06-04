@@ -19,7 +19,7 @@ pub use config::default_config_path;
 pub use config::{
     AutoModelLoader, DeviceSpec, DiffusionModelLoader, GgufModelLoader, ModelDataType, ModelLoader,
     NexoAiConfig, PagedAttentionCacheType, PagedAttentionMode, PagedAttentionRuntimeConfig,
-    RegisteredModelConfig, RuntimeConfig, SchedulerPolicy,
+    RegisteredModelConfig, RuntimeConfig, SchedulerPolicy, SpeechModelLoader,
 };
 pub use error::{Error, Result};
 pub use registry::StaticModelRegistry;
