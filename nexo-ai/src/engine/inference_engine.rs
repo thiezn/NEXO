@@ -1,46 +1,37 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
-use nexo_core::{InferenceEngine, InferenceRequest, InferenceStream, ModelId, ModelRegistry};
+use nexo_core::{InferenceRequest, InferenceRuntime, InferenceStream, ModelId, ModelRegistry};
 use tokio::sync::Mutex;
 
-use crate::runtime::controller::RuntimeController;
-use crate::{Error, NexoAiConfig, StaticModelRegistry};
+use crate::engine::runtime_manager::RuntimeManager;
+use crate::{Error, InferenceEngineConfig, StaticModelRegistry};
 
 /// The library-first `nexo-ai` service surface.
 #[derive(Debug, Clone)]
-pub struct NexoAi {
+pub struct InferenceEngine {
     registry: StaticModelRegistry,
-    controller: Arc<Mutex<RuntimeController>>,
+    runtime_manager: Arc<Mutex<RuntimeManager>>,
     loaded_model_ids: Arc<RwLock<BTreeSet<ModelId>>>,
 }
 
-impl NexoAi {
-    /// Creates a new builder for the provided configuration.
+impl InferenceEngine {
+    /// Creates an inference engine from declarative configuration.
     ///
     /// # Arguments
     ///
     /// * `config` - The declarative runtime configuration.
-    pub fn builder(config: NexoAiConfig) -> crate::runtime::NexoAiBuilder {
-        crate::runtime::NexoAiBuilder::new(config)
-    }
-
-    /// Builds a service from configuration.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - The declarative runtime configuration.
-    pub async fn from_config(config: NexoAiConfig) -> crate::Result<Self> {
+    pub async fn new(config: InferenceEngineConfig) -> crate::Result<Self> {
         let descriptors = config
             .models
             .iter()
             .map(|model| model.descriptor.clone())
             .collect();
         let registry = StaticModelRegistry::new(descriptors)?;
-        let controller = RuntimeController::new(&config);
+        let runtime_manager = RuntimeManager::new(&config);
         Ok(Self {
             registry,
-            controller: Arc::new(Mutex::new(controller)),
+            runtime_manager: Arc::new(Mutex::new(runtime_manager)),
             loaded_model_ids: Arc::new(RwLock::new(BTreeSet::new())),
         })
     }
@@ -60,18 +51,22 @@ impl NexoAi {
     }
 
     /// Loads a configured model into memory without exposing backend details to callers.
-    pub async fn load_model(&self, model_id: &ModelId) -> crate::Result<()> {
-        let mut controller = self.controller.lock().await;
-        controller.load_model(model_id).await?;
-        self.set_loaded_snapshot(controller.loaded_model_ids());
+    pub async fn load_model(
+        &self,
+        model_id: &ModelId,
+        runtime_kind: InferenceRuntime,
+    ) -> crate::Result<()> {
+        let mut runtime_manager = self.runtime_manager.lock().await;
+        runtime_manager.load_model(model_id, runtime_kind).await?;
+        self.set_loaded_snapshot(runtime_manager.loaded_model_ids());
         Ok(())
     }
 
     /// Unloads a configured model and returns whether it was previously loaded.
     pub async fn unload_model(&self, model_id: &ModelId) -> crate::Result<bool> {
-        let mut controller = self.controller.lock().await;
-        let unloaded = controller.unload_model(model_id)?;
-        self.set_loaded_snapshot(controller.loaded_model_ids());
+        let mut runtime_manager = self.runtime_manager.lock().await;
+        let unloaded = runtime_manager.unload_model(model_id)?;
+        self.set_loaded_snapshot(runtime_manager.loaded_model_ids());
         Ok(unloaded)
     }
 
@@ -102,9 +97,23 @@ impl NexoAi {
     pub fn model(&self, model_id: &ModelId) -> Option<nexo_core::ModelDescriptor> {
         self.registry.get_model(model_id)
     }
+
+    /// Submits a new inference request and returns a stream of responses.
+    pub async fn submit(&self, request: InferenceRequest) -> nexo_core::Result<InferenceStream> {
+        let (descriptor, runtime) = {
+            let mut runtime_manager = self.runtime_manager.lock().await;
+            let prepared = runtime_manager.prepare_request(&request).await;
+            self.set_loaded_snapshot(runtime_manager.loaded_model_ids());
+            prepared.map_err(Error::into_core_error)?
+        };
+        runtime
+            .submit(descriptor, request)
+            .await
+            .map_err(Error::into_core_error)
+    }
 }
 
-impl ModelRegistry for NexoAi {
+impl ModelRegistry for InferenceEngine {
     fn list_models(&self) -> Vec<nexo_core::ModelDescriptor> {
         self.registry.list_models()
     }
@@ -123,21 +132,5 @@ impl ModelRegistry for NexoAi {
     fn model_state(&self, model_id: &ModelId) -> Option<nexo_core::ModelRuntimeState> {
         self.model_state_from_runtime(model_id)
             .or_else(|| self.registry.model_state(model_id))
-    }
-}
-
-#[async_trait::async_trait]
-impl InferenceEngine for NexoAi {
-    async fn submit(&self, request: InferenceRequest) -> nexo_core::Result<InferenceStream> {
-        let (descriptor, runtime) = {
-            let mut controller = self.controller.lock().await;
-            let prepared = controller.prepare_request(&request).await;
-            self.set_loaded_snapshot(controller.loaded_model_ids());
-            prepared.map_err(Error::into_core_error)?
-        };
-        runtime
-            .submit(descriptor, request)
-            .await
-            .map_err(Error::into_core_error)
     }
 }

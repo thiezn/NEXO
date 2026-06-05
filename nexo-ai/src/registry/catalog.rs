@@ -106,6 +106,7 @@ mod tests {
             specific_model: Some(ModelId::from("chat")),
             required_capabilities: vec![ModelCapability::TextGeneration],
             preferred_capabilities: Vec::new(),
+            runtime_preference: Default::default(),
         });
 
         assert_eq!(resolved, Some(descriptor));
@@ -127,6 +128,7 @@ mod tests {
             specific_model: None,
             required_capabilities: vec![ModelCapability::TextGeneration],
             preferred_capabilities: vec![ModelCapability::ToolCalling],
+            runtime_preference: Default::default(),
         });
 
         assert_eq!(resolved, Some(tool));

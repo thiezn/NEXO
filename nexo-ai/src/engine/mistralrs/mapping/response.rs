@@ -191,7 +191,7 @@ pub(crate) fn map_runtime_error(
         | Error::UnresolvedModelSelection { .. }
         | Error::InvalidToolPayload { .. }
         | Error::Json(_) => (InferenceErrorCode::InvalidRequest, Retryability::Fatal),
-        Error::MistralRuntime { .. }
+        Error::Runtime { .. }
         | Error::Io(_)
         | Error::Config { .. }
         | Error::EmptyModelCatalog

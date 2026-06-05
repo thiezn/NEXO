@@ -7,10 +7,6 @@ autobins = false
 [lib]
 path = "src/lib.rs"
 
-[[bin]]
-name = "nexo-ai"
-path = "src/main.rs"
-
 [features]
 default = []
 candle = []

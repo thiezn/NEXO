@@ -16,28 +16,31 @@ use nexo_core::inference::request::{
     EmbedRequest, GenerateRequest, ImageGenerationRequest, SpeechGenerationRequest,
 };
 use nexo_core::{
-    DetokenizationRequest, InferenceRequest, InferenceResponse, InferenceStream, ModelDescriptor,
-    ModelId, TokenUsage, TokenizationRequest,
+    DetokenizationRequest, InferenceRequest, InferenceResponse, InferenceRuntime, InferenceStream,
+    ModelDescriptor, ModelId, TokenUsage, TokenizationRequest,
 };
 use nexo_model_mgmt::resolve_model_storage_dir;
 use tokio::sync::mpsc;
 
-use crate::config::{
-    AutoModelLoader, DeviceSpec, DiffusionModelLoader, GgufModelLoader, ModelDataType, ModelLoader,
-    PagedAttentionCacheType, PagedAttentionMode, RegisteredModelConfig, RuntimeConfig,
-    SchedulerPolicy, SpeechModelLoader,
-};
-use crate::mapping::request::{
+use super::mapping::request::{
     map_detokenization_request, map_embedding_request, map_generate_request,
     map_image_generation_request, map_speech_generation_request, map_tokenization_request,
 };
-use crate::mapping::response::{
+use super::mapping::response::{
     ResponseContext, generation_started, map_embedding_response, map_generation_response,
     map_media_response, map_runtime_error,
 };
+use super::{
+    MistralRsAutoLoader, MistralRsDiffusionLoader, MistralRsGgufLoader, MistralRsLoader,
+    MistralRsModelConfig, MistralRsPagedAttentionCacheType, MistralRsPagedAttentionMode,
+    MistralRsRuntimeConfig, MistralRsSpeechLoader,
+};
+use crate::engine::config::{
+    DeviceSpec, ModelDataType, RegisteredModelConfig, RuntimeConfig, SchedulerPolicy,
+};
 use crate::{Error, Result};
 
-/// Shared `mistralrs-core` runtime state used by `NexoAi`.
+/// Shared `mistralrs-core` runtime state used by `InferenceEngine`.
 #[derive(Clone)]
 pub(crate) struct MistralRuntime {
     engine: Arc<MistralRs>,
@@ -55,12 +58,20 @@ impl MistralRuntime {
         base_runtime_config: &RuntimeConfig,
         model: &RegisteredModelConfig,
     ) -> Result<Self> {
-        let device = resolve_device(base_runtime_config.device)?;
-        Self::from_models(base_runtime_config, &device, std::slice::from_ref(model)).await
+        let runtime_config = mistral_runtime_config(base_runtime_config)?;
+        let device = resolve_device(runtime_config.device)?;
+        Self::from_models(
+            base_runtime_config.scheduler,
+            runtime_config,
+            &device,
+            std::slice::from_ref(model),
+        )
+        .await
     }
 
     async fn from_models(
-        runtime_config: &RuntimeConfig,
+        scheduler_policy: SchedulerPolicy,
+        runtime_config: &MistralRsRuntimeConfig,
         device: &Device,
         models: &[RegisteredModelConfig],
     ) -> Result<Self> {
@@ -71,8 +82,7 @@ impl MistralRuntime {
         let paged_attn_config = resolve_paged_attention_config(runtime_config, device)?;
 
         let first_pipeline = build_pipeline(first, runtime_config, device, paged_attn_config)?;
-        let scheduler =
-            map_scheduler(runtime_config.scheduler, &first_pipeline, paged_attn_config).await;
+        let scheduler = map_scheduler(scheduler_policy, &first_pipeline, paged_attn_config).await;
         let engine = MistralRsBuilder::new(
             first_pipeline,
             scheduler.clone(),
@@ -97,7 +107,7 @@ impl MistralRuntime {
                     AddModelConfig::new(map_engine_config(&runtime_config)),
                 )
                 .await
-                .map_err(|message| Error::MistralRuntime { message })?;
+                .map_err(|message| Error::Runtime { message })?;
         }
 
         Ok(Self {
@@ -276,7 +286,7 @@ impl MistralRuntime {
             match response_rx.recv().await {
                 Some(response) => Ok(map_media_response(response, &context)),
                 None => Ok(map_runtime_error(
-                    Error::MistralRuntime {
+                    Error::Runtime {
                         message: "image generation response channel closed before producing output"
                             .to_string(),
                     },
@@ -311,7 +321,7 @@ impl MistralRuntime {
             match response_rx.recv().await {
                 Some(response) => Ok(map_media_response(response, &context)),
                 None => Ok(map_runtime_error(
-                    Error::MistralRuntime {
+                    Error::Runtime {
                         message:
                             "speech generation response channel closed before producing output"
                                 .to_string(),
@@ -383,7 +393,7 @@ impl MistralRuntime {
                 .await?;
 
             let Some(response) = response_rx.recv().await else {
-                return Err(Error::MistralRuntime {
+                return Err(Error::Runtime {
                     message: "embedding response channel closed before producing output"
                         .to_string(),
                 });
@@ -403,7 +413,7 @@ impl MistralRuntime {
                     aggregated_usage.total_tokens += total_tokens;
                 }
                 other => {
-                    return Err(Error::MistralRuntime {
+                    return Err(Error::Runtime {
                         message: format!(
                             "unexpected embedding response variant: {}",
                             other
@@ -438,10 +448,10 @@ impl MistralRuntime {
 
         match response_rx.recv().await {
             Some(Ok(tokens)) => Ok(tokens),
-            Some(Err(error)) => Err(Error::MistralRuntime {
+            Some(Err(error)) => Err(Error::Runtime {
                 message: error.to_string(),
             }),
-            None => Err(Error::MistralRuntime {
+            None => Err(Error::Runtime {
                 message: "tokenization response channel closed before producing output".to_string(),
             }),
         }
@@ -459,10 +469,10 @@ impl MistralRuntime {
 
         match response_rx.recv().await {
             Some(Ok(text)) => Ok(text),
-            Some(Err(error)) => Err(Error::MistralRuntime {
+            Some(Err(error)) => Err(Error::Runtime {
                 message: error.to_string(),
             }),
-            None => Err(Error::MistralRuntime {
+            None => Err(Error::Runtime {
                 message: "detokenization response channel closed before producing output"
                     .to_string(),
             }),
@@ -473,15 +483,12 @@ impl MistralRuntime {
         let sender = self
             .engine
             .get_sender(Some(model_id.as_str()))
-            .map_err(|error| Error::MistralRuntime {
+            .map_err(|error| Error::Runtime {
                 message: error.to_string(),
             })?;
-        sender
-            .send(request)
-            .await
-            .map_err(|_| Error::MistralRuntime {
-                message: format!("failed to dispatch request to model `{model_id}`"),
-            })
+        sender.send(request).await.map_err(|_| Error::Runtime {
+            message: format!("failed to dispatch request to model `{model_id}`"),
+        })
     }
 
     fn next_request_ordinal(&self) -> usize {
@@ -491,26 +498,26 @@ impl MistralRuntime {
 
 fn build_pipeline(
     model: &RegisteredModelConfig,
-    runtime_config: &RuntimeConfig,
+    runtime_config: &MistralRsRuntimeConfig,
     device: &Device,
     paged_attn_config: Option<PagedAttentionConfig>,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
-    match &model.loader {
-        ModelLoader::Auto(loader) => {
+    match &mistral_model_config(model)?.loader {
+        MistralRsLoader::Auto(loader) => {
             build_auto_pipeline(loader, runtime_config, device, paged_attn_config)
         }
-        ModelLoader::Diffusion(loader) => build_diffusion_pipeline(loader, device),
-        ModelLoader::Speech(loader) => build_speech_pipeline(loader, device),
-        ModelLoader::Gguf(loader) => {
+        MistralRsLoader::Diffusion(loader) => build_diffusion_pipeline(loader, device),
+        MistralRsLoader::Speech(loader) => build_speech_pipeline(loader, device),
+        MistralRsLoader::Gguf(loader) => {
             build_gguf_pipeline(loader, runtime_config, device, paged_attn_config)
         }
     }
 }
 
 fn effective_runtime_config(
-    runtime_config: &RuntimeConfig,
+    runtime_config: &MistralRsRuntimeConfig,
     models: &[RegisteredModelConfig],
-) -> RuntimeConfig {
+) -> MistralRsRuntimeConfig {
     let mut effective = runtime_config.clone();
     if !effective.no_prefix_cache && models.iter().any(is_gemma_4_model) {
         tracing::warn!(
@@ -531,7 +538,7 @@ fn is_gemma_4_model(model: &RegisteredModelConfig) -> bool {
 }
 
 fn build_diffusion_pipeline(
-    loader: &DiffusionModelLoader,
+    loader: &MistralRsDiffusionLoader,
     device: &Device,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
     let model_dir = resolve_model_storage_dir(&loader.model_id);
@@ -547,10 +554,10 @@ fn build_diffusion_pipeline(
 
     let built_loader = LoaderBuilder::new(selected.clone())
         .build()
-        .map_err(|error| Error::MistralRuntime {
+        .map_err(|error| Error::Runtime {
             message: error.to_string(),
         })?;
-    let dtype = get_model_dtype(&selected).map_err(|error| Error::MistralRuntime {
+    let dtype = get_model_dtype(&selected).map_err(|error| Error::Runtime {
         message: error.to_string(),
     })?;
 
@@ -565,13 +572,13 @@ fn build_diffusion_pipeline(
             None,
             None,
         )
-        .map_err(|error| Error::MistralRuntime {
+        .map_err(|error| Error::Runtime {
             message: error.to_string(),
         })
 }
 
 fn build_speech_pipeline(
-    loader: &SpeechModelLoader,
+    loader: &MistralRsSpeechLoader,
     device: &Device,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
     let model_dir = resolve_model_storage_dir(&loader.model_id);
@@ -584,10 +591,10 @@ fn build_speech_pipeline(
 
     let built_loader = LoaderBuilder::new(selected.clone())
         .build()
-        .map_err(|error| Error::MistralRuntime {
+        .map_err(|error| Error::Runtime {
             message: error.to_string(),
         })?;
-    let dtype = get_model_dtype(&selected).map_err(|error| Error::MistralRuntime {
+    let dtype = get_model_dtype(&selected).map_err(|error| Error::Runtime {
         message: error.to_string(),
     })?;
 
@@ -602,14 +609,14 @@ fn build_speech_pipeline(
             None,
             None,
         )
-        .map_err(|error| Error::MistralRuntime {
+        .map_err(|error| Error::Runtime {
             message: error.to_string(),
         })
 }
 
 fn build_auto_pipeline(
-    loader: &AutoModelLoader,
-    runtime_config: &RuntimeConfig,
+    loader: &MistralRsAutoLoader,
+    runtime_config: &MistralRsRuntimeConfig,
     device: &Device,
     paged_attn_config: Option<PagedAttentionConfig>,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
@@ -645,17 +652,16 @@ fn build_auto_pipeline(
         .with_chat_template(path_to_string(loader.chat_template.as_ref()))
         .with_jinja_explicit(path_to_string(loader.jinja_explicit.as_ref()))
         .build()
-        .map_err(|error| Error::MistralRuntime {
+        .map_err(|error| Error::Runtime {
             message: error.to_string(),
         })?;
 
-    let dtype = get_model_dtype(&selected).map_err(|error| Error::MistralRuntime {
+    let dtype = get_model_dtype(&selected).map_err(|error| Error::Runtime {
         message: error.to_string(),
     })?;
-    let device_map =
-        get_auto_device_map_params(&selected).map_err(|error| Error::MistralRuntime {
-            message: error.to_string(),
-        })?;
+    let device_map = get_auto_device_map_params(&selected).map_err(|error| Error::Runtime {
+        message: error.to_string(),
+    })?;
 
     if selected_uses_uqff(&selected) {
         return built_loader
@@ -669,7 +675,7 @@ fn build_auto_pipeline(
                 None,
                 paged_attn_config,
             )
-            .map_err(|error| Error::MistralRuntime {
+            .map_err(|error| Error::Runtime {
                 message: error.to_string(),
             });
     }
@@ -686,14 +692,14 @@ fn build_auto_pipeline(
             None,
             paged_attn_config,
         )
-        .map_err(|error| Error::MistralRuntime {
+        .map_err(|error| Error::Runtime {
             message: error.to_string(),
         })
 }
 
 fn build_gguf_pipeline(
-    loader: &GgufModelLoader,
-    runtime_config: &RuntimeConfig,
+    loader: &MistralRsGgufLoader,
+    runtime_config: &MistralRsRuntimeConfig,
     device: &Device,
     paged_attn_config: Option<PagedAttentionConfig>,
 ) -> Result<Arc<tokio::sync::Mutex<dyn mistralrs_core::Pipeline + Send + Sync>>> {
@@ -720,7 +726,7 @@ fn build_gguf_pipeline(
             None,
             paged_attn_config,
         )
-        .map_err(|error| Error::MistralRuntime {
+        .map_err(|error| Error::Runtime {
             message: error.to_string(),
         })
 }
@@ -768,7 +774,7 @@ fn resolve_explicit_uqff_files(model_dir: &Path, selectors: &[PathBuf]) -> Resul
         if discovered.is_none() {
             discovered = Some(discover_local_uqff_files(model_dir)?);
         }
-        let local_files = discovered.as_ref().ok_or_else(|| Error::MistralRuntime {
+        let local_files = discovered.as_ref().ok_or_else(|| Error::Runtime {
             message: "failed to discover local UQFF files".to_string(),
         })?;
         let mut matched = local_files
@@ -790,7 +796,7 @@ fn resolve_explicit_uqff_files(model_dir: &Path, selectors: &[PathBuf]) -> Resul
 }
 
 fn discover_local_uqff_files(model_dir: &Path) -> Result<Vec<String>> {
-    let entries = std::fs::read_dir(model_dir).map_err(|error| Error::MistralRuntime {
+    let entries = std::fs::read_dir(model_dir).map_err(|error| Error::Runtime {
         message: format!(
             "failed to read local model directory `{}`: {error}",
             model_dir.display()
@@ -799,7 +805,7 @@ fn discover_local_uqff_files(model_dir: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
 
     for entry in entries {
-        let entry = entry.map_err(|error| Error::MistralRuntime {
+        let entry = entry.map_err(|error| Error::Runtime {
             message: format!(
                 "failed to read local model directory entry under `{}`: {error}",
                 model_dir.display()
@@ -817,7 +823,7 @@ fn discover_local_uqff_files(model_dir: &Path) -> Result<Vec<String>> {
     Ok(files)
 }
 
-fn build_auto_model_paths(loader: &AutoModelLoader) -> Result<Box<dyn ModelPaths>> {
+fn build_auto_model_paths(loader: &MistralRsAutoLoader) -> Result<Box<dyn ModelPaths>> {
     let model_dir = resolve_model_storage_dir(&loader.model_id);
     let tokenizer_filename = loader
         .tokenizer_json
@@ -849,7 +855,7 @@ fn build_auto_model_paths(loader: &AutoModelLoader) -> Result<Box<dyn ModelPaths
     }))
 }
 
-fn build_gguf_model_paths(loader: &GgufModelLoader) -> Result<Box<dyn ModelPaths>> {
+fn build_gguf_model_paths(loader: &MistralRsGgufLoader) -> Result<Box<dyn ModelPaths>> {
     let model_dir = resolve_model_storage_dir(&loader.quantized_model_id);
     let filenames = loader
         .quantized_filenames
@@ -896,7 +902,7 @@ fn collect_weight_files(model_dir: &Path, explicit_filenames: &[String]) -> Resu
     files.sort();
 
     if files.is_empty() {
-        return Err(Error::MistralRuntime {
+        return Err(Error::Runtime {
             message: format!(
                 "no local model weight files found under `{}`; run `nexo-ai models pull <model>` first",
                 model_dir.display()
@@ -908,7 +914,7 @@ fn collect_weight_files(model_dir: &Path, explicit_filenames: &[String]) -> Resu
 }
 
 fn collect_weight_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> Result {
-    let entries = std::fs::read_dir(dir).map_err(|error| Error::MistralRuntime {
+    let entries = std::fs::read_dir(dir).map_err(|error| Error::Runtime {
         message: format!(
             "failed to read local model directory `{}`: {error}",
             dir.display()
@@ -916,7 +922,7 @@ fn collect_weight_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> Resul
     })?;
 
     for entry in entries {
-        let entry = entry.map_err(|error| Error::MistralRuntime {
+        let entry = entry.map_err(|error| Error::Runtime {
             message: format!(
                 "failed to read local model directory entry under `{}`: {error}",
                 dir.display()
@@ -968,7 +974,7 @@ fn is_uqff_file(path: &Path) -> bool {
 }
 
 fn missing_local_file(model_dir: &Path, filename: &str) -> Error {
-    Error::MistralRuntime {
+    Error::Runtime {
         message: format!(
             "missing local model file `{}` under `{}`; run `nexo-ai models pull <model>` first",
             filename,
@@ -998,7 +1004,7 @@ fn best_available_device() -> Result<Device> {
 
 #[cfg(feature = "metal")]
 fn metal_device() -> Result<Device> {
-    Device::new_metal(0).map_err(|error| Error::MistralRuntime {
+    Device::new_metal(0).map_err(|error| Error::Runtime {
         message: error.to_string(),
     })
 }
@@ -1027,7 +1033,7 @@ mod tests {
     fn gemma_4_uqff_disables_prefix_cache_by_default() {
         let _model =
             model_config_from_manifest(find_manifest("gemma-4-e4b-it-uqff-afq8").unwrap()).unwrap();
-        let runtime = RuntimeConfig::default();
+        let runtime = MistralRsRuntimeConfig::default();
 
         assert!(runtime.no_prefix_cache);
     }
@@ -1036,7 +1042,7 @@ mod tests {
     fn gemma_4_gguf_disables_prefix_cache_by_default() {
         let _model =
             model_config_from_manifest(find_manifest("gemma-4-e2b-it-q5").unwrap()).unwrap();
-        let runtime = RuntimeConfig::default();
+        let runtime = MistralRsRuntimeConfig::default();
 
         assert!(runtime.no_prefix_cache);
     }
@@ -1045,9 +1051,9 @@ mod tests {
     fn gemma_4_forces_prefix_cache_disabled_when_config_enables_it() {
         let model =
             model_config_from_manifest(find_manifest("gemma-4-e4b-it-uqff-afq8").unwrap()).unwrap();
-        let runtime = RuntimeConfig {
+        let runtime = MistralRsRuntimeConfig {
             no_prefix_cache: false,
-            ..RuntimeConfig::default()
+            ..MistralRsRuntimeConfig::default()
         };
 
         let effective = effective_runtime_config(&runtime, &[model]);
@@ -1058,9 +1064,9 @@ mod tests {
     #[test]
     fn non_gemma_model_preserves_prefix_cache_setting() {
         let model = model_config_from_manifest(find_manifest("flux.2-klein-9b").unwrap()).unwrap();
-        let runtime = RuntimeConfig {
+        let runtime = MistralRsRuntimeConfig {
             no_prefix_cache: false,
-            ..RuntimeConfig::default()
+            ..MistralRsRuntimeConfig::default()
         };
 
         let effective = effective_runtime_config(&runtime, &[model]);
@@ -1128,13 +1134,13 @@ async fn map_scheduler(
 }
 
 fn resolve_paged_attention_config(
-    runtime_config: &RuntimeConfig,
+    runtime_config: &MistralRsRuntimeConfig,
     device: &Device,
 ) -> Result<Option<PagedAttentionConfig>> {
     let requested = match runtime_config.paged_attention.mode {
-        PagedAttentionMode::Enabled => true,
-        PagedAttentionMode::Disabled => false,
-        PagedAttentionMode::Auto => {
+        MistralRsPagedAttentionMode::Enabled => true,
+        MistralRsPagedAttentionMode::Disabled => false,
+        MistralRsPagedAttentionMode::Auto => {
             if device.is_cuda() {
                 true
             } else {
@@ -1161,14 +1167,14 @@ fn resolve_paged_attention_config(
         memory_config,
         cache_type,
     )
-    .map_err(|error| Error::MistralRuntime {
+    .map_err(|error| Error::Runtime {
         message: error.to_string(),
     })?;
 
     Ok(Some(config))
 }
 
-fn resolve_paged_memory_config(runtime_config: &RuntimeConfig) -> MemoryGpuConfig {
+fn resolve_paged_memory_config(runtime_config: &MistralRsRuntimeConfig) -> MemoryGpuConfig {
     let paged = &runtime_config.paged_attention;
 
     match (
@@ -1201,14 +1207,14 @@ fn resolve_paged_memory_config(runtime_config: &RuntimeConfig) -> MemoryGpuConfi
     }
 }
 
-fn map_paged_cache_type(cache_type: PagedAttentionCacheType) -> PagedCacheType {
+fn map_paged_cache_type(cache_type: MistralRsPagedAttentionCacheType) -> PagedCacheType {
     match cache_type {
-        PagedAttentionCacheType::Auto => PagedCacheType::Auto,
-        PagedAttentionCacheType::F8e4m3 => PagedCacheType::F8E4M3,
+        MistralRsPagedAttentionCacheType::Auto => PagedCacheType::Auto,
+        MistralRsPagedAttentionCacheType::F8e4m3 => PagedCacheType::F8E4M3,
     }
 }
 
-fn map_engine_config(runtime_config: &RuntimeConfig) -> MistralEngineConfig {
+fn map_engine_config(runtime_config: &MistralRsRuntimeConfig) -> MistralEngineConfig {
     MistralEngineConfig {
         no_kv_cache: runtime_config.no_kv_cache,
         no_prefix_cache: runtime_config.no_prefix_cache,
@@ -1226,6 +1232,27 @@ fn map_dtype(dtype: ModelDataType) -> mistralrs_core::ModelDType {
         ModelDataType::F16 => mistralrs_core::ModelDType::F16,
         ModelDataType::F32 => mistralrs_core::ModelDType::F32,
     }
+}
+
+fn mistral_runtime_config(runtime_config: &RuntimeConfig) -> Result<&MistralRsRuntimeConfig> {
+    runtime_config
+        .runtime(InferenceRuntime::MistralRs)
+        .and_then(|implementation| implementation.as_mistralrs())
+        .ok_or_else(|| Error::Config {
+            message: "missing mistral_rs runtime defaults in RuntimeConfig".to_string(),
+        })
+}
+
+fn mistral_model_config(model: &RegisteredModelConfig) -> Result<&MistralRsModelConfig> {
+    model
+        .runtime(InferenceRuntime::MistralRs)
+        .and_then(|implementation| implementation.as_mistralrs())
+        .ok_or_else(|| Error::UnsupportedFeature {
+            feature: format!(
+                "model `{}` is not configured for runtime `mistral_rs`",
+                model.descriptor.id
+            ),
+        })
 }
 
 fn path_to_string(path: Option<&PathBuf>) -> Option<String> {

@@ -6,10 +6,12 @@ use std::path::PathBuf;
 use nexo_model_mgmt::registry::{known_manifests, list_models};
 use nexo_model_mgmt::{ModelComponent, ModelFileSelector, ModelManifest};
 
-use crate::{
-    AutoModelLoader, DiffusionModelLoader, Error, GgufModelLoader, ModelDataType, ModelLoader,
-    RegisteredModelConfig, Result, SpeechModelLoader,
+use crate::ModelRuntimeImplementation;
+use crate::engine::mistralrs::{
+    MistralRsAutoLoader, MistralRsDiffusionLoader, MistralRsGgufLoader, MistralRsLoader,
+    MistralRsModelConfig, MistralRsSpeechLoader,
 };
+use crate::{Error, ModelDataType, RegisteredModelConfig, Result};
 
 /// Build runtime configs for every downloaded model known to `nexo-model-mgmt`.
 ///
@@ -42,14 +44,18 @@ pub fn downloaded_model_configs() -> Result<Vec<RegisteredModelConfig>> {
 pub fn model_config_from_manifest(manifest: &ModelManifest) -> Result<RegisteredModelConfig> {
     Ok(RegisteredModelConfig {
         descriptor: manifest.descriptor.clone(),
-        loader: loader_from_manifest(manifest)?,
-        revision: None,
+        runtimes: vec![ModelRuntimeImplementation::MistralRs(
+            MistralRsModelConfig {
+                loader: loader_from_manifest(manifest)?,
+                revision: None,
+            },
+        )],
     })
 }
 
-fn loader_from_manifest(manifest: &ModelManifest) -> Result<ModelLoader> {
+fn loader_from_manifest(manifest: &ModelManifest) -> Result<MistralRsLoader> {
     if manifest.backend == "mistralrs-gguf" {
-        return Ok(ModelLoader::Gguf(GgufModelLoader {
+        return Ok(MistralRsLoader::Gguf(MistralRsGgufLoader {
             tokenizer_model_id: None,
             quantized_model_id: manifest.id().to_string(),
             quantized_filenames: gguf_filenames(manifest)?,
@@ -60,7 +66,7 @@ fn loader_from_manifest(manifest: &ModelManifest) -> Result<ModelLoader> {
     }
 
     if manifest.backend == "mistralrs-flux" {
-        return Ok(ModelLoader::Diffusion(DiffusionModelLoader {
+        return Ok(MistralRsLoader::Diffusion(MistralRsDiffusionLoader {
             model_id: manifest.id().to_string(),
             offload: false,
             dtype: ModelDataType::Auto,
@@ -69,14 +75,14 @@ fn loader_from_manifest(manifest: &ModelManifest) -> Result<ModelLoader> {
 
     if manifest.backend == "mistralrs-dia" {
         let model_dir = nexo_model_mgmt::resolve_model_storage_dir(manifest.id());
-        return Ok(ModelLoader::Speech(SpeechModelLoader {
+        return Ok(MistralRsLoader::Speech(MistralRsSpeechLoader {
             model_id: manifest.id().to_string(),
             dac_model_id: Some(model_dir.join("dac").to_string_lossy().into_owned()),
             dtype: ModelDataType::Auto,
         }));
     }
 
-    Ok(ModelLoader::Auto(AutoModelLoader {
+    Ok(MistralRsLoader::Auto(MistralRsAutoLoader {
         model_id: manifest.id().to_string(),
         from_uqff: uqff_selectors(manifest),
         tokenizer_json: None,
@@ -144,7 +150,11 @@ mod tests {
         let manifest = find_manifest("gemma-4-e2b-it-q5").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
 
-        let ModelLoader::Gguf(loader) = config.loader else {
+        let ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
+            loader: MistralRsLoader::Gguf(loader),
+            ..
+        }) = &config.runtimes[0]
+        else {
             panic!("expected gguf loader");
         };
 
@@ -161,7 +171,13 @@ mod tests {
         let manifest = find_manifest("gemma-4-e2b-it-uqff-q4k").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
 
-        assert!(matches!(config.loader, ModelLoader::Auto(_)));
+        assert!(matches!(
+            &config.runtimes[0],
+            ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
+                loader: MistralRsLoader::Auto(_),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -169,7 +185,11 @@ mod tests {
         let manifest = find_manifest("gemma-4-e4b-it-uqff-afq8").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
 
-        let ModelLoader::Auto(loader) = config.loader else {
+        let ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
+            loader: MistralRsLoader::Auto(loader),
+            ..
+        }) = &config.runtimes[0]
+        else {
             panic!("expected auto loader");
         };
 
@@ -182,7 +202,11 @@ mod tests {
         let manifest = find_manifest("gemma-4-12b-it").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
 
-        let ModelLoader::Auto(loader) = config.loader else {
+        let ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
+            loader: MistralRsLoader::Auto(loader),
+            ..
+        }) = &config.runtimes[0]
+        else {
             panic!("expected auto loader");
         };
 
@@ -196,7 +220,11 @@ mod tests {
         let manifest = find_manifest("gemma-4-12b-it-uqff-q4k").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
 
-        let ModelLoader::Auto(loader) = config.loader else {
+        let ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
+            loader: MistralRsLoader::Auto(loader),
+            ..
+        }) = &config.runtimes[0]
+        else {
             panic!("expected auto loader");
         };
 
@@ -209,7 +237,11 @@ mod tests {
         let manifest = find_manifest("flux.2-klein-9b").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
 
-        let ModelLoader::Diffusion(loader) = config.loader else {
+        let ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
+            loader: MistralRsLoader::Diffusion(loader),
+            ..
+        }) = &config.runtimes[0]
+        else {
             panic!("expected diffusion loader");
         };
 
@@ -222,7 +254,11 @@ mod tests {
         let manifest = find_manifest("dia-1.6b-tts").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
 
-        let ModelLoader::Speech(loader) = config.loader else {
+        let ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
+            loader: MistralRsLoader::Speech(loader),
+            ..
+        }) = &config.runtimes[0]
+        else {
             panic!("expected speech loader");
         };
 

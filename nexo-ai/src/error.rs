@@ -78,9 +78,9 @@ pub enum Error {
         message: String,
     },
 
-    /// A `mistralrs-core` interaction failed before a request stream was accepted.
-    #[error("mistral runtime error: {message}")]
-    MistralRuntime {
+    /// A runtime interaction failed before a request stream was accepted.
+    #[error("runtime error: {message}")]
+    Runtime {
         /// The human-readable runtime failure message.
         message: String,
     },
@@ -117,7 +117,7 @@ impl Error {
             },
             Self::UnresolvedModelSelection { message }
             | Self::Config { message }
-            | Self::MistralRuntime { message } => nexo_core::Error::InvalidState { message },
+            | Self::Runtime { message } => nexo_core::Error::InvalidState { message },
             Self::UnsupportedMessagePart { part } => nexo_core::Error::InvalidState {
                 message: part.to_string(),
             },

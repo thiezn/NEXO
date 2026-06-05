@@ -176,6 +176,7 @@ impl GenerateRequest {
                     ModelCapability::ImageInput,
                 ],
                 preferred_capabilities: Vec::new(),
+                runtime_preference: Default::default(),
             },
             conversation: Conversation {
                 messages: vec![ConversationMessage {
@@ -228,6 +229,7 @@ impl GenerateRequest {
                     ModelCapability::AudioInput,
                 ],
                 preferred_capabilities: Vec::new(),
+                runtime_preference: Default::default(),
             },
             conversation: Conversation {
                 messages: vec![ConversationMessage {

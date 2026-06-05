@@ -652,6 +652,7 @@ mod tests {
                 specific_model: Some(ModelId::from("chat")),
                 required_capabilities: Vec::new(),
                 preferred_capabilities: Vec::new(),
+                runtime_preference: Default::default(),
             },
             conversation: Conversation {
                 messages: vec![ConversationMessage {

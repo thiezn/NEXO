@@ -2,11 +2,14 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 use futures_util::StreamExt;
-use nexo_ai::{NexoAi, NexoAiConfig, RegisteredModelConfig, RuntimeConfig, StaticModelRegistry};
+use nexo_ai::{
+    InferenceEngine, InferenceEngineConfig, RegisteredModelConfig, RuntimeConfig,
+    StaticModelRegistry,
+};
 use nexo_core::inference::request::GenerateRequest;
 use nexo_core::{
-    AudioFormat, ContentPart, ConversationMessage, FinishReason, GenerateDelta, InferenceEngine,
-    InferenceRequest, InferenceResponse, InferenceStream, MediaSource, MessageRole,
+    AudioFormat, ContentPart, ConversationMessage, FinishReason, GenerateDelta, InferenceRequest,
+    InferenceResponse, InferenceRuntime, InferenceStream, MediaSource, MessageRole,
     ModelCapability, ModelDescriptor, ModelId, ModelSelection, PerformanceMetrics, RequestId,
     RoundId, RunId, SessionId, TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId,
     ToolChoice,
@@ -34,7 +37,7 @@ pub(super) struct LoadedModels {
     runtime: RuntimeConfig,
     enable_tool_calling: bool,
     available: BTreeMap<ModelId, RegisteredModelConfig>,
-    engine: Option<NexoAi>,
+    engine: Option<InferenceEngine>,
 }
 
 impl LoadedModels {
@@ -102,6 +105,7 @@ impl LoadedModels {
                 specific_model: config.default_models.get(&capability).cloned(),
                 required_capabilities: vec![capability],
                 preferred_capabilities: config.startup_capabilities[index + 1..].to_vec(),
+                runtime_preference: Default::default(),
             };
             let Some(descriptor) = registry.resolve_model(&selection) else {
                 tracing::warn!(
@@ -119,7 +123,11 @@ impl LoadedModels {
         selected
     }
 
-    async fn load_model(&mut self, model_id: &str) -> Result<(), String> {
+    async fn load_model(
+        &mut self,
+        model_id: &str,
+        runtime_kind: InferenceRuntime,
+    ) -> Result<(), String> {
         let model_id = ModelId::from(model_id);
         if !self.available.contains_key(&model_id) {
             return Err(format!("Model '{model_id}' is not downloaded on this node"));
@@ -131,7 +139,7 @@ impl LoadedModels {
             .clone()
             .ok_or_else(|| "No inference engine configured".to_string())?;
         engine
-            .load_model(&model_id)
+            .load_model(&model_id, runtime_kind)
             .await
             .map_err(|error| error.to_string())
     }
@@ -148,7 +156,7 @@ impl LoadedModels {
             .map_err(|error| error.to_string())
     }
 
-    fn engine(&self) -> Result<NexoAi, String> {
+    fn engine(&self) -> Result<InferenceEngine, String> {
         self.engine
             .clone()
             .ok_or_else(|| "No model loaded for inference".to_string())
@@ -163,7 +171,7 @@ impl LoadedModels {
         }
 
         self.engine = Some(
-            NexoAi::from_config(NexoAiConfig {
+            InferenceEngine::new(InferenceEngineConfig {
                 runtime: self.runtime.clone(),
                 models: self.available.values().cloned().collect(),
             })
@@ -210,7 +218,9 @@ pub(super) async fn load_startup_models(models: &SharedModels, config: &NodeConf
     for model_id in startup_model_ids {
         let result = {
             let mut models = models.lock().await;
-            models.load_model(model_id.as_str()).await
+            models
+                .load_model(model_id.as_str(), InferenceRuntime::MistralRs)
+                .await
         };
 
         match result {
@@ -273,7 +283,9 @@ pub(super) async fn handle_model_load(
     tracing::info!("Loading model '{model_id}'");
     let result = {
         let mut models = models.lock().await;
-        models.load_model(model_id).await
+        models
+            .load_model(model_id, InferenceRuntime::MistralRs)
+            .await
     };
     let (loaded, error) = match result {
         Ok(()) => {
@@ -565,6 +577,7 @@ pub(super) async fn queue_image_generate(
             specific_model: None,
             required_capabilities: vec![ModelCapability::ImageGeneration],
             preferred_capabilities: Vec::new(),
+            runtime_preference: Default::default(),
         },
         prompt: params.prompt,
         negative_prompt: params.negative_prompt,
@@ -632,6 +645,7 @@ pub(super) async fn queue_audio_generate(
             specific_model: None,
             required_capabilities: vec![ModelCapability::SpeechGeneration],
             preferred_capabilities: Vec::new(),
+            runtime_preference: Default::default(),
         },
         text: params.prompt,
         voice: params.voice,
@@ -750,6 +764,7 @@ fn run_round_request(
             } else {
                 Vec::new()
             },
+            runtime_preference: Default::default(),
         },
         round.messages,
         if use_tools { round.tools } else { Vec::new() },
@@ -1243,7 +1258,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use futures_util::stream;
-    use nexo_ai::{AutoModelLoader, ModelDataType, ModelLoader};
+    use nexo_ai::engine::mistralrs::{MistralRsAutoLoader, MistralRsLoader, MistralRsModelConfig};
+    use nexo_ai::{ModelDataType, ModelRuntimeImplementation};
     use nexo_core::{
         GenerateChunk, InferenceErrorCode, InferenceFailure, MetadataMap, ModelModalities,
         ReasoningSettings, Retryability, RoleStrategy, SupportedModality,
@@ -1490,16 +1506,20 @@ mod tests {
                 max_output_tokens: Some(1024),
                 metadata: MetadataMap::new(),
             },
-            loader: ModelLoader::Auto(AutoModelLoader {
-                model_id: id.to_string(),
-                from_uqff: None,
-                tokenizer_json: None,
-                chat_template: None,
-                jinja_explicit: None,
-                dtype: ModelDataType::Auto,
-                hf_cache_path: None,
-            }),
-            revision: None,
+            runtimes: vec![ModelRuntimeImplementation::MistralRs(
+                MistralRsModelConfig {
+                    loader: MistralRsLoader::Auto(MistralRsAutoLoader {
+                        model_id: id.to_string(),
+                        from_uqff: None,
+                        tokenizer_json: None,
+                        chat_template: None,
+                        jinja_explicit: None,
+                        dtype: ModelDataType::Auto,
+                        hf_cache_path: None,
+                    }),
+                    revision: None,
+                },
+            )],
         }
     }
 }

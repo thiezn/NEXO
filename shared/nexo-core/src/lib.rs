@@ -28,7 +28,7 @@ pub mod run;
 pub mod tools;
 
 pub use common::{MetadataMap, PageInfo, PageRequest, Timestamp};
-pub use contracts::{InferenceEngine, ModelRegistry, ToolExecutor};
+pub use contracts::{ModelRegistry, ToolExecutor};
 pub use error::{Error, Result};
 pub use ids::{ModelId, NodeId, RequestId, RoundId, RunId, SessionId, ToolCallId};
 pub use inference::{
@@ -45,8 +45,9 @@ pub use message::{
     MessageRole, TextPart, VideoInput,
 };
 pub use model::{
-    ModelCapability, ModelDescriptor, ModelModalities, ModelRuntimeState, ModelSelection,
-    ReasoningEffort, ReasoningSettings, RoleStrategy, SupportedModality, ThinkingMode,
+    InferenceRuntime, ModelCapability, ModelDescriptor, ModelModalities, ModelRuntimeState,
+    ModelSelection, ReasoningEffort, ReasoningSettings, RoleStrategy, SupportedModality,
+    ThinkingMode,
 };
 pub use run::{
     RoundEvent, RoundStatus, RoundStatusUpdate, RoundSummary, RunEvent, RunStatus, RunStatusUpdate,

@@ -21,4 +21,4 @@ pub use modality::{ModelModalities, SupportedModality};
 pub use reasoning::{ReasoningEffort, ReasoningSettings, ThinkingMode};
 pub use role_strategy::RoleStrategy;
 pub use runtime_state::ModelRuntimeState;
-pub use selection::ModelSelection;
+pub use selection::{InferenceRuntime, ModelSelection};

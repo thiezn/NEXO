@@ -1,31 +1,26 @@
-//! Library-first inference adapters that bridge `nexo-core` and `mistralrs-core`.
+//! Library-first inference adapters that bridge `nexo-core` and configured runtimes.
 
 #![forbid(unsafe_code)]
 
 /// Helpers for turning local model manifests into runtime configs.
 pub mod catalog;
-/// Public runtime configuration and model loader configuration types.
-pub mod config;
+/// Inference engine implementation and configuration.
+pub mod engine;
 /// Crate-local error and result types.
 pub mod error;
-mod mapping;
 pub mod registry;
-mod round;
-mod run;
-pub mod runtime;
 
 pub use catalog::{downloaded_model_configs, model_config_from_manifest};
-pub use config::default_config_path;
-pub use config::{
-    AutoModelLoader, DeviceSpec, DiffusionModelLoader, GgufModelLoader, ModelDataType, ModelLoader,
-    NexoAiConfig, PagedAttentionCacheType, PagedAttentionMode, PagedAttentionRuntimeConfig,
-    RegisteredModelConfig, RuntimeConfig, SchedulerPolicy, SpeechModelLoader,
+pub use engine::InferenceEngine;
+pub use engine::config::default_config_path;
+pub use engine::config::{
+    DeviceSpec, InferenceEngineConfig, ModelDataType, ModelRuntimeImplementation,
+    RegisteredModelConfig, RuntimeConfig, RuntimeImplementation, SchedulerPolicy,
 };
 pub use error::{Error, Result};
 pub use registry::StaticModelRegistry;
-pub use runtime::{NexoAi, NexoAiBuilder};
 
 pub use nexo_core::{
-    InferenceEngine, InferenceRequest, InferenceResponse, InferenceStream, ModelDescriptor,
-    ModelId, ModelRegistry, ModelRuntimeState,
+    InferenceRequest, InferenceResponse, InferenceStream, ModelDescriptor, ModelId, ModelRegistry,
+    ModelRuntimeState,
 };

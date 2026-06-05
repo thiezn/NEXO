@@ -1,67 +1,20 @@
-use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, ModelDescriptor, Result};
+use crate::{DeviceSpec, ModelDataType};
 
-/// Serializable crate configuration for a library-first `nexo-ai` runtime.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct NexoAiConfig {
-    /// Runtime-wide settings shared by all configured models.
-    pub runtime: RuntimeConfig,
-
-    /// The models exposed through the local registry and runtime.
-    pub models: Vec<RegisteredModelConfig>,
-}
-
-impl NexoAiConfig {
-    /// Loads the runtime configuration from the given path, creating a default file when absent.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The configuration file path to load.
-    pub fn load(path: &Path) -> Result<Self> {
-        cli_helpers::config::load_or_create(path).map_err(|error| Error::Config {
-            message: error.to_string(),
-        })
-    }
-
-    /// Saves the runtime configuration to the given path.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The configuration file path to write.
-    pub fn save(&self, path: &Path) -> Result {
-        cli_helpers::config::save(self, path).map_err(|error| Error::Config {
-            message: error.to_string(),
-        })
-    }
-}
-
-/// Runtime-wide settings that govern model loading and request scheduling.
+/// Runtime defaults for the Mistral.rs integration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct RuntimeConfig {
+pub struct MistralRsRuntimeConfig {
     /// The target device selection policy used for model loading.
     pub device: DeviceSpec,
-
-    /// The scheduler policy used for generation requests.
-    pub scheduler: SchedulerPolicy,
 
     /// Disables KV-cache use in the underlying runtime when set.
     pub no_kv_cache: bool,
 
     /// Disables prefix caching in the underlying runtime when set.
-    ///
-    /// Prefix caching is an optimization that retains the activations
-    /// for the initial tokens of a sequence. This is often a system prompt
-    /// and will help time-to-first token for new sessions.
-    ///
-    /// However, at jun-3-2026 I am seeing issues occationally when this is
-    /// enabled, especially when a second inference is run in the same
-    /// session. I'm defaulting this to be disabled for now.
     pub no_prefix_cache: bool,
 
     /// The number of prefix-cache entries to retain when prefix caching is enabled.
@@ -74,33 +27,32 @@ pub struct RuntimeConfig {
     pub throughput_logging: bool,
 
     /// PagedAttention runtime controls.
-    pub paged_attention: PagedAttentionRuntimeConfig,
+    pub paged_attention: MistralRsPagedAttentionConfig,
 }
 
-impl Default for RuntimeConfig {
+impl Default for MistralRsRuntimeConfig {
     fn default() -> Self {
         Self {
             device: DeviceSpec::BestAvailable,
-            scheduler: SchedulerPolicy::default(),
             no_kv_cache: false,
             no_prefix_cache: true,
             prefix_cache_entries: 16,
             disable_eos_stop: false,
             throughput_logging: false,
-            paged_attention: PagedAttentionRuntimeConfig::default(),
+            paged_attention: MistralRsPagedAttentionConfig::default(),
         }
     }
 }
 
-/// PagedAttention controls for runtimes that support paged KV-cache allocation.
+/// PagedAttention controls for the Mistral.rs runtime.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct PagedAttentionRuntimeConfig {
+pub struct MistralRsPagedAttentionConfig {
     /// Tri-state mode:
     /// - `auto`: use backend defaults (enabled on CUDA, disabled on Metal/CPU)
     /// - `enabled`: force-enable when supported by the build/backend
     /// - `disabled`: force-disable
-    pub mode: PagedAttentionMode,
+    pub mode: MistralRsPagedAttentionMode,
 
     /// Optional fixed GPU memory budget (MB) for paged KV cache.
     pub gpu_memory_mb: Option<usize>,
@@ -115,26 +67,26 @@ pub struct PagedAttentionRuntimeConfig {
     pub block_size: Option<usize>,
 
     /// KV cache dtype policy for paged attention.
-    pub cache_type: PagedAttentionCacheType,
+    pub cache_type: MistralRsPagedAttentionCacheType,
 }
 
-impl Default for PagedAttentionRuntimeConfig {
+impl Default for MistralRsPagedAttentionConfig {
     fn default() -> Self {
         Self {
-            mode: PagedAttentionMode::Auto,
+            mode: MistralRsPagedAttentionMode::Auto,
             gpu_memory_mb: None,
             gpu_memory_utilization: None,
             context_size: None,
             block_size: None,
-            cache_type: PagedAttentionCacheType::Auto,
+            cache_type: MistralRsPagedAttentionCacheType::Auto,
         }
     }
 }
 
-/// PagedAttention enablement policy.
+/// PagedAttention enablement policy for Mistral.rs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PagedAttentionMode {
+pub enum MistralRsPagedAttentionMode {
     /// Use backend defaults (CUDA: enabled, Metal/CPU: disabled).
     #[default]
     Auto,
@@ -144,10 +96,10 @@ pub enum PagedAttentionMode {
     Disabled,
 }
 
-/// PagedAttention KV-cache storage type.
+/// PagedAttention KV-cache storage type for Mistral.rs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PagedAttentionCacheType {
+pub enum MistralRsPagedAttentionCacheType {
     /// Let mistral-rs choose the cache dtype.
     #[default]
     Auto,
@@ -155,39 +107,36 @@ pub enum PagedAttentionCacheType {
     F8e4m3,
 }
 
-/// A single model exposed through `nexo-ai`.
+/// Mistral.rs-specific configuration for a model binding.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegisteredModelConfig {
-    /// The stable `nexo-core` descriptor surfaced to callers.
-    pub descriptor: ModelDescriptor,
-
+pub struct MistralRsModelConfig {
     /// The loader configuration used to create the backing runtime pipeline.
-    pub loader: ModelLoader,
+    pub loader: MistralRsLoader,
 
     /// The optional Hugging Face revision to pin during model loading.
     pub revision: Option<String>,
 }
 
-/// Public loader variants supported by `nexo-ai`.
+/// Loader variants supported by the Mistral.rs integration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ModelLoader {
+pub enum MistralRsLoader {
     /// Use `mistralrs-core` automatic loader detection for a local path or HF repository.
-    Auto(AutoModelLoader),
+    Auto(MistralRsAutoLoader),
 
     /// Load a diffusion model for image generation.
-    Diffusion(DiffusionModelLoader),
+    Diffusion(MistralRsDiffusionLoader),
 
     /// Load a speech synthesis model.
-    Speech(SpeechModelLoader),
+    Speech(MistralRsSpeechLoader),
 
     /// Load a quantized GGUF model with an explicit weight file list.
-    Gguf(GgufModelLoader),
+    Gguf(MistralRsGgufLoader),
 }
 
 /// Loader settings for `mistralrs-core` automatic model detection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutoModelLoader {
+pub struct MistralRsAutoLoader {
     /// The model identifier or local path understood by `mistralrs-core`.
     pub model_id: String,
 
@@ -214,7 +163,7 @@ pub struct AutoModelLoader {
 
 /// Loader settings for diffusion image-generation models.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiffusionModelLoader {
+pub struct MistralRsDiffusionLoader {
     /// The local model identifier under NEXO's model store.
     pub model_id: String,
 
@@ -228,7 +177,7 @@ pub struct DiffusionModelLoader {
 
 /// Loader settings for speech synthesis models.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpeechModelLoader {
+pub struct MistralRsSpeechLoader {
     /// The local model identifier under NEXO's model store.
     pub model_id: String,
 
@@ -241,7 +190,7 @@ pub struct SpeechModelLoader {
 
 /// Loader settings for GGUF-based models.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GgufModelLoader {
+pub struct MistralRsGgufLoader {
     /// The optional tokenizer or chat-template model source.
     pub tokenizer_model_id: Option<String>,
 
@@ -259,64 +208,4 @@ pub struct GgufModelLoader {
 
     /// The preferred activation data type for the GGUF pipeline.
     pub dtype: ModelDataType,
-}
-
-/// The public data-type choices supported by `nexo-ai`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelDataType {
-    /// Let the runtime choose the best supported type.
-    #[default]
-    Auto,
-
-    /// Prefer BF16 weights or activations.
-    Bf16,
-
-    /// Prefer F16 weights or activations.
-    F16,
-
-    /// Prefer F32 weights or activations.
-    F32,
-}
-
-/// The device policy used when loading models.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeviceSpec {
-    /// Use the best device supported by the current build and platform.
-    #[default]
-    BestAvailable,
-
-    /// Force CPU execution.
-    Cpu,
-
-    /// Prefer Apple's Metal backend when the crate is built with the `metal` feature.
-    Metal,
-}
-
-/// The scheduler policy used for multi-sequence generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SchedulerPolicy {
-    /// Run up to a fixed number of concurrent sequences.
-    Fixed {
-        /// The maximum number of concurrently running sequences.
-        max_running_sequences: NonZeroUsize,
-    },
-}
-
-impl Default for SchedulerPolicy {
-    fn default() -> Self {
-        Self::Fixed {
-            max_running_sequences: NonZeroUsize::MIN,
-        }
-    }
-}
-
-/// Returns the default configuration path used by `nexo-ai` CLI-oriented helpers.
-pub fn default_config_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".nexo")
-        .join("nexo-ai.toml")
 }

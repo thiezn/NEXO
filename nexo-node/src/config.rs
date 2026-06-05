@@ -84,6 +84,11 @@ impl NodeConfig {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+
+    use nexo_ai::RuntimeImplementation;
+    use nexo_ai::engine::mistralrs::MistralRsRuntimeConfig;
+    use nexo_core::InferenceRuntime;
+
     use super::*;
 
     #[test]
@@ -100,8 +105,8 @@ mod tests {
         assert!(config.default_models.is_empty());
         assert!(config.enable_tool_calling);
         assert_eq!(
-            config.runtime.no_kv_cache,
-            RuntimeConfig::default().no_kv_cache
+            mistral_runtime(&config.runtime).no_kv_cache,
+            mistral_runtime(&RuntimeConfig::default()).no_kv_cache
         );
     }
 
@@ -116,7 +121,14 @@ mod tests {
             ModelCapability::TextGeneration,
             ModelId::from("gemma-4-e2b-it-q5"),
         );
-        config.runtime.no_kv_cache = true;
+        if let Some(RuntimeImplementation::MistralRs(runtime)) = config
+            .runtime
+            .runtimes
+            .iter_mut()
+            .find(|runtime| runtime.runtime() == InferenceRuntime::MistralRs)
+        {
+            runtime.no_kv_cache = true;
+        }
 
         let json = serde_json::to_string(&config).unwrap();
         let decoded: NodeConfig = serde_json::from_str(&json).unwrap();
@@ -129,7 +141,7 @@ mod tests {
                 .unwrap(),
             &ModelId::from("gemma-4-e2b-it-q5")
         );
-        assert!(decoded.runtime.no_kv_cache);
+        assert!(mistral_runtime(&decoded.runtime).no_kv_cache);
     }
 
     #[test]
@@ -137,5 +149,14 @@ mod tests {
         let config = NodeConfig::default();
         let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("available_models"));
+    }
+
+    fn mistral_runtime(runtime: &RuntimeConfig) -> &MistralRsRuntimeConfig {
+        runtime
+            .runtime(InferenceRuntime::MistralRs)
+            .and_then(|runtime| match runtime {
+                RuntimeImplementation::MistralRs(config) => Some(config),
+            })
+            .unwrap()
     }
 }
