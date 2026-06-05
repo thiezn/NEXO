@@ -78,7 +78,8 @@ fn loader_from_manifest(manifest: &ModelManifest) -> Result<MistralRsLoader> {
         return Ok(MistralRsLoader::Speech(MistralRsSpeechLoader {
             model_id: manifest.id().to_string(),
             dac_model_id: Some(model_dir.join("dac").to_string_lossy().into_owned()),
-            dtype: ModelDataType::Auto,
+            // Dia runs substantially faster on Apple Silicon when loaded in f16.
+            dtype: ModelDataType::F16,
         }));
     }
 
@@ -269,6 +270,6 @@ mod tests {
                 .as_deref()
                 .is_some_and(|path| path.ends_with("dia-1.6b/dac"))
         );
-        assert_eq!(loader.dtype, ModelDataType::Auto);
+        assert_eq!(loader.dtype, ModelDataType::F16);
     }
 }

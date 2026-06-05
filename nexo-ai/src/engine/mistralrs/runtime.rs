@@ -597,6 +597,17 @@ fn build_speech_pipeline(
     let dtype = get_model_dtype(&selected).map_err(|error| Error::Runtime {
         message: error.to_string(),
     })?;
+    let device_map = match get_auto_device_map_params(&selected) {
+        Ok(params) => params,
+        Err(error) => {
+            tracing::warn!(
+                model_id = %loader.model_id,
+                error = %error,
+                "Failed to derive speech auto device-map params; falling back to text defaults"
+            );
+            AutoDeviceMapParams::default_text()
+        }
+    };
 
     built_loader
         .load_model_from_hf(
@@ -605,7 +616,7 @@ fn build_speech_pipeline(
             &dtype,
             device,
             true,
-            DeviceMapSetting::Auto(AutoDeviceMapParams::default_text()),
+            DeviceMapSetting::Auto(device_map),
             None,
             None,
         )
@@ -994,11 +1005,20 @@ fn resolve_device(device: DeviceSpec) -> Result<Device> {
 fn best_available_device() -> Result<Device> {
     #[cfg(all(target_os = "macos", feature = "metal"))]
     {
-        if let Ok(device) = Device::new_metal(0) {
-            return Ok(device);
+        match Device::new_metal(0) {
+            Ok(device) => return Ok(device),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "Failed to initialize Metal device; falling back to CPU"
+                );
+            }
         }
     }
 
+    tracing::warn!(
+        "Using CPU device for inference; this can be significantly slower than GPU backends"
+    );
     Ok(Device::Cpu)
 }
 
