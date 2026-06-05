@@ -10,8 +10,8 @@ use crate::{
 };
 
 use super::any_tts::{AnyTtsRuntime, internal_runtime_kind};
-use super::mold::MoldRuntime;
 use super::mistralrs::MistralRuntime;
+use super::mold::MoldRuntime;
 
 #[derive(Debug)]
 pub(crate) struct RuntimeManager {
@@ -259,7 +259,7 @@ impl RuntimeManager {
         runtime_kind: InferenceRuntime,
     ) -> Result<BackendRuntime> {
         match runtime_kind {
-            InferenceRuntime::Any => match internal_runtime_kind(model) {
+            InferenceRuntime::AnyTts => match internal_runtime_kind(model) {
                 Some(_) => Ok(BackendRuntime::AnyTts(
                     AnyTtsRuntime::from_model_config(model).await?,
                 )),
@@ -280,7 +280,7 @@ impl RuntimeManager {
         model: &RegisteredModelConfig,
         requested_runtime_kind: InferenceRuntime,
     ) -> Result<InferenceRuntime> {
-        if requested_runtime_kind != InferenceRuntime::Any {
+        if requested_runtime_kind != InferenceRuntime::AnyTts {
             return model
                 .supports_runtime(requested_runtime_kind)
                 .then_some(requested_runtime_kind)
@@ -292,12 +292,12 @@ impl RuntimeManager {
                 });
         }
 
-        if model.descriptor.runtime != InferenceRuntime::Any {
+        if model.descriptor.runtime != InferenceRuntime::AnyTts {
             return Ok(model.descriptor.runtime);
         }
 
         if internal_runtime_kind(model).is_some() {
-            return Ok(InferenceRuntime::Any);
+            return Ok(InferenceRuntime::AnyTts);
         }
 
         let mut runtimes = model.runtimes.iter().map(|runtime| runtime.runtime());
@@ -336,7 +336,7 @@ fn request_session_id(request: &InferenceRequest) -> Option<&str> {
 }
 
 fn requested_runtime_kind(request: &InferenceRequest) -> Option<InferenceRuntime> {
-    (request_model_selection(request).runtime_preference != InferenceRuntime::Any)
+    (request_model_selection(request).runtime_preference != InferenceRuntime::AnyTts)
         .then_some(request_model_selection(request).runtime_preference)
 }
 
@@ -352,7 +352,7 @@ fn matches_runtime_preference(
     requested_runtime_kind: InferenceRuntime,
 ) -> bool {
     match requested_runtime_kind {
-        InferenceRuntime::Any => matches!(state, ModelSlotState::Loaded(_)),
+        InferenceRuntime::AnyTts => matches!(state, ModelSlotState::Loaded(_)),
         runtime_kind => matches!(
             state,
             ModelSlotState::Loaded(ActiveModelRuntime {
@@ -469,7 +469,7 @@ mod tests {
         };
 
         assert_eq!(
-            RuntimeManager::resolve_load_runtime_kind(&model, InferenceRuntime::Any).unwrap(),
+            RuntimeManager::resolve_load_runtime_kind(&model, InferenceRuntime::AnyTts).unwrap(),
             InferenceRuntime::MistralRs
         );
     }
@@ -487,8 +487,8 @@ mod tests {
         };
 
         assert_eq!(
-            RuntimeManager::resolve_load_runtime_kind(&model, InferenceRuntime::Any).unwrap(),
-            InferenceRuntime::Any
+            RuntimeManager::resolve_load_runtime_kind(&model, InferenceRuntime::AnyTts).unwrap(),
+            InferenceRuntime::AnyTts
         );
     }
 
@@ -497,7 +497,7 @@ mod tests {
             id: id.into(),
             display_name: id.to_string(),
             provider: Some("test".to_string()),
-            runtime: InferenceRuntime::Any,
+            runtime: InferenceRuntime::AnyTts,
             capabilities: vec![ModelCapability::TextGeneration],
             modalities: ModelModalities {
                 input: vec![SupportedModality::Text],
@@ -516,7 +516,7 @@ mod tests {
             id: ModelId::from("chat"),
             display_name: "chat".to_string(),
             provider: Some("test".to_string()),
-            runtime: InferenceRuntime::Any,
+            runtime: InferenceRuntime::AnyTts,
             capabilities: vec![ModelCapability::TextGeneration],
             modalities: ModelModalities {
                 input: vec![SupportedModality::Text],

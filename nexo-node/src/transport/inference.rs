@@ -9,9 +9,9 @@ use nexo_ai::{
 use nexo_core::inference::request::GenerateRequest;
 use nexo_core::{
     AudioFormat, ContentPart, ConversationMessage, FinishReason, GenerateDelta, InferenceRequest,
-    InferenceResponse, InferenceStream, MediaSource, MessageRole, ModelCapability,
-    ModelDescriptor, ModelId, ModelSelection, PerformanceMetrics, RequestId, RoundId, RunId,
-    SessionId, TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId, ToolChoice,
+    InferenceResponse, InferenceStream, MediaSource, MessageRole, ModelCapability, ModelDescriptor,
+    ModelId, ModelSelection, PerformanceMetrics, RequestId, RoundId, RunId, SessionId, TextPart,
+    TokenUsage, ToolCall, ToolCallDelta, ToolCallId, ToolChoice,
 };
 use nexo_ws_client::WriteHalf;
 use nexo_ws_schema::{
@@ -134,7 +134,7 @@ impl LoadedModels {
             .clone()
             .ok_or_else(|| "No inference engine configured".to_string())?;
         engine
-            .load_model(&model_id, nexo_core::InferenceRuntime::Any)
+            .load_model(&model_id, nexo_core::InferenceRuntime::AnyTts)
             .await
             .map_err(|error| error.to_string())
     }
@@ -1488,7 +1488,7 @@ mod tests {
                 id: ModelId::from(id),
                 display_name: id.to_string(),
                 provider: Some("test".to_string()),
-                runtime: nexo_core::InferenceRuntime::Any,
+                runtime: nexo_core::InferenceRuntime::AnyTts,
                 capabilities,
                 modalities: ModelModalities {
                     input: vec![SupportedModality::Text],

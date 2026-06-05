@@ -581,7 +581,7 @@ fn kokoro_82m_tts_manifest() -> ModelManifest {
             "kokoro-82m-tts",
             "Kokoro 82M TTS",
             Some("hexgrad"),
-            InferenceRuntime::Any,
+            InferenceRuntime::AnyTts,
             "kokoro",
             vec![ModelCapability::SpeechGeneration],
             vec![SupportedModality::Text],

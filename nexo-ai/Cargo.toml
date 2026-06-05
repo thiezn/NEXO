@@ -12,7 +12,12 @@ default = []
 candle = []
 cli = []
 download = []
-metal = ["candle-core/metal", "mistralrs-core/metal", "mold-ai-inference/metal", "any-tts/metal"]
+metal = [
+    "candle-core/metal",
+    "mistralrs-core/metal",
+    "mold-ai-inference/metal",
+    "any-tts/metal",
+]
 
 [dependencies]
 any-tts = { version = "0.1", default-features = false, features = ["kokoro"] }

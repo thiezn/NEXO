@@ -10,11 +10,11 @@ use nexo_model_mgmt::{ModelComponent, ModelFileSelector, ModelManifest};
 
 use crate::ModelRuntimeImplementation;
 use crate::engine::any_tts::{INTERNAL_RUNTIME_KEY, KOKORO_RUNTIME_ID};
-use crate::engine::mold::{MoldFlux2Loader, MoldLoader, MoldModelConfig};
 use crate::engine::mistralrs::{
     MistralRsAutoLoader, MistralRsDiffusionLoader, MistralRsGgufLoader, MistralRsLoader,
     MistralRsModelConfig, MistralRsSpeechLoader,
 };
+use crate::engine::mold::{MoldFlux2Loader, MoldLoader, MoldModelConfig};
 use crate::{Error, ModelDataType, RegisteredModelConfig, Result};
 
 /// Build runtime configs for every downloaded model known to `nexo-model-mgmt`.
@@ -55,10 +55,12 @@ pub fn model_config_from_manifest(manifest: &ModelManifest) -> Result<Registered
             Value::String(KOKORO_RUNTIME_ID.to_string()),
         );
     } else {
-        runtimes.push(ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
-            loader: loader_from_manifest(manifest)?,
-            revision: None,
-        }));
+        runtimes.push(ModelRuntimeImplementation::MistralRs(
+            MistralRsModelConfig {
+                loader: loader_from_manifest(manifest)?,
+                revision: None,
+            },
+        ));
     }
 
     if let Some(mold) = mold_model_config_from_manifest(manifest) {
@@ -72,13 +74,13 @@ pub fn model_config_from_manifest(manifest: &ModelManifest) -> Result<Registered
 }
 
 fn mold_model_config_from_manifest(manifest: &ModelManifest) -> Option<MoldModelConfig> {
-    (manifest.backend == "mistralrs-flux" && manifest_family(manifest) == Some("flux2")).then(|| {
-        MoldModelConfig {
+    (manifest.backend == "mistralrs-flux" && manifest_family(manifest) == Some("flux2")).then(
+        || MoldModelConfig {
             loader: MoldLoader::Flux2(MoldFlux2Loader {
                 model_id: manifest.id().to_string(),
             }),
-        }
-    })
+        },
+    )
 }
 
 fn manifest_family(manifest: &ModelManifest) -> Option<&str> {

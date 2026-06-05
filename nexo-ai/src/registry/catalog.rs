@@ -91,7 +91,7 @@ fn matches_runtime_preference(
     descriptor: &ModelDescriptor,
     requested_runtime: InferenceRuntime,
 ) -> bool {
-    matches!(requested_runtime, InferenceRuntime::Any) || descriptor.runtime == requested_runtime
+    matches!(requested_runtime, InferenceRuntime::AnyTts) || descriptor.runtime == requested_runtime
 }
 
 fn supports_all(available: &[ModelCapability], required: &[ModelCapability]) -> bool {
@@ -176,7 +176,7 @@ mod tests {
             id: ModelId::from(id),
             display_name: id.to_string(),
             provider: Some("test".to_string()),
-            runtime: InferenceRuntime::Any,
+            runtime: InferenceRuntime::AnyTts,
             capabilities,
             modalities: ModelModalities {
                 input: vec![SupportedModality::Text],

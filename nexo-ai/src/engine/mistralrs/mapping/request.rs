@@ -837,7 +837,7 @@ mod tests {
             id: ModelId::from("chat"),
             display_name: "chat".to_string(),
             provider: Some("test".to_string()),
-            runtime: nexo_core::InferenceRuntime::Any,
+            runtime: nexo_core::InferenceRuntime::AnyTts,
             capabilities: vec![ModelCapability::TextGeneration],
             modalities: ModelModalities {
                 input: vec![SupportedModality::Text],

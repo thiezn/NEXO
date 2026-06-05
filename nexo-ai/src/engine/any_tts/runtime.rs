@@ -250,7 +250,7 @@ mod tests {
             id: "kokoro-82m-tts".into(),
             display_name: "Kokoro 82M TTS".to_string(),
             provider: Some("hexgrad".to_string()),
-            runtime: nexo_core::InferenceRuntime::Any,
+            runtime: nexo_core::InferenceRuntime::AnyTts,
             capabilities: vec![nexo_core::ModelCapability::SpeechGeneration],
             modalities: nexo_core::ModelModalities {
                 input: vec![nexo_core::SupportedModality::Text],

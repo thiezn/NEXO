@@ -11,7 +11,7 @@ use super::ModelCapability;
 pub enum InferenceRuntime {
     /// Allow the runtime crate to choose any compatible binding.
     #[default]
-    Any,
+    AnyTts,
 
     /// The Mistral.rs runtime integration.
     MistralRs,
