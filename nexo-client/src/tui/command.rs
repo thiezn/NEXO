@@ -484,6 +484,7 @@ fn parse_audio_generate(
     Ok(AppCommand::AudioGenerate(AudioGenerateParams {
         prompt: prompt.to_string(),
         session_id: current_session_id.map(ToOwned::to_owned),
+        language: Default::default(),
         voice: None,
         sample_rate_hz: None,
         speed: None,

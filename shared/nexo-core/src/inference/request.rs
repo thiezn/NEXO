@@ -53,6 +53,19 @@ pub enum AudioFormat {
     Mp3,
 }
 
+/// The requested spoken language for speech synthesis.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechLanguage {
+    /// English speech output.
+    #[default]
+    English,
+
+    /// Dutch speech output.
+    Dutch,
+}
+
 /// A unified request enum for all supported inference operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -346,6 +359,10 @@ pub struct SpeechGenerationRequest {
 
     /// The text to synthesize into speech.
     pub text: String,
+
+    /// The requested spoken language.
+    #[serde(default)]
+    pub language: SpeechLanguage,
 
     /// The requested voice label, if the runtime supports voice selection.
     pub voice: Option<String>,

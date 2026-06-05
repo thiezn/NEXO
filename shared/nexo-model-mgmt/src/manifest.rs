@@ -200,6 +200,7 @@ mod tests {
                 id: "org/test:model".into(),
                 display_name: "Test model".to_string(),
                 provider: Some("test".to_string()),
+                runtime: nexo_core::InferenceRuntime::Any,
                 capabilities: vec![nexo_core::ModelCapability::TextGeneration],
                 modalities: nexo_core::ModelModalities {
                     input: vec![nexo_core::SupportedModality::Text],
@@ -243,6 +244,7 @@ mod tests {
                 id: "gemma-4-e4b-it-uqff-afq8".into(),
                 display_name: "Gemma 4 E4B IT UQFF AFQ8".to_string(),
                 provider: Some("mistralrs-community".to_string()),
+                runtime: nexo_core::InferenceRuntime::Any,
                 capabilities: vec![nexo_core::ModelCapability::TextGeneration],
                 modalities: nexo_core::ModelModalities {
                     input: vec![nexo_core::SupportedModality::Text],
@@ -268,6 +270,7 @@ mod tests {
                 id: "dia-1.6b-tts".into(),
                 display_name: "Dia 1.6B TTS".to_string(),
                 provider: Some("nari-labs".to_string()),
+                runtime: nexo_core::InferenceRuntime::Any,
                 capabilities: vec![nexo_core::ModelCapability::SpeechGeneration],
                 modalities: nexo_core::ModelModalities {
                     input: vec![nexo_core::SupportedModality::Text],

@@ -12,9 +12,10 @@ default = []
 candle = []
 cli = []
 download = []
-metal = ["candle-core/metal", "mistralrs-core/metal"]
+metal = ["candle-core/metal", "mistralrs-core/metal", "mold-ai-inference/metal", "any-tts/metal"]
 
 [dependencies]
+any-tts = { version = "0.1", default-features = false, features = ["kokoro"] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
@@ -37,6 +38,17 @@ version = "1"
 
 [dependencies.indexmap]
 version = "2"
+
+[dependencies.mold-ai-core]
+package = "mold-ai-core"
+git = "https://github.com/utensils/mold"
+branch = "main"
+
+[dependencies.mold-ai-inference]
+package = "mold-ai-inference"
+git = "https://github.com/utensils/mold"
+branch = "main"
+default-features = false
 
 [dependencies.mistralrs-core]
 git = "https://github.com/EricLBuehler/mistral.rs"

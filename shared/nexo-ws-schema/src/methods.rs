@@ -1,5 +1,7 @@
 use nexo_core::message::ConversationMessage;
-use nexo_core::{ModelDescriptor, ReasoningSettings, ToolCall, ToolChoice, ToolDefinition};
+use nexo_core::{
+    ModelDescriptor, ReasoningSettings, SpeechLanguage, ToolCall, ToolChoice, ToolDefinition,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -960,6 +962,9 @@ pub struct AudioGenerateParams {
     /// Optional session identifier used to preserve runtime continuity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Requested spoken language.
+    #[serde(default)]
+    pub language: SpeechLanguage,
     /// Optional voice label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice: Option<String>,

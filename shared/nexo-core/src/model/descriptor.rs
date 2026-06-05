@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::common::MetadataMap;
 use crate::ids::ModelId;
 
-use super::{ModelCapability, ModelModalities, RoleStrategy};
+use super::{InferenceRuntime, ModelCapability, ModelModalities, RoleStrategy};
 
 /// Describes a model that may be selected for inference.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,6 +17,10 @@ pub struct ModelDescriptor {
 
     /// The provider or runtime family responsible for the model.
     pub provider: Option<String>,
+
+    /// The runtime implementation required or preferred when loading this model.
+    #[serde(default)]
+    pub runtime: InferenceRuntime,
 
     /// The declared model capabilities.
     pub capabilities: Vec<ModelCapability>,

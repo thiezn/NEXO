@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use nexo_core::{ModelCapability, ModelDescriptor, ModelId, ModelSelection};
+use nexo_core::{InferenceRuntime, ModelCapability, ModelDescriptor, ModelId, ModelSelection};
 
 use crate::{Error, ModelRuntimeState, Result};
 
@@ -55,6 +55,7 @@ impl StaticModelRegistry {
         if let Some(model_id) = &selection.specific_model {
             return self.get_model(model_id).filter(|descriptor| {
                 supports_all(&descriptor.capabilities, &selection.required_capabilities)
+                    && matches_runtime_preference(descriptor, selection.runtime_preference)
             });
         }
 
@@ -62,6 +63,7 @@ impl StaticModelRegistry {
             .values()
             .filter(|descriptor| {
                 supports_all(&descriptor.capabilities, &selection.required_capabilities)
+                    && matches_runtime_preference(descriptor, selection.runtime_preference)
             })
             .max_by_key(|descriptor| {
                 selection
@@ -83,6 +85,13 @@ impl StaticModelRegistry {
             .contains_key(model_id)
             .then_some(ModelRuntimeState::Unloaded)
     }
+}
+
+fn matches_runtime_preference(
+    descriptor: &ModelDescriptor,
+    requested_runtime: InferenceRuntime,
+) -> bool {
+    matches!(requested_runtime, InferenceRuntime::Any) || descriptor.runtime == requested_runtime
 }
 
 fn supports_all(available: &[ModelCapability], required: &[ModelCapability]) -> bool {
@@ -145,11 +154,29 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn filters_models_by_runtime_preference() {
+        let mistral = descriptor("chat", vec![ModelCapability::TextGeneration]);
+        let mut flux = descriptor("flux", vec![ModelCapability::ImageGeneration]);
+        flux.runtime = InferenceRuntime::Mold;
+        let registry = StaticModelRegistry::new(vec![mistral, flux.clone()]).unwrap();
+
+        let resolved = registry.resolve_model(&ModelSelection {
+            specific_model: Some(ModelId::from("flux")),
+            required_capabilities: vec![ModelCapability::ImageGeneration],
+            preferred_capabilities: Vec::new(),
+            runtime_preference: InferenceRuntime::Mold,
+        });
+
+        assert_eq!(resolved, Some(flux));
+    }
+
     fn descriptor(id: &str, capabilities: Vec<ModelCapability>) -> ModelDescriptor {
         ModelDescriptor {
             id: ModelId::from(id),
             display_name: id.to_string(),
             provider: Some("test".to_string()),
+            runtime: InferenceRuntime::Any,
             capabilities,
             modalities: ModelModalities {
                 input: vec![SupportedModality::Text],

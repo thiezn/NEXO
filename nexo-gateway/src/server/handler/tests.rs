@@ -36,6 +36,7 @@ fn make_loaded_model(
         id: ModelId::from(model_id),
         display_name: model_id.into(),
         provider: Some("test".into()),
+        runtime: nexo_core::InferenceRuntime::Any,
         capabilities,
         modalities: ModelModalities {
             input: vec![SupportedModality::Text],

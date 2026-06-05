@@ -3,10 +3,14 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use serde_json::Value;
+
 use nexo_model_mgmt::registry::{known_manifests, list_models};
 use nexo_model_mgmt::{ModelComponent, ModelFileSelector, ModelManifest};
 
 use crate::ModelRuntimeImplementation;
+use crate::engine::any_tts::{INTERNAL_RUNTIME_KEY, KOKORO_RUNTIME_ID};
+use crate::engine::mold::{MoldFlux2Loader, MoldLoader, MoldModelConfig};
 use crate::engine::mistralrs::{
     MistralRsAutoLoader, MistralRsDiffusionLoader, MistralRsGgufLoader, MistralRsLoader,
     MistralRsModelConfig, MistralRsSpeechLoader,
@@ -42,15 +46,47 @@ pub fn downloaded_model_configs() -> Result<Vec<RegisteredModelConfig>> {
 ///
 /// Returns an error when the manifest does not contain enough information for the selected backend.
 pub fn model_config_from_manifest(manifest: &ModelManifest) -> Result<RegisteredModelConfig> {
+    let mut descriptor = manifest.descriptor.clone();
+    let mut runtimes = Vec::new();
+
+    if manifest.backend == "any-tts-kokoro" {
+        descriptor.metadata.insert(
+            INTERNAL_RUNTIME_KEY.to_string(),
+            Value::String(KOKORO_RUNTIME_ID.to_string()),
+        );
+    } else {
+        runtimes.push(ModelRuntimeImplementation::MistralRs(MistralRsModelConfig {
+            loader: loader_from_manifest(manifest)?,
+            revision: None,
+        }));
+    }
+
+    if let Some(mold) = mold_model_config_from_manifest(manifest) {
+        runtimes.push(ModelRuntimeImplementation::Mold(mold));
+    }
+
     Ok(RegisteredModelConfig {
-        descriptor: manifest.descriptor.clone(),
-        runtimes: vec![ModelRuntimeImplementation::MistralRs(
-            MistralRsModelConfig {
-                loader: loader_from_manifest(manifest)?,
-                revision: None,
-            },
-        )],
+        descriptor,
+        runtimes,
     })
+}
+
+fn mold_model_config_from_manifest(manifest: &ModelManifest) -> Option<MoldModelConfig> {
+    (manifest.backend == "mistralrs-flux" && manifest_family(manifest) == Some("flux2")).then(|| {
+        MoldModelConfig {
+            loader: MoldLoader::Flux2(MoldFlux2Loader {
+                model_id: manifest.id().to_string(),
+            }),
+        }
+    })
+}
+
+fn manifest_family(manifest: &ModelManifest) -> Option<&str> {
+    manifest
+        .descriptor
+        .metadata
+        .get("family")
+        .and_then(Value::as_str)
 }
 
 fn loader_from_manifest(manifest: &ModelManifest) -> Result<MistralRsLoader> {
@@ -251,6 +287,25 @@ mod tests {
     }
 
     #[test]
+    fn flux_manifest_also_exposes_mold_runtime() {
+        let manifest = find_manifest("flux.2-klein-9b").unwrap();
+        let config = model_config_from_manifest(manifest).unwrap();
+
+        let mold = config
+            .runtimes
+            .iter()
+            .find_map(|runtime| match runtime {
+                ModelRuntimeImplementation::Mold(model) => Some(model),
+                ModelRuntimeImplementation::MistralRs(_) => None,
+            })
+            .expect("expected mold runtime for flux.2 manifest");
+
+        let MoldLoader::Flux2(loader) = &mold.loader;
+
+        assert_eq!(loader.model_id, "flux.2-klein-9b");
+    }
+
+    #[test]
     fn dia_manifest_uses_speech_loader() {
         let manifest = find_manifest("dia-1.6b-tts").unwrap();
         let config = model_config_from_manifest(manifest).unwrap();
@@ -271,5 +326,21 @@ mod tests {
                 .is_some_and(|path| path.ends_with("dia-1.6b/dac"))
         );
         assert_eq!(loader.dtype, ModelDataType::F16);
+    }
+
+    #[test]
+    fn kokoro_manifest_uses_internal_any_tts_runtime() {
+        let manifest = find_manifest("kokoro-82m-tts").unwrap();
+        let config = model_config_from_manifest(manifest).unwrap();
+
+        assert!(config.runtimes.is_empty());
+        assert_eq!(
+            config
+                .descriptor
+                .metadata
+                .get(INTERNAL_RUNTIME_KEY)
+                .and_then(Value::as_str),
+            Some(KOKORO_RUNTIME_ID)
+        );
     }
 }

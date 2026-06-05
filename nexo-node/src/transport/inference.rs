@@ -9,10 +9,9 @@ use nexo_ai::{
 use nexo_core::inference::request::GenerateRequest;
 use nexo_core::{
     AudioFormat, ContentPart, ConversationMessage, FinishReason, GenerateDelta, InferenceRequest,
-    InferenceResponse, InferenceRuntime, InferenceStream, MediaSource, MessageRole,
-    ModelCapability, ModelDescriptor, ModelId, ModelSelection, PerformanceMetrics, RequestId,
-    RoundId, RunId, SessionId, TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId,
-    ToolChoice,
+    InferenceResponse, InferenceStream, MediaSource, MessageRole, ModelCapability,
+    ModelDescriptor, ModelId, ModelSelection, PerformanceMetrics, RequestId, RoundId, RunId,
+    SessionId, TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId, ToolChoice,
 };
 use nexo_ws_client::WriteHalf;
 use nexo_ws_schema::{
@@ -123,11 +122,7 @@ impl LoadedModels {
         selected
     }
 
-    async fn load_model(
-        &mut self,
-        model_id: &str,
-        runtime_kind: InferenceRuntime,
-    ) -> Result<(), String> {
+    async fn load_model(&mut self, model_id: &str) -> Result<(), String> {
         let model_id = ModelId::from(model_id);
         if !self.available.contains_key(&model_id) {
             return Err(format!("Model '{model_id}' is not downloaded on this node"));
@@ -139,7 +134,7 @@ impl LoadedModels {
             .clone()
             .ok_or_else(|| "No inference engine configured".to_string())?;
         engine
-            .load_model(&model_id, runtime_kind)
+            .load_model(&model_id, nexo_core::InferenceRuntime::Any)
             .await
             .map_err(|error| error.to_string())
     }
@@ -218,9 +213,7 @@ pub(super) async fn load_startup_models(models: &SharedModels, config: &NodeConf
     for model_id in startup_model_ids {
         let result = {
             let mut models = models.lock().await;
-            models
-                .load_model(model_id.as_str(), InferenceRuntime::MistralRs)
-                .await
+            models.load_model(model_id.as_str()).await
         };
 
         match result {
@@ -283,9 +276,7 @@ pub(super) async fn handle_model_load(
     tracing::info!("Loading model '{model_id}'");
     let result = {
         let mut models = models.lock().await;
-        models
-            .load_model(model_id, InferenceRuntime::MistralRs)
-            .await
+        models.load_model(model_id).await
     };
     let (loaded, error) = match result {
         Ok(()) => {
@@ -648,6 +639,7 @@ pub(super) async fn queue_audio_generate(
             runtime_preference: Default::default(),
         },
         text: params.prompt,
+        language: params.language,
         voice: params.voice,
         format: AudioFormat::Wav,
         sample_rate_hz: params.sample_rate_hz,
@@ -1496,6 +1488,7 @@ mod tests {
                 id: ModelId::from(id),
                 display_name: id.to_string(),
                 provider: Some("test".to_string()),
+                runtime: nexo_core::InferenceRuntime::Any,
                 capabilities,
                 modalities: ModelModalities {
                     input: vec![SupportedModality::Text],

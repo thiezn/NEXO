@@ -125,6 +125,7 @@ fn model_descriptor(id: &str, capabilities: Vec<ModelCapability>) -> ModelDescri
         id: ModelId::from(id),
         display_name: id.to_string(),
         provider: Some("test".to_string()),
+        runtime: nexo_core::InferenceRuntime::Any,
         capabilities,
         modalities: ModelModalities {
             input: vec![SupportedModality::Text],

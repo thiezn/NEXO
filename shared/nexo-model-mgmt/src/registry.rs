@@ -5,7 +5,8 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use nexo_core::{
-    MetadataMap, ModelCapability, ModelDescriptor, ModelModalities, RoleStrategy, SupportedModality,
+    InferenceRuntime, MetadataMap, ModelCapability, ModelDescriptor, ModelModalities,
+    RoleStrategy, SupportedModality,
 };
 use serde_json::Value;
 
@@ -141,6 +142,7 @@ static ALL_MANIFESTS: LazyLock<Vec<ModelManifest>> = LazyLock::new(|| {
     manifests.extend(qwen_3_5_apple_metal_manifests());
     manifests.push(voxtral_mini_asr_stt_manifest());
     manifests.push(dia_1_6b_tts_manifest());
+    manifests.push(kokoro_82m_tts_manifest());
     manifests.extend(flux_2_manifests());
     manifests.push(embedding_gemma_manifest());
     manifests
@@ -168,6 +170,7 @@ fn gemma_4_e2b_it_q5_manifest() -> ModelManifest {
             "gemma-4-e2b-it-q5",
             "Gemma 4 E2B IT Q5_K_M",
             Some("unsloth"),
+            InferenceRuntime::MistralRs,
             "gemma4",
             vec![
                 ModelCapability::TextGeneration,
@@ -234,6 +237,7 @@ fn gemma_4_26b_a4b_it_q4_manifest() -> ModelManifest {
             "gemma-4-26b-a4b-it-q4",
             "Gemma 4 26B-A4B IT UD-Q4_K_M",
             Some("unsloth"),
+            InferenceRuntime::MistralRs,
             "gemma4",
             vec![
                 ModelCapability::TextGeneration,
@@ -295,6 +299,7 @@ fn gemma_4_12b_it_manifest() -> ModelManifest {
             "gemma-4-12b-it",
             "Gemma 4 12B IT",
             Some("google"),
+            InferenceRuntime::MistralRs,
             "gemma4",
             vec![
                 ModelCapability::TextGeneration,
@@ -485,6 +490,7 @@ fn uqff_variant_manifest(spec: UqffManifestSpec<'_>) -> ModelManifest {
             &format!("{}-{}", spec.id_prefix, spec.variant_id),
             &format!("{} {}", spec.display_name_prefix, spec.variant_label),
             Some(spec.provider),
+            InferenceRuntime::MistralRs,
             spec.family,
             spec.capabilities,
             spec.input_modalities,
@@ -507,6 +513,7 @@ fn voxtral_mini_asr_stt_manifest() -> ModelManifest {
             "voxtral-mini-3b-2507-asr-stt",
             "Voxtral Mini 3B 2507 ASR/STT",
             Some("mistralai"),
+            InferenceRuntime::MistralRs,
             "voxtral",
             vec![
                 ModelCapability::TextGeneration,
@@ -534,6 +541,7 @@ fn dia_1_6b_tts_manifest() -> ModelManifest {
             "dia-1.6b-tts",
             "Dia 1.6B TTS",
             Some("nari-labs"),
+            InferenceRuntime::MistralRs,
             "dia",
             vec![ModelCapability::SpeechGeneration],
             vec![SupportedModality::Text],
@@ -562,6 +570,39 @@ fn dia_1_6b_tts_manifest() -> ModelManifest {
                 None,
                 false,
             ),
+        ],
+    }
+}
+
+fn kokoro_82m_tts_manifest() -> ModelManifest {
+    let repo = "hexgrad/Kokoro-82M";
+    ModelManifest {
+        descriptor: descriptor(
+            "kokoro-82m-tts",
+            "Kokoro 82M TTS",
+            Some("hexgrad"),
+            InferenceRuntime::Any,
+            "kokoro",
+            vec![ModelCapability::SpeechGeneration],
+            vec![SupportedModality::Text],
+            vec![SupportedModality::Audio],
+            "Kokoro text-to-speech model for fast local speech synthesis.",
+            repo,
+            "pytorch",
+            None,
+        ),
+        backend: "any-tts-kokoro".to_string(),
+        size_gb: 0.4,
+        files: vec![
+            file_exact(ModelComponent::Config, repo, "config.json", None, false),
+            file_exact(
+                ModelComponent::Weights,
+                repo,
+                "kokoro-v1_0.pth",
+                None,
+                false,
+            ),
+            file_prefix(ModelComponent::Modules, repo, "voices/", false),
         ],
     }
 }
@@ -599,6 +640,7 @@ fn flux_2_manifests() -> Vec<ModelManifest> {
             id,
             display_name,
             Some("black-forest-labs"),
+            InferenceRuntime::Mold,
             "flux2",
             vec![ModelCapability::ImageGeneration],
             vec![SupportedModality::Text],
@@ -622,6 +664,7 @@ fn embedding_gemma_manifest() -> ModelManifest {
             "embedding-gemma-300m",
             "Embedding Gemma 300M",
             Some("google"),
+            InferenceRuntime::MistralRs,
             "embedding-gemma",
             vec![ModelCapability::Embeddings],
             vec![SupportedModality::Text],
@@ -642,6 +685,7 @@ fn descriptor(
     id: &str,
     display_name: &str,
     provider: Option<&str>,
+    runtime: InferenceRuntime,
     family: &str,
     capabilities: Vec<ModelCapability>,
     input_modalities: Vec<SupportedModality>,
@@ -670,6 +714,7 @@ fn descriptor(
         id: id.into(),
         display_name: display_name.to_string(),
         provider: provider.map(str::to_string),
+        runtime,
         capabilities,
         modalities: ModelModalities {
             input: input_modalities,
@@ -992,6 +1037,27 @@ mod tests {
             file.hf_repo == "EricB/dac_44khz"
                 && file.selector.exact_path() == Some("model.safetensors")
                 && file.local_path.as_deref() == Some("dac/model.safetensors")
+        }));
+    }
+
+    #[test]
+    fn kokoro_manifest_supports_speech_generation_and_voice_assets() {
+        let manifest = find_manifest("kokoro-82m-tts").expect("missing Kokoro manifest");
+
+        assert_eq!(manifest.backend, "any-tts-kokoro");
+        assert!(
+            manifest
+                .descriptor
+                .capabilities
+                .contains(&ModelCapability::SpeechGeneration)
+        );
+        assert!(manifest.files.iter().any(|file| {
+            file.component == ModelComponent::Weights
+                && file.selector.exact_path() == Some("kokoro-v1_0.pth")
+        }));
+        assert!(manifest.files.iter().any(|file| {
+            file.component == ModelComponent::Modules
+                && matches!(file.selector, ModelFileSelector::Prefix(ref prefix) if prefix == "voices/")
         }));
     }
 }

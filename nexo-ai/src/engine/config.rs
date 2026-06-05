@@ -5,6 +5,7 @@ use nexo_core::InferenceRuntime;
 use serde::{Deserialize, Serialize};
 
 use crate::engine::mistralrs::{MistralRsModelConfig, MistralRsRuntimeConfig};
+use crate::engine::mold::{MoldModelConfig, MoldRuntimeConfig};
 use crate::{Error, ModelDescriptor, Result};
 
 /// Runtime-default configuration for a concrete inference implementation.
@@ -13,6 +14,9 @@ use crate::{Error, ModelDescriptor, Result};
 pub enum RuntimeImplementation {
     /// Defaults for the Mistral.rs runtime integration.
     MistralRs(MistralRsRuntimeConfig),
+
+    /// Defaults for the mold runtime integration.
+    Mold(MoldRuntimeConfig),
 }
 
 impl RuntimeImplementation {
@@ -20,12 +24,21 @@ impl RuntimeImplementation {
     pub fn runtime(&self) -> InferenceRuntime {
         match self {
             Self::MistralRs(_) => InferenceRuntime::MistralRs,
+            Self::Mold(_) => InferenceRuntime::Mold,
         }
     }
 
     pub(crate) fn as_mistralrs(&self) -> Option<&MistralRsRuntimeConfig> {
         match self {
             Self::MistralRs(config) => Some(config),
+            Self::Mold(_) => None,
+        }
+    }
+
+    pub(crate) fn as_mold(&self) -> Option<&MoldRuntimeConfig> {
+        match self {
+            Self::MistralRs(_) => None,
+            Self::Mold(config) => Some(config),
         }
     }
 }
@@ -36,6 +49,9 @@ impl RuntimeImplementation {
 pub enum ModelRuntimeImplementation {
     /// Mistral.rs-specific model binding configuration.
     MistralRs(MistralRsModelConfig),
+
+    /// mold-specific model binding configuration.
+    Mold(MoldModelConfig),
 }
 
 impl ModelRuntimeImplementation {
@@ -43,12 +59,21 @@ impl ModelRuntimeImplementation {
     pub fn runtime(&self) -> InferenceRuntime {
         match self {
             Self::MistralRs(_) => InferenceRuntime::MistralRs,
+            Self::Mold(_) => InferenceRuntime::Mold,
         }
     }
 
     pub(crate) fn as_mistralrs(&self) -> Option<&MistralRsModelConfig> {
         match self {
             Self::MistralRs(config) => Some(config),
+            Self::Mold(_) => None,
+        }
+    }
+
+    pub(crate) fn as_mold(&self) -> Option<&MoldModelConfig> {
+        match self {
+            Self::MistralRs(_) => None,
+            Self::Mold(config) => Some(config),
         }
     }
 }

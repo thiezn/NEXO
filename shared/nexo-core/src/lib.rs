@@ -37,7 +37,8 @@ pub use inference::{
     GenerateStarted, GenerationPromptPolicy, ImageGenerationRequest, ImageGenerationResponse,
     ImageGenerationSize, InferenceErrorCode, InferenceFailure, InferenceRequest, InferenceResponse,
     InferenceStream, OutputConstraint, PerformanceMetrics, Retryability, SamplingConfig,
-    SpecialTokenPolicy, SpeechGenerationRequest, SpeechGenerationResponse, StreamingMode,
+    SpecialTokenPolicy, SpeechGenerationRequest, SpeechGenerationResponse, SpeechLanguage,
+    StreamingMode,
     TokenUsage, TokenizationInput, TokenizationRequest, TokenizationResponse,
 };
 pub use message::{

@@ -20,7 +20,7 @@ pub use finish::FinishReason;
 pub use request::{
     AudioFormat, DetokenizationRequest, EmbedRequest, GenerationPromptPolicy,
     ImageGenerationRequest, ImageGenerationSize, InferenceRequest, SpecialTokenPolicy,
-    SpeechGenerationRequest, TokenizationInput, TokenizationRequest,
+    SpeechGenerationRequest, SpeechLanguage, TokenizationInput, TokenizationRequest,
 };
 pub use response::{
     DetokenizationResponse, EmbeddingResponse, EmbeddingVector, GenerateChunk, GenerateCompleted,

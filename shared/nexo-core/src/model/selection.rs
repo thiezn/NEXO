@@ -15,6 +15,9 @@ pub enum InferenceRuntime {
 
     /// The Mistral.rs runtime integration.
     MistralRs,
+
+    /// The mold runtime integration.
+    Mold,
 }
 
 /// Describes how a caller wants a model to be selected.

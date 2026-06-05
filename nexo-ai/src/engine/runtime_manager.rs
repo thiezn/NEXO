@@ -9,6 +9,8 @@ use crate::{
     Error, InferenceEngineConfig, RegisteredModelConfig, Result, RuntimeConfig, StaticModelRegistry,
 };
 
+use super::any_tts::{AnyTtsRuntime, internal_runtime_kind};
+use super::mold::MoldRuntime;
 use super::mistralrs::MistralRuntime;
 
 #[derive(Debug)]
@@ -39,7 +41,9 @@ struct ActiveModelRuntime {
 
 #[derive(Debug, Clone)]
 pub(crate) enum BackendRuntime {
+    AnyTts(AnyTtsRuntime),
     MistralRs(MistralRuntime),
+    Mold(MoldRuntime),
 }
 
 impl BackendRuntime {
@@ -49,7 +53,9 @@ impl BackendRuntime {
         request: InferenceRequest,
     ) -> Result<InferenceStream> {
         match self {
+            Self::AnyTts(runtime) => runtime.submit(descriptor, request).await,
             Self::MistralRs(runtime) => runtime.submit(descriptor, request).await,
+            Self::Mold(runtime) => runtime.submit(descriptor, request).await,
         }
     }
 }
@@ -90,33 +96,12 @@ impl RuntimeManager {
         model_id: &ModelId,
         runtime_kind: InferenceRuntime,
     ) -> Result<()> {
-        if runtime_kind == InferenceRuntime::Any {
-            return Err(Error::UnsupportedFeature {
-                feature: "load_model requires a concrete runtime".to_string(),
-            });
-        }
-
         let runtime_config = self.runtime_config.clone();
-        let config = match self.slots.get(model_id) {
-            Some(slot)
-                if matches!(
-                    &slot.state,
-                    ModelSlotState::Loaded(ActiveModelRuntime {
-                        runtime_kind: active_runtime_kind,
-                        ..
-                    }) if *active_runtime_kind == runtime_kind
-                ) =>
-            {
-                return Ok(());
-            }
-            Some(slot) if slot.config.supports_runtime(runtime_kind) => slot.config.clone(),
-            Some(_) => {
-                return Err(Error::UnsupportedFeature {
-                    feature: format!(
-                        "model `{model_id}` is not configured for runtime `{runtime_kind:?}`"
-                    ),
-                });
-            }
+        let (config, resolved_runtime_kind) = match self.slots.get(model_id) {
+            Some(slot) => (
+                slot.config.clone(),
+                Self::resolve_load_runtime_kind(&slot.config, runtime_kind)?,
+            ),
             None => {
                 return Err(Error::UnknownModel {
                     model_id: model_id.clone(),
@@ -124,10 +109,23 @@ impl RuntimeManager {
             }
         };
 
-        let runtime = Self::build_runtime(&runtime_config, &config, runtime_kind).await?;
+        if matches!(
+            self.slots.get(model_id),
+            Some(ModelSlot {
+                state: ModelSlotState::Loaded(ActiveModelRuntime {
+                    runtime_kind: active_runtime_kind,
+                    ..
+                }),
+                ..
+            }) if *active_runtime_kind == resolved_runtime_kind
+        ) {
+            return Ok(());
+        }
+
+        let runtime = Self::build_runtime(&runtime_config, &config, resolved_runtime_kind).await?;
         let slot = self.slot_mut(model_id)?;
         slot.state = ModelSlotState::Loaded(ActiveModelRuntime {
-            runtime_kind,
+            runtime_kind: resolved_runtime_kind,
             runtime,
             active_session_id: None,
         });
@@ -261,13 +259,59 @@ impl RuntimeManager {
         runtime_kind: InferenceRuntime,
     ) -> Result<BackendRuntime> {
         match runtime_kind {
-            InferenceRuntime::Any => Err(Error::UnsupportedFeature {
-                feature: "runtime selection must resolve to a concrete runtime".to_string(),
-            }),
+            InferenceRuntime::Any => match internal_runtime_kind(model) {
+                Some(_) => Ok(BackendRuntime::AnyTts(
+                    AnyTtsRuntime::from_model_config(model).await?,
+                )),
+                None => Err(Error::UnsupportedFeature {
+                    feature: "runtime selection must resolve to a concrete runtime".to_string(),
+                }),
+            },
             InferenceRuntime::MistralRs => Ok(BackendRuntime::MistralRs(
                 MistralRuntime::from_model_config(runtime_config, model).await?,
             )),
+            InferenceRuntime::Mold => Ok(BackendRuntime::Mold(
+                MoldRuntime::from_model_config(runtime_config, model).await?,
+            )),
         }
+    }
+
+    fn resolve_load_runtime_kind(
+        model: &RegisteredModelConfig,
+        requested_runtime_kind: InferenceRuntime,
+    ) -> Result<InferenceRuntime> {
+        if requested_runtime_kind != InferenceRuntime::Any {
+            return model
+                .supports_runtime(requested_runtime_kind)
+                .then_some(requested_runtime_kind)
+                .ok_or_else(|| Error::UnsupportedFeature {
+                    feature: format!(
+                        "model `{}` is not configured for runtime `{requested_runtime_kind:?}`",
+                        model.descriptor.id
+                    ),
+                });
+        }
+
+        if model.descriptor.runtime != InferenceRuntime::Any {
+            return Ok(model.descriptor.runtime);
+        }
+
+        if internal_runtime_kind(model).is_some() {
+            return Ok(InferenceRuntime::Any);
+        }
+
+        let mut runtimes = model.runtimes.iter().map(|runtime| runtime.runtime());
+        let Some(first_runtime) = runtimes.next() else {
+            return Err(Error::UnsupportedFeature {
+                feature: format!(
+                    "model `{}` does not expose any loadable runtime",
+                    model.descriptor.id
+                ),
+            });
+        };
+
+        let _ = runtimes;
+        Ok(first_runtime)
     }
 }
 
@@ -403,11 +447,76 @@ mod tests {
     }
 
     #[test]
+    fn load_model_resolves_any_for_single_runtime_model() {
+        let model = RegisteredModelConfig {
+            descriptor: test_descriptor("gemma"),
+            runtimes: vec![crate::ModelRuntimeImplementation::MistralRs(
+                crate::engine::mistralrs::MistralRsModelConfig {
+                    loader: crate::engine::mistralrs::MistralRsLoader::Auto(
+                        crate::engine::mistralrs::MistralRsAutoLoader {
+                            model_id: "gemma".to_string(),
+                            from_uqff: None,
+                            tokenizer_json: None,
+                            chat_template: None,
+                            jinja_explicit: None,
+                            dtype: crate::ModelDataType::Auto,
+                            hf_cache_path: None,
+                        },
+                    ),
+                    revision: None,
+                },
+            )],
+        };
+
+        assert_eq!(
+            RuntimeManager::resolve_load_runtime_kind(&model, InferenceRuntime::Any).unwrap(),
+            InferenceRuntime::MistralRs
+        );
+    }
+
+    #[test]
+    fn load_model_keeps_internal_runtime_private_behind_any() {
+        let mut descriptor = test_descriptor("kokoro-82m-tts");
+        descriptor.metadata.insert(
+            crate::engine::any_tts::INTERNAL_RUNTIME_KEY.to_string(),
+            serde_json::Value::String(crate::engine::any_tts::KOKORO_RUNTIME_ID.to_string()),
+        );
+        let model = RegisteredModelConfig {
+            descriptor,
+            runtimes: Vec::new(),
+        };
+
+        assert_eq!(
+            RuntimeManager::resolve_load_runtime_kind(&model, InferenceRuntime::Any).unwrap(),
+            InferenceRuntime::Any
+        );
+    }
+
+    fn test_descriptor(id: &str) -> ModelDescriptor {
+        ModelDescriptor {
+            id: id.into(),
+            display_name: id.to_string(),
+            provider: Some("test".to_string()),
+            runtime: InferenceRuntime::Any,
+            capabilities: vec![ModelCapability::TextGeneration],
+            modalities: ModelModalities {
+                input: vec![SupportedModality::Text],
+                output: vec![SupportedModality::Text],
+            },
+            role_strategy: RoleStrategy::Default,
+            context_window_tokens: Some(4096),
+            max_output_tokens: Some(1024),
+            metadata: MetadataMap::new(),
+        }
+    }
+
+    #[test]
     fn supports_selection_checks_required_capabilities() {
         let descriptor = ModelDescriptor {
             id: ModelId::from("chat"),
             display_name: "chat".to_string(),
             provider: Some("test".to_string()),
+            runtime: InferenceRuntime::Any,
             capabilities: vec![ModelCapability::TextGeneration],
             modalities: ModelModalities {
                 input: vec![SupportedModality::Text],

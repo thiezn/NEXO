@@ -156,6 +156,7 @@ mod tests {
             .runtime(InferenceRuntime::MistralRs)
             .and_then(|runtime| match runtime {
                 RuntimeImplementation::MistralRs(config) => Some(config),
+                _ => None,
             })
             .unwrap()
     }
