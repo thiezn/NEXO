@@ -14,7 +14,10 @@ use nexo_core::{
 };
 use nexo_model_mgmt::resolve_model_storage_dir;
 
-use super::{MoldFlux2Loader, MoldLoadStrategy as ConfigLoadStrategy, MoldLoader, MoldModelConfig, MoldRuntimeConfig};
+use super::{
+    MoldFlux2Loader, MoldLoadStrategy as ConfigLoadStrategy, MoldLoader, MoldModelConfig,
+    MoldRuntimeConfig,
+};
 use crate::{Error, RegisteredModelConfig, Result, RuntimeConfig};
 
 const DEFAULT_FLUX2_STEPS: u32 = 4;
@@ -37,7 +40,7 @@ impl MoldRuntime {
         base_runtime_config: &RuntimeConfig,
         model: &RegisteredModelConfig,
     ) -> Result<Self> {
-        let runtime_config = mold_runtime_config(base_runtime_config)?.clone();
+        let runtime_config = mold_runtime_config(base_runtime_config);
         let model_config = mold_model_config(model)?.clone();
         let model_name = model.descriptor.id.to_string();
 
@@ -142,7 +145,9 @@ fn build_flux2_paths_from_dir(model_dir: &Path) -> Result<MoldModelPaths> {
 
     let vae = first_existing([
         model_dir.join("ae.safetensors"),
-        model_dir.join("vae").join("diffusion_pytorch_model.safetensors"),
+        model_dir
+            .join("vae")
+            .join("diffusion_pytorch_model.safetensors"),
     ])
     .ok_or_else(|| missing_path_error("Flux.2 VAE", model_dir))?;
 
@@ -184,8 +189,7 @@ fn collect_safetensors(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut paths = fs::read_dir(dir)?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| {
-            path.extension().and_then(|ext| ext.to_str()) == Some("safetensors")
-                && path.is_file()
+            path.extension().and_then(|ext| ext.to_str()) == Some("safetensors") && path.is_file()
         })
         .collect::<Vec<_>>();
     paths.sort();
@@ -355,13 +359,12 @@ fn request_kind(request: &InferenceRequest) -> &'static str {
     }
 }
 
-fn mold_runtime_config(runtime_config: &RuntimeConfig) -> Result<&MoldRuntimeConfig> {
+fn mold_runtime_config(runtime_config: &RuntimeConfig) -> MoldRuntimeConfig {
     runtime_config
         .runtime(InferenceRuntime::Mold)
         .and_then(|implementation| implementation.as_mold())
-        .ok_or_else(|| Error::UnsupportedFeature {
-            feature: "mold runtime configuration is missing".to_string(),
-        })
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn mold_model_config(model: &RegisteredModelConfig) -> Result<&MoldModelConfig> {
@@ -412,7 +415,10 @@ mod tests {
 
         assert_eq!(paths.transformer_shards.len(), 2);
         assert_eq!(paths.transformer, paths.transformer_shards[0]);
-        assert_eq!(paths.vae, dir.join("vae/diffusion_pytorch_model.safetensors"));
+        assert_eq!(
+            paths.vae,
+            dir.join("vae/diffusion_pytorch_model.safetensors")
+        );
         assert_eq!(
             paths.text_tokenizer.as_deref(),
             Some(dir.join("tokenizer/tokenizer.json").as_path())
@@ -458,7 +464,12 @@ mod tests {
         let request = ImageGenerationRequest {
             request_id: None,
             session_id: None,
-            model: nexo_core::ModelSelection::default(),
+            model: nexo_core::ModelSelection {
+                specific_model: None,
+                required_capabilities: Vec::new(),
+                preferred_capabilities: Vec::new(),
+                runtime_preference: nexo_core::InferenceRuntime::AnyTts,
+            },
             prompt: "a test image".to_string(),
             negative_prompt: None,
             size: nexo_core::ImageGenerationSize {
@@ -479,5 +490,18 @@ mod tests {
         assert_eq!(mapped.guidance, 0.0);
         assert_eq!(mapped.batch_size, 2);
         assert_eq!(mapped.output_format, Some(mold_ai_core::OutputFormat::Png));
+    }
+
+    #[test]
+    fn missing_runtime_config_uses_mold_defaults() {
+        let runtime = mold_runtime_config(&RuntimeConfig {
+            scheduler: crate::engine::config::SchedulerPolicy::default(),
+            runtimes: Vec::new(),
+        });
+
+        assert_eq!(runtime.gpu_ordinal, 0);
+        assert_eq!(runtime.load_strategy, ConfigLoadStrategy::Sequential);
+        assert!(!runtime.offload);
+        assert_eq!(runtime.qwen3_variant, None);
     }
 }

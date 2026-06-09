@@ -430,7 +430,7 @@ mod tests {
                 specific_model: Some(ModelId::from("chat")),
                 required_capabilities: vec![ModelCapability::TextGeneration],
                 preferred_capabilities: Vec::new(),
-                runtime_preference: Default::default(),
+                runtime_preference: InferenceRuntime::AnyTts,
             },
             conversation: Conversation {
                 messages: Vec::new(),
@@ -447,9 +447,9 @@ mod tests {
     }
 
     #[test]
-    fn load_model_resolves_any_for_single_runtime_model() {
+    fn load_model_resolves_descriptor_runtime_for_single_runtime_model() {
         let model = RegisteredModelConfig {
-            descriptor: test_descriptor("gemma"),
+            descriptor: test_descriptor("gemma", InferenceRuntime::MistralRs),
             runtimes: vec![crate::ModelRuntimeImplementation::MistralRs(
                 crate::engine::mistralrs::MistralRsModelConfig {
                     loader: crate::engine::mistralrs::MistralRsLoader::Auto(
@@ -474,30 +474,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn load_model_keeps_internal_runtime_private_behind_any() {
-        let mut descriptor = test_descriptor("kokoro-82m-tts");
-        descriptor.metadata.insert(
-            crate::engine::any_tts::INTERNAL_RUNTIME_KEY.to_string(),
-            serde_json::Value::String(crate::engine::any_tts::KOKORO_RUNTIME_ID.to_string()),
-        );
-        let model = RegisteredModelConfig {
-            descriptor,
-            runtimes: Vec::new(),
-        };
-
-        assert_eq!(
-            RuntimeManager::resolve_load_runtime_kind(&model, InferenceRuntime::AnyTts).unwrap(),
-            InferenceRuntime::AnyTts
-        );
-    }
-
-    fn test_descriptor(id: &str) -> ModelDescriptor {
+    fn test_descriptor(id: &str, runtime: InferenceRuntime) -> ModelDescriptor {
         ModelDescriptor {
             id: id.into(),
             display_name: id.to_string(),
             provider: Some("test".to_string()),
-            runtime: InferenceRuntime::AnyTts,
+            runtime,
             capabilities: vec![ModelCapability::TextGeneration],
             modalities: ModelModalities {
                 input: vec![SupportedModality::Text],
@@ -531,7 +513,7 @@ mod tests {
             specific_model: Some(ModelId::from("chat")),
             required_capabilities: vec![ModelCapability::TextGeneration],
             preferred_capabilities: Vec::new(),
-            runtime_preference: Default::default(),
+            runtime_preference: InferenceRuntime::AnyTts,
         };
 
         assert!(supports_selection(&descriptor, &selection));

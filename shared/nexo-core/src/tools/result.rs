@@ -1,6 +1,5 @@
-use serde::{Deserialize, Serialize};
-
 use crate::ids::ToolCallId;
+use serde::{Deserialize, Serialize};
 
 /// Indicates whether a tool execution succeeded or failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

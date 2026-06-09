@@ -8,12 +8,18 @@ use nexo_core::{
     MediaSource, ModelDescriptor, ModelId, RequestId, Retryability, SpeechLanguage,
 };
 use nexo_model_mgmt::resolve_model_storage_dir;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Error, RegisteredModelConfig, Result};
+use crate::{Error, ModelRuntimeImplementation, RegisteredModelConfig, Result};
 
-pub(crate) const INTERNAL_RUNTIME_KEY: &str = "internal_runtime";
-pub(crate) const KOKORO_RUNTIME_ID: &str = "any_tts_kokoro";
+/// AnyTTS-specific configuration for a model binding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "engine", rename_all = "snake_case")]
+pub enum AnyTtsModelConfig {
+    /// Kokoro TTS model binding.
+    Kokoro,
+}
 
 type SharedTtsModel = Arc<dyn TtsModel>;
 
@@ -96,15 +102,12 @@ impl AnyTtsRuntime {
 }
 
 pub(crate) fn internal_runtime_kind(model: &RegisteredModelConfig) -> Option<InternalRuntimeKind> {
-    match model
-        .descriptor
-        .metadata
-        .get(INTERNAL_RUNTIME_KEY)
-        .and_then(Value::as_str)
-    {
-        Some(KOKORO_RUNTIME_ID) => Some(InternalRuntimeKind::Kokoro),
-        _ => None,
-    }
+    model.runtimes.iter().find_map(|runtime| match runtime {
+        ModelRuntimeImplementation::AnyTts(AnyTtsModelConfig::Kokoro) => {
+            Some(InternalRuntimeKind::Kokoro)
+        }
+        ModelRuntimeImplementation::MistralRs(_) | ModelRuntimeImplementation::Mold(_) => None,
+    })
 }
 
 async fn load_kokoro_model(model: &RegisteredModelConfig) -> Result<AnyTtsRuntime> {
@@ -231,7 +234,12 @@ mod tests {
         let request = SpeechGenerationRequest {
             request_id: None,
             session_id: None,
-            model: nexo_core::ModelSelection::default(),
+            model: nexo_core::ModelSelection {
+                specific_model: None,
+                required_capabilities: Vec::new(),
+                preferred_capabilities: Vec::new(),
+                runtime_preference: nexo_core::InferenceRuntime::AnyTts,
+            },
             text: "hello".to_string(),
             language: SpeechLanguage::Dutch,
             voice: None,
@@ -246,7 +254,7 @@ mod tests {
 
     #[test]
     fn internal_runtime_kind_detects_kokoro_backend() {
-        let mut descriptor = ModelDescriptor {
+        let descriptor = ModelDescriptor {
             id: "kokoro-82m-tts".into(),
             display_name: "Kokoro 82M TTS".to_string(),
             provider: Some("hexgrad".to_string()),
@@ -261,15 +269,11 @@ mod tests {
             max_output_tokens: None,
             metadata: Default::default(),
         };
-        descriptor.metadata.insert(
-            INTERNAL_RUNTIME_KEY.to_string(),
-            Value::String(KOKORO_RUNTIME_ID.to_string()),
-        );
 
         assert_eq!(
             internal_runtime_kind(&RegisteredModelConfig {
                 descriptor,
-                runtimes: Vec::new(),
+                runtimes: vec![ModelRuntimeImplementation::AnyTts(AnyTtsModelConfig::Kokoro)],
             }),
             Some(InternalRuntimeKind::Kokoro)
         );

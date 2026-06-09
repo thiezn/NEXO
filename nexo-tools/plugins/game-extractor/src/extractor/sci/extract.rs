@@ -56,7 +56,7 @@ pub fn extract_game(
         resource::ResourceManager::new(game).context("Failed to initialize resource manager")?;
 
     let counts = res_mgr.resource_counts();
-    let mut sorted_counts: Vec<_> = counts.iter().collect();
+    let mut sorted_counts = Vec::from_iter(counts);
     sorted_counts.sort_by_key(|(name, _)| *name);
     for (name, count) in &sorted_counts {
         log.push(format!("{}: {}: {}", prefix, name, count));

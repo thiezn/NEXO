@@ -2,5 +2,7 @@
 
 /// IO tool definitions and executor implementation.
 pub mod tools;
+pub use tools::{BashTool, EditTool, ReadTool, WebFetchTool};
+
 /// Shared text/content transformation helpers used by IO tools.
-pub mod transform;
+pub(crate) mod transform;

@@ -10,8 +10,6 @@
 
 /// Shared utility types such as timestamps and metadata maps.
 pub mod common;
-/// Cross-crate service contracts implemented by runtime crates.
-pub mod contracts;
 /// Shared error and result types used by crate-level traits.
 pub mod error;
 /// Strongly typed identifiers used across the Nexo workspace.
@@ -28,7 +26,6 @@ pub mod run;
 pub mod tools;
 
 pub use common::{MetadataMap, PageInfo, PageRequest, Timestamp};
-pub use contracts::{ModelRegistry, ToolExecutor};
 pub use error::{Error, Result};
 pub use ids::{ModelId, NodeId, RequestId, RoundId, RunId, SessionId, ToolCallId};
 pub use inference::{
@@ -38,23 +35,23 @@ pub use inference::{
     ImageGenerationSize, InferenceErrorCode, InferenceFailure, InferenceRequest, InferenceResponse,
     InferenceStream, OutputConstraint, PerformanceMetrics, Retryability, SamplingConfig,
     SpecialTokenPolicy, SpeechGenerationRequest, SpeechGenerationResponse, SpeechLanguage,
-    StreamingMode,
-    TokenUsage, TokenizationInput, TokenizationRequest, TokenizationResponse,
+    StreamingMode, TokenUsage, TokenizationInput, TokenizationRequest, TokenizationResponse,
 };
 pub use message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
     MessageRole, TextPart, VideoInput,
 };
 pub use model::{
-    InferenceRuntime, ModelCapability, ModelDescriptor, ModelModalities, ModelRuntimeState,
-    ModelSelection, ReasoningEffort, ReasoningSettings, RoleStrategy, SupportedModality,
-    ThinkingMode,
+    InferenceRuntime, ModelCapability, ModelDescriptor, ModelModalities, ModelRegistry,
+    ModelRuntimeState, ModelSelection, ReasoningEffort, ReasoningSettings, RoleStrategy,
+    SupportedModality, ThinkingMode,
 };
 pub use run::{
     RoundEvent, RoundStatus, RoundStatusUpdate, RoundSummary, RunEvent, RunStatus, RunStatusUpdate,
     RunSummary,
 };
 pub use tools::{
-    ToolCall, ToolCallDelta, ToolChoice, ToolDefinition, ToolExecutionConstraints, ToolParallelism,
-    ToolRegistry, ToolResult, ToolResultContent, ToolResultStatus, ToolSideEffectLevel,
+    Tool, ToolCall, ToolCallDelta, ToolChoice, ToolDefinition, ToolExecutionConstraints,
+    ToolParallelism, ToolRegistry, ToolResult, ToolResultContent, ToolResultStatus,
+    ToolSideEffectLevel,
 };

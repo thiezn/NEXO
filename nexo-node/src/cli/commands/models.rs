@@ -78,7 +78,7 @@ fn run_list(context: &mut CommandContext) -> Result<ExitCode> {
     table.set_header([
         "ID",
         "FAMILY",
-        "BACKEND",
+        "RUNTIMES",
         "CAPABILITIES",
         "SIZE",
         "DOWNLOADED",
@@ -96,7 +96,7 @@ fn run_list(context: &mut CommandContext) -> Result<ExitCode> {
         table.add_row([
             entry.id,
             entry.family,
-            entry.backend,
+            entry.runtime_bindings.join(","),
             capabilities,
             format!("{:.1}G", entry.size_gb),
             if entry.is_downloaded {

@@ -145,7 +145,7 @@ fn build_gateway_tools(git_storage: Option<&Arc<GitStorage>>) -> ToolRegistry {
         }
     }
 
-    for definition in nexo_io::tools::all_tools() {
+    for definition in nexo_io::all_tools() {
         register_gateway_tool(
             &mut gateway_tools,
             definition,

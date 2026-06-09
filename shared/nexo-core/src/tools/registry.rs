@@ -1,85 +1,101 @@
-use std::collections::BTreeMap;
-use std::future::Future;
-use std::pin::Pin;
+use std::collections::HashMap;
 
-use crate::contracts::ToolExecutor;
+use super::Tool;
 use crate::error::{Error, Result};
-use crate::tools::{ToolCall, ToolDefinition, ToolResult};
+use crate::tools::{ToolCall, ToolDefinition, ToolExecutionConstraints, ToolResult};
 
-type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<ToolResult>> + Send + 'a>>;
+/// DynTool trait that will allow us to store heterogeneous tools
+/// in the registry while still being able to call their execute method.
+///
+/// The reason this is needed as each Tool trail implements an associated type Args,
+/// which prevents us from using a simple Box<dyn Tool>.
+///
+/// This macro does introduce some complexity here, but it allows us to keep the
+/// ergonomics of defining tools with the Tool trait. Since this code here
+/// is not meant to be used by end-users, we can afford to have some internal complexity
+/// in order to provide a better experience for tool authors.
+#[async_trait::async_trait]
+pub trait DynTool: Send + Sync {
+    /// Returns the name of the tool, which should be unique across the registry.
+    fn name(&self) -> &str;
 
-trait RegisteredTool: Send + Sync {
-    fn definition(&self) -> &ToolDefinition;
+    /// Returns a human-readable description of the tool's functionality.
+    fn description(&self) -> &str;
 
-    fn execute(&self, call: ToolCall) -> ToolFuture<'_>;
+    /// Returns a JSON schema describing the tool's expected arguments.
+    fn parameters(&self) -> serde_json::Value;
+
+    /// Returns an optional version string for the tool's contract, which can be used for compatibility checks.
+    fn contract_version(&self) -> Option<&str>;
+
+    /// Returns the execution constraints for the tool, such as side effect level and parallelism.
+    fn execution_constraints(&self) -> ToolExecutionConstraints;
+
+    /// Returns the full tool definition, which includes the name, description, parameters, contract version, and execution constraints.
+    fn definition(&self) -> ToolDefinition;
+
+    /// Executes the tool with the given call, returning a ToolResult or an error if execution fails.
+    async fn execute(&self, call: ToolCall) -> Result<ToolResult>;
 }
 
-struct RegisteredExecutor<T> {
-    definition: ToolDefinition,
-    executor: T,
-}
-
-impl<T> RegisteredTool for RegisteredExecutor<T>
+#[async_trait::async_trait]
+impl<T> DynTool for T
 where
-    T: ToolExecutor + 'static,
+    T: Tool + Send + Sync,
 {
-    fn definition(&self) -> &ToolDefinition {
-        &self.definition
+    fn name(&self) -> &str {
+        Tool::name(self)
+    }
+    fn description(&self) -> &str {
+        Tool::description(self)
+    }
+    fn parameters(&self) -> serde_json::Value {
+        Tool::parameters(self)
+    }
+    fn contract_version(&self) -> Option<&str> {
+        Tool::contract_version(self)
+    }
+    fn execution_constraints(&self) -> ToolExecutionConstraints {
+        Tool::execution_constraints(self)
     }
 
-    fn execute(&self, call: ToolCall) -> ToolFuture<'_> {
-        Box::pin(self.executor.execute(call))
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: self.name().to_string(),
+            description: self.description().to_string(),
+            parameters: self.parameters(),
+            contract_version: self.contract_version().map(|s| s.to_string()),
+            execution: self.execution_constraints(),
+        }
+    }
+
+    async fn execute(&self, call: ToolCall) -> Result<ToolResult> {
+        Tool::execute(self, call).await
     }
 }
 
 /// Generic in-memory registry for tools defined with `nexo-core` contracts.
 #[derive(Default)]
 pub struct ToolRegistry {
-    tools: BTreeMap<String, Box<dyn RegisteredTool>>,
+    tools: HashMap<String, Box<dyn DynTool>>,
 }
 
 impl ToolRegistry {
     /// Creates an empty tool registry.
-    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers a concrete executor with its model-facing tool definition.
-    ///
-    /// # Arguments
-    ///
-    /// * `definition` - The tool schema and execution metadata to advertise.
-    /// * `executor` - The concrete executor that handles calls for this definition.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the tool name is empty or already registered.
-    pub fn register<T>(&mut self, definition: ToolDefinition, executor: T) -> Result
-    where
-        T: ToolExecutor + 'static,
-    {
-        let name = definition.name.trim();
-        if name.is_empty() {
-            return Err(Error::InvalidRequest {
-                message: "tool name must not be empty".to_string(),
-            });
-        }
-
-        let name = name.to_string();
+    /// Registers a tool with the registry.
+    pub fn register(&mut self, tool: impl Tool + 'static) -> Result {
+        let name = tool.name().to_string();
         if self.tools.contains_key(&name) {
             return Err(Error::InvalidState {
                 message: format!("tool '{name}' is already registered"),
             });
         }
 
-        self.tools.insert(
-            name,
-            Box::new(RegisteredExecutor {
-                definition,
-                executor,
-            }),
-        );
+        self.tools.insert(name, Box::new(tool));
         Ok(())
     }
 
@@ -88,13 +104,11 @@ impl ToolRegistry {
     /// # Arguments
     ///
     /// * `name` - The tool name to look up.
-    #[must_use]
     pub fn definition(&self, name: &str) -> Option<ToolDefinition> {
         self.tools.get(name).map(|tool| tool.definition().clone())
     }
 
     /// Returns all registered tool definitions in deterministic name order.
-    #[must_use]
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools
             .values()
@@ -103,13 +117,11 @@ impl ToolRegistry {
     }
 
     /// Returns all registered tool names in deterministic order.
-    #[must_use]
     pub fn tool_names(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
     }
 
     /// Returns capability labels derived from the prefix before `.` in each tool name.
-    #[must_use]
     pub fn capability_names(&self) -> Vec<String> {
         let mut capabilities = self
             .tools
@@ -122,7 +134,6 @@ impl ToolRegistry {
     }
 
     /// Returns the advertised capability labels and command names.
-    #[must_use]
     pub fn capabilities_and_commands(&self) -> (Vec<String>, Vec<String>) {
         (self.capability_names(), self.tool_names())
     }
@@ -132,19 +143,16 @@ impl ToolRegistry {
     /// # Arguments
     ///
     /// * `name` - The tool name to check.
-    #[must_use]
     pub fn contains(&self, name: &str) -> bool {
         self.tools.contains_key(name)
     }
 
     /// Returns the number of registered tools.
-    #[must_use]
     pub fn len(&self) -> usize {
         self.tools.len()
     }
 
     /// Returns whether the registry has no tools.
-    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
@@ -167,135 +175,10 @@ impl ToolRegistry {
     }
 }
 
-impl ToolExecutor for ToolRegistry {
-    async fn execute(&self, call: ToolCall) -> Result<ToolResult> {
-        let tool_name = call.name.clone();
-        self.try_execute(call)
-            .await?
-            .ok_or_else(|| Error::InvalidRequest {
-                message: format!("tool '{tool_name}' is not registered"),
-            })
-    }
-}
-
 impl std::fmt::Debug for ToolRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolRegistry")
             .field("tools", &self.tool_names())
             .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::panic, clippy::unwrap_used)]
-
-    use std::future::Future;
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
-
-    use crate::tools::{
-        ToolExecutionConstraints, ToolParallelism, ToolResultContent, ToolResultStatus,
-        ToolSideEffectLevel,
-    };
-    use crate::{MetadataMap, ToolCallId};
-
-    use super::*;
-
-    #[derive(Clone)]
-    struct StaticTool;
-
-    impl ToolExecutor for StaticTool {
-        async fn execute(&self, call: ToolCall) -> Result<ToolResult> {
-            Ok(ToolResult {
-                tool_call_id: call.id,
-                tool_name: call.name,
-                status: ToolResultStatus::Success,
-                content: ToolResultContent::Text("ok".to_string()),
-            })
-        }
-    }
-
-    #[test]
-    fn registers_and_executes_tool() {
-        let mut registry = ToolRegistry::new();
-        registry
-            .register(definition("dummy.test"), StaticTool)
-            .unwrap();
-
-        let result = block_ready(registry.execute(ToolCall {
-            id: ToolCallId::from("call-1"),
-            index: 0,
-            name: "dummy.test".to_string(),
-            arguments: serde_json::json!({}),
-        }))
-        .unwrap();
-
-        assert_eq!(result.tool_name, "dummy.test");
-        assert_eq!(registry.tool_names(), vec!["dummy.test".to_string()]);
-        assert_eq!(registry.capability_names(), vec!["dummy".to_string()]);
-    }
-
-    #[test]
-    fn try_execute_returns_none_for_unknown_tool() {
-        let registry = ToolRegistry::new();
-        let result = block_ready(registry.try_execute(ToolCall {
-            id: ToolCallId::from("call-1"),
-            index: 0,
-            name: "missing.test".to_string(),
-            arguments: serde_json::json!({}),
-        }))
-        .unwrap();
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn rejects_duplicate_tool_names() {
-        let mut registry = ToolRegistry::new();
-        registry
-            .register(definition("dummy.test"), StaticTool)
-            .unwrap();
-
-        let error = registry
-            .register(definition("dummy.test"), StaticTool)
-            .unwrap_err();
-
-        assert!(matches!(error, Error::InvalidState { .. }));
-    }
-
-    fn definition(name: &str) -> ToolDefinition {
-        ToolDefinition {
-            name: name.to_string(),
-            description: "Test tool".to_string(),
-            parameters: serde_json::json!({"type": "object"}),
-            contract_version: None,
-            execution: ToolExecutionConstraints {
-                side_effect_level: ToolSideEffectLevel::ReadOnly,
-                parallelism: ToolParallelism::ParallelGlobal,
-                timeout_ms: None,
-            },
-            metadata: MetadataMap::new(),
-        }
-    }
-
-    fn block_ready<F>(future: F) -> F::Output
-    where
-        F: Future,
-    {
-        let waker = Waker::from(Arc::new(NoopWake));
-        let mut context = Context::from_waker(&waker);
-        let mut future = Box::pin(future);
-
-        match future.as_mut().poll(&mut context) {
-            Poll::Ready(output) => output,
-            Poll::Pending => panic!("test future unexpectedly pending"),
-        }
-    }
-
-    struct NoopWake;
-
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
     }
 }

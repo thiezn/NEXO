@@ -31,7 +31,6 @@ impl EchoTool {
             }),
             contract_version: None,
             execution: read_only_execution(),
-            metadata: MetadataMap::new(),
         }
     }
 }
@@ -77,7 +76,6 @@ impl PingTool {
             }),
             contract_version: None,
             execution: read_only_execution(),
-            metadata: MetadataMap::new(),
         }
     }
 }

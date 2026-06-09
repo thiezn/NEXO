@@ -28,23 +28,23 @@ pub async fn html_to_markdown(html: &str) -> String {
     md
 }
 
-/// Synchronous HTML to markdown conversion.
-///
-/// Uses `html2md::rewrite_html` for use in `spawn_blocking` contexts.
-pub fn html_to_markdown_sync(html: &str) -> String {
-    if html.trim().is_empty() {
-        return String::new();
-    }
+// /// Synchronous HTML to markdown conversion.
+// ///
+// /// Uses `html2md::rewrite_html` for use in `spawn_blocking` contexts.
+// pub fn html_to_markdown_sync(html: &str) -> String {
+//     if html.trim().is_empty() {
+//         return String::new();
+//     }
 
-    let md = html2md::rewrite_html(html, false);
-    let md = post_process(&md);
+//     let md = html2md::rewrite_html(html, false);
+//     let md = post_process(&md);
 
-    if md.trim().is_empty() {
-        return fallback_strip_tags(html);
-    }
+//     if md.trim().is_empty() {
+//         return fallback_strip_tags(html);
+//     }
 
-    md
-}
+//     md
+// }
 
 /// Normalize excessive blank lines and trim.
 fn post_process(text: &str) -> String {
@@ -110,13 +110,6 @@ mod tests {
     async fn empty_input() {
         assert_eq!(html_to_markdown("").await, "");
         assert_eq!(html_to_markdown("   ").await, "");
-    }
-
-    #[test]
-    fn sync_converts_html() {
-        let html = "<p>Hello</p>";
-        let result = html_to_markdown_sync(html);
-        assert!(result.contains("Hello"));
     }
 
     #[test]

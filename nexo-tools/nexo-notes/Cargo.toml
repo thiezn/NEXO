@@ -10,8 +10,9 @@ serde_json = { workspace = true }
 yaml_serde = { workspace = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
-chrono = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
+schemars = { workspace = true }
 
 [lints]
 workspace = true

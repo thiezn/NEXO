@@ -7,7 +7,7 @@ use crate::message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
     MessageRole, TextPart,
 };
-use crate::model::{ModelSelection, ReasoningSettings};
+use crate::model::{InferenceRuntime, ModelSelection, ReasoningSettings};
 use crate::tools::{ToolChoice, ToolDefinition};
 
 use super::{OutputConstraint, SamplingConfig, StreamingMode};
@@ -189,7 +189,7 @@ impl GenerateRequest {
                     ModelCapability::ImageInput,
                 ],
                 preferred_capabilities: Vec::new(),
-                runtime_preference: Default::default(),
+                runtime_preference: InferenceRuntime::AnyTts,
             },
             conversation: Conversation {
                 messages: vec![ConversationMessage {
@@ -242,7 +242,7 @@ impl GenerateRequest {
                     ModelCapability::AudioInput,
                 ],
                 preferred_capabilities: Vec::new(),
-                runtime_preference: Default::default(),
+                runtime_preference: InferenceRuntime::AnyTts,
             },
             conversation: Conversation {
                 messages: vec![ConversationMessage {

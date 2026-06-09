@@ -10,7 +10,12 @@ use nexo_core::{
 };
 use serde_json::Value;
 
-use crate::manifest::{ModelComponent, ModelFile, ModelFileSelector, ModelManifest};
+use crate::manifest::{
+    AnyTtsManifestBinding, AnyTtsManifestEngine, ManifestModelDataType, ManifestRuntimeBinding,
+    MistralRsAutoManifestLoader, MistralRsGgufManifestLoader, MistralRsManifestBinding,
+    MistralRsManifestLoader, MistralRsSpeechManifestLoader, ModelComponent, ModelFile,
+    ModelFileSelector, ModelManifest, MoldManifestBinding, MoldManifestLoader,
+};
 use crate::paths::default_models_dir;
 
 /// Printable model entry with local download status.
@@ -24,8 +29,8 @@ pub struct ModelEntry {
     pub provider: Option<String>,
     /// Model family identifier.
     pub family: String,
-    /// Loader/runtime backend label.
-    pub backend: String,
+    /// Runtime binding labels declared by the model manifest.
+    pub runtime_bindings: Vec<String>,
     /// Declared model capabilities.
     pub capabilities: Vec<ModelCapability>,
     /// Declared input and output modalities.
@@ -115,7 +120,11 @@ pub fn list_models() -> Vec<ModelEntry> {
                 display_name: manifest.display_name().to_string(),
                 provider: manifest.descriptor.provider.clone(),
                 family: metadata_string(&manifest.descriptor.metadata, "family"),
-                backend: manifest.backend.clone(),
+                runtime_bindings: manifest
+                    .runtime_bindings
+                    .iter()
+                    .map(|binding| binding.label().to_string())
+                    .collect(),
                 capabilities: manifest.descriptor.capabilities.clone(),
                 modalities: manifest.descriptor.modalities.clone(),
                 size_gb: manifest.size_gb,
@@ -162,6 +171,51 @@ const UQFF_VARIANTS: &[(&str, &str)] = &[
     ("q8_0", "Q8_0"),
 ];
 
+fn mistral_auto_binding(
+    from_uqff: Option<Vec<String>>,
+    dtype: ManifestModelDataType,
+) -> ManifestRuntimeBinding {
+    ManifestRuntimeBinding::MistralRs(MistralRsManifestBinding {
+        loader: MistralRsManifestLoader::Auto(MistralRsAutoManifestLoader { from_uqff, dtype }),
+        revision: None,
+    })
+}
+
+fn mistral_gguf_binding(filenames: &[&str]) -> ManifestRuntimeBinding {
+    ManifestRuntimeBinding::MistralRs(MistralRsManifestBinding {
+        loader: MistralRsManifestLoader::Gguf(MistralRsGgufManifestLoader {
+            quantized_filenames: filenames.iter().map(|filename| (*filename).to_string()).collect(),
+            dtype: ManifestModelDataType::Auto,
+        }),
+        revision: None,
+    })
+}
+
+fn mistral_speech_binding(
+    dac_subdir: Option<&str>,
+    dtype: ManifestModelDataType,
+) -> ManifestRuntimeBinding {
+    ManifestRuntimeBinding::MistralRs(MistralRsManifestBinding {
+        loader: MistralRsManifestLoader::Speech(MistralRsSpeechManifestLoader {
+            dac_subdir: dac_subdir.map(str::to_string),
+            dtype,
+        }),
+        revision: None,
+    })
+}
+
+fn any_tts_kokoro_binding() -> ManifestRuntimeBinding {
+    ManifestRuntimeBinding::AnyTts(AnyTtsManifestBinding {
+        engine: AnyTtsManifestEngine::Kokoro,
+    })
+}
+
+fn mold_flux2_binding() -> ManifestRuntimeBinding {
+    ManifestRuntimeBinding::Mold(MoldManifestBinding {
+        loader: MoldManifestLoader::Flux2,
+    })
+}
+
 fn gemma_4_e2b_it_q5_manifest() -> ModelManifest {
     let gguf_repo = "unsloth/gemma-4-e2b-it-GGUF";
     let orig_repo = "google/gemma-4-E2B-it";
@@ -193,7 +247,10 @@ fn gemma_4_e2b_it_q5_manifest() -> ModelManifest {
             "gguf",
             None,
         ),
-        backend: "mistralrs-gguf".to_string(),
+        runtime_bindings: vec![mistral_gguf_binding(&[
+            "gemma-4-E2B-it-Q5_K_M.gguf",
+            "mmproj-F16.gguf",
+        ])],
         size_gb: 4.1,
         files: vec![
             file_exact(
@@ -253,7 +310,10 @@ fn gemma_4_26b_a4b_it_q4_manifest() -> ModelManifest {
             "gguf",
             None,
         ),
-        backend: "mistralrs-gguf".to_string(),
+        runtime_bindings: vec![mistral_gguf_binding(&[
+            "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+            "mmproj-F16.gguf",
+        ])],
         size_gb: 17.0,
         files: vec![
             file_exact(
@@ -322,7 +382,7 @@ fn gemma_4_12b_it_manifest() -> ModelManifest {
             "safetensors",
             None,
         ),
-        backend: "mistralrs-gemma4".to_string(),
+        runtime_bindings: vec![mistral_auto_binding(None, ManifestModelDataType::Auto)],
         size_gb: 26.0,
         files,
     }
@@ -392,7 +452,6 @@ fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
                 output_modalities: vec![SupportedModality::Text],
                 description: "Mistral UQFF Gemma 4 artifact set with quantized shards and residual tensors.",
                 source_model,
-                backend: "mistralrs-uqff",
                 size_gb,
                 hf_repo: &uqff_repo,
                 variant_id,
@@ -446,7 +505,6 @@ fn qwen_3_5_apple_metal_manifests() -> Vec<ModelManifest> {
                 output_modalities: vec![SupportedModality::Text],
                 description: "Mistral UQFF Qwen 3.5 artifact set intended for Apple Metal AFQ execution.",
                 source_model,
-                backend: "mistralrs-uqff-metal",
                 size_gb,
                 hf_repo: &uqff_repo,
                 variant_id,
@@ -476,7 +534,6 @@ struct UqffManifestSpec<'a> {
     output_modalities: Vec<SupportedModality>,
     description: &'a str,
     source_model: &'a str,
-    backend: &'a str,
     size_gb: f32,
     hf_repo: &'a str,
     variant_id: &'a str,
@@ -500,7 +557,10 @@ fn uqff_variant_manifest(spec: UqffManifestSpec<'_>) -> ModelManifest {
             "uqff",
             None,
         ),
-        backend: spec.backend.to_string(),
+        runtime_bindings: vec![mistral_auto_binding(
+            Some(vec![format!("{}-", spec.variant_id)]),
+            ManifestModelDataType::Auto,
+        )],
         size_gb: spec.size_gb,
         files: files_for_uqff_variant(spec.hf_repo, spec.variant_id, spec.gated),
     }
@@ -527,7 +587,7 @@ fn voxtral_mini_asr_stt_manifest() -> ModelManifest {
             "safetensors",
             None,
         ),
-        backend: "mistralrs-voxtral".to_string(),
+        runtime_bindings: vec![mistral_auto_binding(None, ManifestModelDataType::Auto)],
         size_gb: 7.0,
         files: files_for_chat_snapshot(repo, false),
     }
@@ -551,7 +611,10 @@ fn dia_1_6b_tts_manifest() -> ModelManifest {
             "safetensors",
             None,
         ),
-        backend: "mistralrs-dia".to_string(),
+        runtime_bindings: vec![mistral_speech_binding(
+            Some("dac"),
+            ManifestModelDataType::F16,
+        )],
         size_gb: 3.5,
         files: vec![
             file_exact(ModelComponent::Config, repo, "config.json", None, false),
@@ -591,7 +654,7 @@ fn kokoro_82m_tts_manifest() -> ModelManifest {
             "pytorch",
             None,
         ),
-        backend: "any-tts-kokoro".to_string(),
+        runtime_bindings: vec![any_tts_kokoro_binding()],
         size_gb: 0.4,
         files: vec![
             file_exact(ModelComponent::Config, repo, "config.json", None, false),
@@ -650,7 +713,7 @@ fn flux_2_manifests() -> Vec<ModelManifest> {
             "diffusers",
             None,
         ),
-        backend: "mistralrs-flux".to_string(),
+        runtime_bindings: vec![mold_flux2_binding()],
         size_gb,
         files: files_for_hf_snapshot(repo, true),
     })
@@ -674,7 +737,7 @@ fn embedding_gemma_manifest() -> ModelManifest {
             "safetensors",
             Some(2048),
         ),
-        backend: "mistralrs-embedding".to_string(),
+        runtime_bindings: vec![mistral_auto_binding(None, ManifestModelDataType::Auto)],
         size_gb: 1.0,
         files: files_for_hf_snapshot(repo, true),
     }
@@ -995,7 +1058,7 @@ mod tests {
     #[test]
     fn gemma_4_12b_manifests_are_cataloged() {
         let manifest = find_manifest("gemma-4-12b-it").expect("missing Gemma 4 12B manifest");
-        assert_eq!(manifest.backend, "mistralrs-gemma4");
+        assert_eq!(manifest.runtime_bindings[0].label(), "mistral_rs/auto");
         assert!(manifest.files.iter().any(|file| {
             file.component == ModelComponent::Config
                 && matches!(file.selector, ModelFileSelector::Suffix(ref suffix) if suffix == ".json")
@@ -1007,7 +1070,7 @@ mod tests {
 
         let uqff =
             find_manifest("gemma-4-12b-it-uqff-afq8").expect("missing Gemma 4 12B UQFF manifest");
-        assert_eq!(uqff.backend, "mistralrs-uqff");
+        assert_eq!(uqff.runtime_bindings[0].label(), "mistral_rs/auto");
         assert!(uqff.files.iter().any(|file| {
             file.component == ModelComponent::UqffShard
                 && matches!(file.selector, ModelFileSelector::Prefix(ref prefix) if prefix == "afq8-")
@@ -1018,7 +1081,7 @@ mod tests {
     fn dia_manifest_supports_speech_generation_and_dac_sidecar() {
         let manifest = find_manifest("dia-1.6b-tts").expect("missing Dia manifest");
 
-        assert_eq!(manifest.backend, "mistralrs-dia");
+        assert_eq!(manifest.runtime_bindings[0].label(), "mistral_rs/speech");
         assert!(
             manifest
                 .descriptor
@@ -1044,7 +1107,7 @@ mod tests {
     fn kokoro_manifest_supports_speech_generation_and_voice_assets() {
         let manifest = find_manifest("kokoro-82m-tts").expect("missing Kokoro manifest");
 
-        assert_eq!(manifest.backend, "any-tts-kokoro");
+        assert_eq!(manifest.runtime_bindings[0].label(), "any_tts/kokoro");
         assert!(
             manifest
                 .descriptor

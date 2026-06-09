@@ -127,7 +127,10 @@ impl GitStorage {
         let sig = default_signature(&repo)?;
 
         let parent = head_commit(&repo);
-        let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+        let parents = match &parent {
+            Some(c) => vec![c],
+            None => vec![],
+        };
         repo.commit(Some("HEAD"), &sig, &sig, commit_msg, &tree, &parents)?;
 
         push_to_origin(&repo)?;
@@ -294,7 +297,10 @@ fn add_commit_push(repo: &Repository, paths: &[&str], message: &str) -> anyhow::
     let sig = default_signature(repo)?;
 
     let parent = head_commit(repo);
-    let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+    let parents = match &parent {
+        Some(c) => vec![c],
+        None => vec![],
+    };
     repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)?;
 
     push_to_origin(repo)?;

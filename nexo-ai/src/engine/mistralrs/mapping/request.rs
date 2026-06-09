@@ -652,7 +652,7 @@ mod tests {
                 specific_model: Some(ModelId::from("chat")),
                 required_capabilities: Vec::new(),
                 preferred_capabilities: Vec::new(),
-                runtime_preference: Default::default(),
+                runtime_preference: nexo_core::InferenceRuntime::AnyTts,
             },
             conversation: Conversation {
                 messages: vec![ConversationMessage {

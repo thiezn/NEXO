@@ -10,7 +10,6 @@ ALL_TARGETS=(
 	"game-extractor"
 	"epub-extractor"
 	"nexo-node"
-	"nexo-ai"
 )
 
 GIT_UPDATE_PACKAGES=(

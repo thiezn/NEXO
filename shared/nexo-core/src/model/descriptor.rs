@@ -19,7 +19,6 @@ pub struct ModelDescriptor {
     pub provider: Option<String>,
 
     /// The runtime implementation required or preferred when loading this model.
-    #[serde(default)]
     pub runtime: InferenceRuntime,
 
     /// The declared model capabilities.

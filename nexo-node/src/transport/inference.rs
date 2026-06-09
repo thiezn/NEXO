@@ -100,11 +100,18 @@ impl LoadedModels {
                 continue;
             }
 
+            let specific_model = config.default_models.get(&capability).cloned();
+            let runtime_preference = specific_model
+                .as_ref()
+                .and_then(|model_id| self.available.get(model_id))
+                .map(|model| model.descriptor.runtime)
+                .unwrap_or(nexo_core::InferenceRuntime::AnyTts);
+
             let selection = ModelSelection {
-                specific_model: config.default_models.get(&capability).cloned(),
+                specific_model,
                 required_capabilities: vec![capability],
                 preferred_capabilities: config.startup_capabilities[index + 1..].to_vec(),
-                runtime_preference: Default::default(),
+                runtime_preference,
             };
             let Some(descriptor) = registry.resolve_model(&selection) else {
                 tracing::warn!(
@@ -134,7 +141,7 @@ impl LoadedModels {
             .clone()
             .ok_or_else(|| "No inference engine configured".to_string())?;
         engine
-            .load_model(&model_id, nexo_core::InferenceRuntime::AnyTts)
+            .load_model(&model_id, self.available[&model_id].descriptor.runtime)
             .await
             .map_err(|error| error.to_string())
     }
@@ -397,7 +404,18 @@ pub(super) async fn queue_run_round(
         "Starting round inference"
     );
 
-    let request = run_round_request(request_id, request, enable_tool_calling);
+    let runtime_preference = {
+        let models = models.lock().await;
+        request
+            .model_id
+            .as_ref()
+            .map(|model_id| ModelId::from(model_id.as_str()))
+            .and_then(|model_id| models.available.get(&model_id))
+            .map(|model| model.descriptor.runtime)
+            .unwrap_or(nexo_core::InferenceRuntime::AnyTts)
+    };
+
+    let request = run_round_request(request_id, request, enable_tool_calling, runtime_preference);
     let models = models.clone();
     let tx = tx.clone();
     let request_id = request_id.to_string();
@@ -568,7 +586,7 @@ pub(super) async fn queue_image_generate(
             specific_model: None,
             required_capabilities: vec![ModelCapability::ImageGeneration],
             preferred_capabilities: Vec::new(),
-            runtime_preference: Default::default(),
+            runtime_preference: nexo_core::InferenceRuntime::AnyTts,
         },
         prompt: params.prompt,
         negative_prompt: params.negative_prompt,
@@ -636,7 +654,7 @@ pub(super) async fn queue_audio_generate(
             specific_model: None,
             required_capabilities: vec![ModelCapability::SpeechGeneration],
             preferred_capabilities: Vec::new(),
-            runtime_preference: Default::default(),
+            runtime_preference: nexo_core::InferenceRuntime::AnyTts,
         },
         text: params.prompt,
         language: params.language,
@@ -734,6 +752,7 @@ fn run_round_request(
     request_id: &str,
     round: RunRoundRequest,
     enable_tool_calling: bool,
+    runtime_preference: nexo_core::InferenceRuntime,
 ) -> InferenceRequest {
     let use_tools = enable_tool_calling
         && !round.tools.is_empty()
@@ -756,7 +775,7 @@ fn run_round_request(
             } else {
                 Vec::new()
             },
-            runtime_preference: Default::default(),
+            runtime_preference,
         },
         round.messages,
         if use_tools { round.tools } else { Vec::new() },
@@ -1281,6 +1300,7 @@ mod tests {
                 model_id: None,
             },
             true,
+            nexo_core::InferenceRuntime::AnyTts,
         );
 
         let InferenceRequest::Generate(request) = request else {
@@ -1317,6 +1337,7 @@ mod tests {
                 model_id: None,
             },
             false,
+            nexo_core::InferenceRuntime::AnyTts,
         );
 
         let InferenceRequest::Generate(request) = request else {
@@ -1349,6 +1370,7 @@ mod tests {
                 model_id: None,
             },
             true,
+            nexo_core::InferenceRuntime::AnyTts,
         );
 
         let InferenceRequest::Generate(request) = request else {

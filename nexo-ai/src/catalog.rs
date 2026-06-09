@@ -3,13 +3,14 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use serde_json::Value;
-
 use nexo_model_mgmt::registry::{known_manifests, list_models};
-use nexo_model_mgmt::{ModelComponent, ModelFileSelector, ModelManifest};
+use nexo_model_mgmt::{
+    AnyTtsManifestEngine, ManifestModelDataType, ManifestRuntimeBinding, MistralRsManifestLoader,
+    ModelManifest, MoldManifestLoader,
+};
 
 use crate::ModelRuntimeImplementation;
-use crate::engine::any_tts::{INTERNAL_RUNTIME_KEY, KOKORO_RUNTIME_ID};
+use crate::engine::any_tts::AnyTtsModelConfig;
 use crate::engine::mistralrs::{
     MistralRsAutoLoader, MistralRsDiffusionLoader, MistralRsGgufLoader, MistralRsLoader,
     MistralRsModelConfig, MistralRsSpeechLoader,
@@ -40,139 +41,114 @@ pub fn downloaded_model_configs() -> Result<Vec<RegisteredModelConfig>> {
 ///
 /// # Arguments
 ///
-/// * `manifest` - The manifest describing local model identity, backend, and files.
+/// * `manifest` - The manifest describing local model identity, runtime bindings, and files.
 ///
 /// # Errors
 ///
-/// Returns an error when the manifest does not contain enough information for the selected backend.
+/// Returns an error when a manifest runtime binding does not contain enough loader data.
 pub fn model_config_from_manifest(manifest: &ModelManifest) -> Result<RegisteredModelConfig> {
-    let mut descriptor = manifest.descriptor.clone();
-    let mut runtimes = Vec::new();
-
-    if manifest.backend == "any-tts-kokoro" {
-        descriptor.metadata.insert(
-            INTERNAL_RUNTIME_KEY.to_string(),
-            Value::String(KOKORO_RUNTIME_ID.to_string()),
-        );
-    } else {
-        runtimes.push(ModelRuntimeImplementation::MistralRs(
-            MistralRsModelConfig {
-                loader: loader_from_manifest(manifest)?,
-                revision: None,
-            },
-        ));
-    }
-
-    if let Some(mold) = mold_model_config_from_manifest(manifest) {
-        runtimes.push(ModelRuntimeImplementation::Mold(mold));
-    }
-
     Ok(RegisteredModelConfig {
-        descriptor,
-        runtimes,
+        descriptor: manifest.descriptor.clone(),
+        runtimes: manifest
+            .runtime_bindings
+            .iter()
+            .map(|binding| runtime_config_from_manifest_binding(manifest, binding))
+            .collect::<Result<Vec<_>>>()?,
     })
 }
 
-fn mold_model_config_from_manifest(manifest: &ModelManifest) -> Option<MoldModelConfig> {
-    (manifest.backend == "mistralrs-flux" && manifest_family(manifest) == Some("flux2")).then(
-        || MoldModelConfig {
-            loader: MoldLoader::Flux2(MoldFlux2Loader {
-                model_id: manifest.id().to_string(),
-            }),
+fn runtime_config_from_manifest_binding(
+    manifest: &ModelManifest,
+    binding: &ManifestRuntimeBinding,
+) -> Result<ModelRuntimeImplementation> {
+    match binding {
+        ManifestRuntimeBinding::AnyTts(binding) => match binding.engine {
+            AnyTtsManifestEngine::Kokoro => Ok(ModelRuntimeImplementation::AnyTts(
+                AnyTtsModelConfig::Kokoro,
+            )),
         },
-    )
+        ManifestRuntimeBinding::MistralRs(binding) => Ok(ModelRuntimeImplementation::MistralRs(
+            MistralRsModelConfig {
+                loader: mistral_loader_from_manifest_binding(manifest, &binding.loader)?,
+                revision: binding.revision.clone(),
+            },
+        )),
+        ManifestRuntimeBinding::Mold(binding) => match binding.loader {
+            MoldManifestLoader::Flux2 => Ok(ModelRuntimeImplementation::Mold(MoldModelConfig {
+                loader: MoldLoader::Flux2(MoldFlux2Loader {
+                    model_id: manifest.id().to_string(),
+                }),
+            })),
+        },
+    }
 }
 
-fn manifest_family(manifest: &ModelManifest) -> Option<&str> {
-    manifest
-        .descriptor
-        .metadata
-        .get("family")
-        .and_then(Value::as_str)
-}
-
-fn loader_from_manifest(manifest: &ModelManifest) -> Result<MistralRsLoader> {
-    if manifest.backend == "mistralrs-gguf" {
-        return Ok(MistralRsLoader::Gguf(MistralRsGgufLoader {
-            tokenizer_model_id: None,
-            quantized_model_id: manifest.id().to_string(),
-            quantized_filenames: gguf_filenames(manifest)?,
+fn mistral_loader_from_manifest_binding(
+    manifest: &ModelManifest,
+    loader: &MistralRsManifestLoader,
+) -> Result<MistralRsLoader> {
+    match loader {
+        MistralRsManifestLoader::Auto(loader) => Ok(MistralRsLoader::Auto(MistralRsAutoLoader {
+            model_id: manifest.id().to_string(),
+            from_uqff: loader
+                .from_uqff
+                .as_ref()
+                .map(|paths| paths.iter().map(PathBuf::from).collect()),
+            tokenizer_json: None,
             chat_template: None,
             jinja_explicit: None,
-            dtype: ModelDataType::Auto,
-        }));
-    }
-
-    if manifest.backend == "mistralrs-flux" {
-        return Ok(MistralRsLoader::Diffusion(MistralRsDiffusionLoader {
-            model_id: manifest.id().to_string(),
-            offload: false,
-            dtype: ModelDataType::Auto,
-        }));
-    }
-
-    if manifest.backend == "mistralrs-dia" {
-        let model_dir = nexo_model_mgmt::resolve_model_storage_dir(manifest.id());
-        return Ok(MistralRsLoader::Speech(MistralRsSpeechLoader {
-            model_id: manifest.id().to_string(),
-            dac_model_id: Some(model_dir.join("dac").to_string_lossy().into_owned()),
-            // Dia runs substantially faster on Apple Silicon when loaded in f16.
-            dtype: ModelDataType::F16,
-        }));
-    }
-
-    Ok(MistralRsLoader::Auto(MistralRsAutoLoader {
-        model_id: manifest.id().to_string(),
-        from_uqff: uqff_selectors(manifest),
-        tokenizer_json: None,
-        chat_template: None,
-        jinja_explicit: None,
-        dtype: ModelDataType::Auto,
-        hf_cache_path: None,
-    }))
-}
-
-fn uqff_selectors(manifest: &ModelManifest) -> Option<Vec<PathBuf>> {
-    let selectors = manifest
-        .files
-        .iter()
-        .filter(|file| file.component == ModelComponent::UqffShard)
-        .filter_map(|file| match &file.selector {
-            ModelFileSelector::Exact(path) | ModelFileSelector::Prefix(path) => {
-                Some(PathBuf::from(path))
+            dtype: model_data_type(loader.dtype),
+            hf_cache_path: None,
+        })),
+        MistralRsManifestLoader::Gguf(loader) => {
+            if loader.quantized_filenames.is_empty() {
+                return Err(Error::Config {
+                    message: format!(
+                        "GGUF model manifest '{}' does not declare quantized filenames",
+                        manifest.id()
+                    ),
+                });
             }
-            ModelFileSelector::Suffix(_) => None,
-        })
-        .collect::<Vec<_>>();
 
-    (!selectors.is_empty()).then_some(selectors)
+            Ok(MistralRsLoader::Gguf(MistralRsGgufLoader {
+                tokenizer_model_id: None,
+                quantized_model_id: manifest.id().to_string(),
+                quantized_filenames: loader.quantized_filenames.clone(),
+                chat_template: None,
+                jinja_explicit: None,
+                dtype: model_data_type(loader.dtype),
+            }))
+        }
+        MistralRsManifestLoader::Diffusion(loader) => {
+            Ok(MistralRsLoader::Diffusion(MistralRsDiffusionLoader {
+                model_id: manifest.id().to_string(),
+                offload: loader.offload,
+                dtype: model_data_type(loader.dtype),
+            }))
+        }
+        MistralRsManifestLoader::Speech(loader) => {
+            let dac_model_id = loader.dac_subdir.as_ref().map(|subdir| {
+                nexo_model_mgmt::resolve_model_storage_dir(manifest.id())
+                    .join(subdir)
+                    .to_string_lossy()
+                    .into_owned()
+            });
+
+            Ok(MistralRsLoader::Speech(MistralRsSpeechLoader {
+                model_id: manifest.id().to_string(),
+                dac_model_id,
+                dtype: model_data_type(loader.dtype),
+            }))
+        }
+    }
 }
 
-fn gguf_filenames(manifest: &ModelManifest) -> Result<Vec<String>> {
-    let filenames = manifest
-        .files
-        .iter()
-        .filter(|file| {
-            matches!(
-                file.component,
-                ModelComponent::Weights | ModelComponent::VisionProjector
-            )
-        })
-        .filter_map(|file| match &file.selector {
-            ModelFileSelector::Exact(path) if path.ends_with(".gguf") => Some(path.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    if filenames.is_empty() {
-        Err(Error::Config {
-            message: format!(
-                "GGUF model manifest '{}' does not contain exact .gguf filenames",
-                manifest.id()
-            ),
-        })
-    } else {
-        Ok(filenames)
+const fn model_data_type(dtype: ManifestModelDataType) -> ModelDataType {
+    match dtype {
+        ManifestModelDataType::Auto => ModelDataType::Auto,
+        ManifestModelDataType::Bf16 => ModelDataType::Bf16,
+        ManifestModelDataType::F16 => ModelDataType::F16,
+        ManifestModelDataType::F32 => ModelDataType::F32,
     }
 }
 
@@ -298,7 +274,7 @@ mod tests {
             .iter()
             .find_map(|runtime| match runtime {
                 ModelRuntimeImplementation::Mold(model) => Some(model),
-                ModelRuntimeImplementation::MistralRs(_) => None,
+                _ => None,
             })
             .expect("expected mold runtime for flux.2 manifest");
 
@@ -328,21 +304,5 @@ mod tests {
                 .is_some_and(|path| path.ends_with("dia-1.6b/dac"))
         );
         assert_eq!(loader.dtype, ModelDataType::F16);
-    }
-
-    #[test]
-    fn kokoro_manifest_uses_internal_any_tts_runtime() {
-        let manifest = find_manifest("kokoro-82m-tts").unwrap();
-        let config = model_config_from_manifest(manifest).unwrap();
-
-        assert!(config.runtimes.is_empty());
-        assert_eq!(
-            config
-                .descriptor
-                .metadata
-                .get(INTERNAL_RUNTIME_KEY)
-                .and_then(Value::as_str),
-            Some(KOKORO_RUNTIME_ID)
-        );
     }
 }

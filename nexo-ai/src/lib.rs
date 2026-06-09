@@ -12,6 +12,7 @@ pub mod registry;
 
 pub use catalog::{downloaded_model_configs, model_config_from_manifest};
 pub use engine::InferenceEngine;
+pub use engine::any_tts::AnyTtsModelConfig;
 pub use engine::config::default_config_path;
 pub use engine::config::{
     DeviceSpec, InferenceEngineConfig, ModelDataType, ModelRuntimeImplementation,

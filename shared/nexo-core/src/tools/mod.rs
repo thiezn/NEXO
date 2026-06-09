@@ -10,6 +10,10 @@ pub mod definition;
 pub mod execution;
 /// Generic tool registry for core tool definitions and executors.
 pub mod registry;
+
+/// Tool trait implementation
+pub mod tool;
+
 /// Tool result payload types.
 pub mod result;
 
@@ -19,3 +23,4 @@ pub use definition::ToolDefinition;
 pub use execution::{ToolExecutionConstraints, ToolParallelism, ToolSideEffectLevel};
 pub use registry::ToolRegistry;
 pub use result::{ToolResult, ToolResultContent, ToolResultStatus};
+pub use tool::Tool;

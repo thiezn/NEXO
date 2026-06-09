@@ -11,12 +11,12 @@ path = "src/main.rs"
 nexo-ws-schema = { workspace = true }
 nexo-ws-client = { workspace = true }
 nexo-core = { workspace = true }
-nexo-model-mgmt = { path = "../shared/nexo-model-mgmt" }
 nexo-echo = { path = "../nexo-tools/nexo-echo" }
 nexo-ai = { path = "../nexo-ai", default-features = false, features = [
     "metal",
     "download",
 ] }
+comfy-table = "7"
 cli-helpers = { workspace = true, features = ["clap", "config", "tracing"] }
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true, features = ["derive"] }

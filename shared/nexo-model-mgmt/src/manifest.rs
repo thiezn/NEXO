@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use nexo_core::ModelDescriptor;
+use nexo_core::{InferenceRuntime, ModelDescriptor};
 use serde_json::Value;
 
 /// Component types for files that make up a model artifact.
@@ -117,13 +117,173 @@ pub struct ModelFile {
     pub sha256: Option<&'static str>,
 }
 
+/// Data type preference declared by a model manifest for runtime loading.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ManifestModelDataType {
+    /// Let the runtime choose the best supported type.
+    #[default]
+    Auto,
+    /// Prefer BF16 weights or activations.
+    Bf16,
+    /// Prefer F16 weights or activations.
+    F16,
+    /// Prefer F32 weights or activations.
+    F32,
+}
+
+/// Runtime binding declared by a model manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestRuntimeBinding {
+    /// Bind the model to the internal AnyTTS adapter runtime.
+    AnyTts(AnyTtsManifestBinding),
+    /// Bind the model to Mistral.rs.
+    MistralRs(MistralRsManifestBinding),
+    /// Bind the model to mold-ai-inference.
+    Mold(MoldManifestBinding),
+}
+
+impl ManifestRuntimeBinding {
+    /// Returns the NEXO runtime used by this binding.
+    #[must_use]
+    pub const fn runtime(&self) -> InferenceRuntime {
+        match self {
+            Self::AnyTts(_) => InferenceRuntime::AnyTts,
+            Self::MistralRs(_) => InferenceRuntime::MistralRs,
+            Self::Mold(_) => InferenceRuntime::Mold,
+        }
+    }
+
+    /// Returns a compact label used in CLI output.
+    #[must_use]
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::AnyTts(binding) => binding.label(),
+            Self::MistralRs(binding) => binding.label(),
+            Self::Mold(binding) => binding.label(),
+        }
+    }
+}
+
+/// Manifest binding data for AnyTTS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnyTtsManifestBinding {
+    /// The internal AnyTTS engine implementation.
+    pub engine: AnyTtsManifestEngine,
+}
+
+impl AnyTtsManifestBinding {
+    const fn label(&self) -> &'static str {
+        match self.engine {
+            AnyTtsManifestEngine::Kokoro => "any_tts/kokoro",
+        }
+    }
+}
+
+/// Internal AnyTTS engines supported by manifests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnyTtsManifestEngine {
+    /// Kokoro TTS.
+    Kokoro,
+}
+
+/// Manifest binding data for Mistral.rs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MistralRsManifestBinding {
+    /// Loader intent for the Mistral.rs runtime.
+    pub loader: MistralRsManifestLoader,
+    /// Optional Hugging Face revision to pin.
+    pub revision: Option<String>,
+}
+
+impl MistralRsManifestBinding {
+    const fn label(&self) -> &'static str {
+        match self.loader {
+            MistralRsManifestLoader::Auto(_) => "mistral_rs/auto",
+            MistralRsManifestLoader::Gguf(_) => "mistral_rs/gguf",
+            MistralRsManifestLoader::Diffusion(_) => "mistral_rs/diffusion",
+            MistralRsManifestLoader::Speech(_) => "mistral_rs/speech",
+        }
+    }
+}
+
+/// Mistral.rs loader intent declared by manifests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MistralRsManifestLoader {
+    /// Let Mistral.rs auto-detect a local model layout.
+    Auto(MistralRsAutoManifestLoader),
+    /// Load explicit GGUF files.
+    Gguf(MistralRsGgufManifestLoader),
+    /// Load a diffusion image-generation model.
+    Diffusion(MistralRsDiffusionManifestLoader),
+    /// Load a speech-generation model.
+    Speech(MistralRsSpeechManifestLoader),
+}
+
+/// Manifest settings for Mistral.rs automatic loading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MistralRsAutoManifestLoader {
+    /// Optional UQFF shard filename prefixes or paths.
+    pub from_uqff: Option<Vec<String>>,
+    /// Preferred runtime dtype.
+    pub dtype: ManifestModelDataType,
+}
+
+/// Manifest settings for Mistral.rs GGUF loading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MistralRsGgufManifestLoader {
+    /// Exact GGUF filenames to load from local storage.
+    pub quantized_filenames: Vec<String>,
+    /// Preferred activation dtype.
+    pub dtype: ManifestModelDataType,
+}
+
+/// Manifest settings for Mistral.rs diffusion loading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MistralRsDiffusionManifestLoader {
+    /// Prefer the offloaded loader variant.
+    pub offload: bool,
+    /// Preferred runtime dtype.
+    pub dtype: ManifestModelDataType,
+}
+
+/// Manifest settings for Mistral.rs speech loading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MistralRsSpeechManifestLoader {
+    /// Optional local DAC artifact subdirectory.
+    pub dac_subdir: Option<String>,
+    /// Preferred runtime dtype.
+    pub dtype: ManifestModelDataType,
+}
+
+/// Manifest binding data for mold-ai-inference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoldManifestBinding {
+    /// Loader intent for mold.
+    pub loader: MoldManifestLoader,
+}
+
+impl MoldManifestBinding {
+    const fn label(&self) -> &'static str {
+        match self.loader {
+            MoldManifestLoader::Flux2 => "mold/flux2",
+        }
+    }
+}
+
+/// mold loader intent declared by manifests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoldManifestLoader {
+    /// Load a FLUX.2 image-generation model.
+    Flux2,
+}
+
 /// A complete model definition: canonical descriptor, runtime metadata, and files.
 #[derive(Debug, Clone)]
 pub struct ModelManifest {
     /// Canonical model identity and capabilities shared with the rest of Nexo.
     pub descriptor: ModelDescriptor,
-    /// Loader/runtime backend label.
-    pub backend: String,
+    /// Runtime bindings supported by this manifest.
+    pub runtime_bindings: Vec<ManifestRuntimeBinding>,
     /// Approximate total download size in gigabytes.
     pub size_gb: f32,
     /// Files required for this model.
@@ -200,7 +360,7 @@ mod tests {
                 id: "org/test:model".into(),
                 display_name: "Test model".to_string(),
                 provider: Some("test".to_string()),
-                runtime: nexo_core::InferenceRuntime::AnyTts,
+                runtime: nexo_core::InferenceRuntime::MistralRs,
                 capabilities: vec![nexo_core::ModelCapability::TextGeneration],
                 modalities: nexo_core::ModelModalities {
                     input: vec![nexo_core::SupportedModality::Text],
@@ -211,7 +371,15 @@ mod tests {
                 max_output_tokens: None,
                 metadata: Default::default(),
             },
-            backend: "candle-gguf".to_string(),
+            runtime_bindings: vec![ManifestRuntimeBinding::MistralRs(
+                MistralRsManifestBinding {
+                    loader: MistralRsManifestLoader::Gguf(MistralRsGgufManifestLoader {
+                        quantized_filenames: vec!["subdir/model.gguf".to_string()],
+                        dtype: ManifestModelDataType::Auto,
+                    }),
+                    revision: None,
+                },
+            )],
             size_gb: 1.0,
             files: Vec::new(),
         };
@@ -244,7 +412,7 @@ mod tests {
                 id: "gemma-4-e4b-it-uqff-afq8".into(),
                 display_name: "Gemma 4 E4B IT UQFF AFQ8".to_string(),
                 provider: Some("mistralrs-community".to_string()),
-                runtime: nexo_core::InferenceRuntime::AnyTts,
+                runtime: nexo_core::InferenceRuntime::MistralRs,
                 capabilities: vec![nexo_core::ModelCapability::TextGeneration],
                 modalities: nexo_core::ModelModalities {
                     input: vec![nexo_core::SupportedModality::Text],
@@ -255,7 +423,15 @@ mod tests {
                 max_output_tokens: None,
                 metadata,
             },
-            backend: "mistralrs-uqff".to_string(),
+            runtime_bindings: vec![ManifestRuntimeBinding::MistralRs(
+                MistralRsManifestBinding {
+                    loader: MistralRsManifestLoader::Auto(MistralRsAutoManifestLoader {
+                        from_uqff: Some(vec!["afq8-".to_string()]),
+                        dtype: ManifestModelDataType::Auto,
+                    }),
+                    revision: None,
+                },
+            )],
             size_gb: 1.0,
             files: Vec::new(),
         };
@@ -270,7 +446,7 @@ mod tests {
                 id: "dia-1.6b-tts".into(),
                 display_name: "Dia 1.6B TTS".to_string(),
                 provider: Some("nari-labs".to_string()),
-                runtime: nexo_core::InferenceRuntime::AnyTts,
+                runtime: nexo_core::InferenceRuntime::MistralRs,
                 capabilities: vec![nexo_core::ModelCapability::SpeechGeneration],
                 modalities: nexo_core::ModelModalities {
                     input: vec![nexo_core::SupportedModality::Text],
@@ -281,7 +457,15 @@ mod tests {
                 max_output_tokens: None,
                 metadata: Default::default(),
             },
-            backend: "mistralrs-dia".to_string(),
+            runtime_bindings: vec![ManifestRuntimeBinding::MistralRs(
+                MistralRsManifestBinding {
+                    loader: MistralRsManifestLoader::Speech(MistralRsSpeechManifestLoader {
+                        dac_subdir: Some("dac".to_string()),
+                        dtype: ManifestModelDataType::F16,
+                    }),
+                    revision: None,
+                },
+            )],
             size_gb: 1.0,
             files: Vec::new(),
         };

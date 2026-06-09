@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::common::MetadataMap;
-
 use super::ToolExecutionConstraints;
 
 /// Declares a tool that may be exposed to a model for tool calling.
@@ -25,8 +23,7 @@ pub struct ToolDefinition {
     /// Execution-time orchestration constraints.
     #[serde(default)]
     pub execution: ToolExecutionConstraints,
-
-    /// Additional tool metadata for higher-level consumers.
-    #[serde(default)]
-    pub metadata: MetadataMap,
+    // /// Additional tool metadata for higher-level consumers.
+    // #[serde(default)]
+    // pub metadata: MetadataMap,
 }

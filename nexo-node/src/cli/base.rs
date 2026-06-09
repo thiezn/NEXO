@@ -1,6 +1,6 @@
 //! Clap-powered command definitions for the `nexo-node` binary.
 
-use crate::cli::commands::{init, start};
+use crate::cli::commands::{init, models, start};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -35,7 +35,7 @@ pub enum Command {
     },
 
     /// Manage downloaded local models.
-    Models(nexo_model_mgmt::ModelsCommand),
+    Models(models::ModelsCommand),
 }
 
 /// Dispatch a parsed CLI command to its concrete handler.

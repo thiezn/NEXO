@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use nexo_core::InferenceRuntime;
 use serde::{Deserialize, Serialize};
 
+use crate::engine::any_tts::AnyTtsModelConfig;
 use crate::engine::mistralrs::{MistralRsModelConfig, MistralRsRuntimeConfig};
 use crate::engine::mold::{MoldModelConfig, MoldRuntimeConfig};
 use crate::{Error, ModelDescriptor, Result};
@@ -47,6 +48,9 @@ impl RuntimeImplementation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "runtime", rename_all = "snake_case")]
 pub enum ModelRuntimeImplementation {
+    /// AnyTTS-specific model binding configuration.
+    AnyTts(AnyTtsModelConfig),
+
     /// Mistral.rs-specific model binding configuration.
     MistralRs(MistralRsModelConfig),
 
@@ -58,6 +62,7 @@ impl ModelRuntimeImplementation {
     /// Returns the runtime kind represented by this model binding.
     pub fn runtime(&self) -> InferenceRuntime {
         match self {
+            Self::AnyTts(_) => InferenceRuntime::AnyTts,
             Self::MistralRs(_) => InferenceRuntime::MistralRs,
             Self::Mold(_) => InferenceRuntime::Mold,
         }
@@ -65,6 +70,7 @@ impl ModelRuntimeImplementation {
 
     pub(crate) fn as_mistralrs(&self) -> Option<&MistralRsModelConfig> {
         match self {
+            Self::AnyTts(_) => None,
             Self::MistralRs(config) => Some(config),
             Self::Mold(_) => None,
         }
@@ -72,7 +78,7 @@ impl ModelRuntimeImplementation {
 
     pub(crate) fn as_mold(&self) -> Option<&MoldModelConfig> {
         match self {
-            Self::MistralRs(_) => None,
+            Self::AnyTts(_) | Self::MistralRs(_) => None,
             Self::Mold(config) => Some(config),
         }
     }
@@ -128,7 +134,10 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             scheduler: SchedulerPolicy::default(),
-            runtimes: vec![RuntimeImplementation::MistralRs(Default::default())],
+            runtimes: vec![
+                RuntimeImplementation::MistralRs(Default::default()),
+                RuntimeImplementation::Mold(Default::default()),
+            ],
         }
     }
 }

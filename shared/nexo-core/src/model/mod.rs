@@ -15,10 +15,14 @@ pub mod runtime_state;
 /// Model selection criteria types.
 pub mod selection;
 
+/// The public model registry contract.
+pub mod registry;
+
 pub use capability::ModelCapability;
 pub use descriptor::ModelDescriptor;
 pub use modality::{ModelModalities, SupportedModality};
 pub use reasoning::{ReasoningEffort, ReasoningSettings, ThinkingMode};
+pub use registry::ModelRegistry;
 pub use role_strategy::RoleStrategy;
 pub use runtime_state::ModelRuntimeState;
 pub use selection::{InferenceRuntime, ModelSelection};

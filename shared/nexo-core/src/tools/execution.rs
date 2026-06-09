@@ -44,3 +44,23 @@ pub struct ToolExecutionConstraints {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
 }
+
+impl ToolExecutionConstraints {
+    /// Default execution constraints for read-only tools.
+    pub fn default_read_only() -> Self {
+        Self {
+            side_effect_level: ToolSideEffectLevel::ReadOnly,
+            parallelism: ToolParallelism::ParallelGlobal,
+            timeout_ms: None,
+        }
+    }
+
+    /// Default execution constraints for side-effecting tools.
+    pub fn default_side_effecting() -> Self {
+        Self {
+            side_effect_level: ToolSideEffectLevel::SideEffecting,
+            parallelism: ToolParallelism::Sequential,
+            timeout_ms: None,
+        }
+    }
+}

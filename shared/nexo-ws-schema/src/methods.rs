@@ -1005,7 +1005,7 @@ mod tests {
     use super::*;
     use nexo_core::ToolExecutionConstraints;
     use nexo_core::message::{ContentPart, MessageRole, TextPart};
-    use std::collections::BTreeMap;
+    use std::collections::HashMap;
 
     #[test]
     fn method_serialization() {
@@ -1136,7 +1136,6 @@ mod tests {
                     parameters: serde_json::json!({"type": "object"}),
                     contract_version: None,
                     execution: ToolExecutionConstraints::default(),
-                    metadata: BTreeMap::new(),
                 },
                 "core",
                 true,
@@ -1161,7 +1160,6 @@ mod tests {
                     parallelism: nexo_core::ToolParallelism::ParallelGlobal,
                     timeout_ms: Some(5_000),
                 },
-                metadata: BTreeMap::new(),
             },
             "node",
             true,
@@ -1183,7 +1181,6 @@ mod tests {
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: None,
                 execution: ToolExecutionConstraints::default(),
-                metadata: BTreeMap::new(),
             },
             "node",
             true,
@@ -1215,7 +1212,6 @@ mod tests {
                 parameters: serde_json::json!({"type": "object", "properties": {"input": {"type": "string"}}}),
                 contract_version: Some("2026-05-22".into()),
                 execution: ToolExecutionConstraints::default(),
-                metadata: BTreeMap::new(),
             }],
         };
         let json = serde_json::to_string(&params).unwrap();
@@ -1291,7 +1287,7 @@ mod tests {
                 parts: vec![ContentPart::Text(TextPart {
                     text: "You are helpful".into(),
                 })],
-                metadata: BTreeMap::new(),
+                metadata: HashMap::new(),
             }],
             tools: vec![ToolSpecEntry {
                 name: "echo.run".into(),
@@ -1299,7 +1295,6 @@ mod tests {
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: None,
                 execution: ToolExecutionConstraints::default(),
-                metadata: BTreeMap::new(),
             }],
             tool_choice: ToolChoice::Specific {
                 name: "echo.run".into(),
@@ -1442,7 +1437,7 @@ mod tests {
             parts: vec![ContentPart::Text(TextPart {
                 text: "hello".into(),
             })],
-            metadata: BTreeMap::new(),
+            metadata: HashMap::new(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: ConversationMessage = serde_json::from_str(&json).unwrap();

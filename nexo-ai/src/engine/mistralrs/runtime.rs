@@ -58,11 +58,11 @@ impl MistralRuntime {
         base_runtime_config: &RuntimeConfig,
         model: &RegisteredModelConfig,
     ) -> Result<Self> {
-        let runtime_config = mistral_runtime_config(base_runtime_config)?;
+        let runtime_config = mistral_runtime_config(base_runtime_config);
         let device = resolve_device(runtime_config.device)?;
         Self::from_models(
             base_runtime_config.scheduler,
-            runtime_config,
+            &runtime_config,
             &device,
             std::slice::from_ref(model),
         )
@@ -1254,13 +1254,12 @@ fn map_dtype(dtype: ModelDataType) -> mistralrs_core::ModelDType {
     }
 }
 
-fn mistral_runtime_config(runtime_config: &RuntimeConfig) -> Result<&MistralRsRuntimeConfig> {
+fn mistral_runtime_config(runtime_config: &RuntimeConfig) -> MistralRsRuntimeConfig {
     runtime_config
         .runtime(InferenceRuntime::MistralRs)
         .and_then(|implementation| implementation.as_mistralrs())
-        .ok_or_else(|| Error::Config {
-            message: "missing mistral_rs runtime defaults in RuntimeConfig".to_string(),
-        })
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn mistral_model_config(model: &RegisteredModelConfig) -> Result<&MistralRsModelConfig> {
