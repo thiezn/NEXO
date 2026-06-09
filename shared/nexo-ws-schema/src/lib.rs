@@ -40,8 +40,8 @@ pub use methods::{
     SendResponse, SessionClearParams, SessionClearResponse, SessionCreateParams,
     SessionCreateResponse, SessionEntry, SessionGetParams, SessionGetResponse, SessionListParams,
     SessionListResponse, StatusParams, StatusResponse, SystemPresenceParams, SystemPrompt,
-    ToolEntry, ToolSpecEntry, ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams,
-    ToolsExecuteResponse, ToolsRegisterParams, ToolsRegisterResponse,
+    ToolEntry, ToolsCatalogParams, ToolsCatalogResponse, ToolsExecuteParams, ToolsExecuteResponse,
+    ToolsRegisterParams, ToolsRegisterResponse,
 };
 pub use nexo_core::message::{ContentPart, ConversationMessage, MessageRole, TextPart};
 pub use nexo_core::model::ModelDescriptor;

@@ -150,49 +150,6 @@ impl GitStorage {
     }
 }
 
-/// Bridge `GitStorage` into the `nexo_notes::NoteStorage` trait.
-impl nexo_notes::NoteStorage for GitStorage {
-    fn write_note(&self, filename: &str, content: &str) -> anyhow::Result<()> {
-        self.write_and_sync(
-            &format!("NOTES/{filename}"),
-            content,
-            &format!("Add note: {filename}"),
-        )
-    }
-
-    fn read_note(&self, filename: &str) -> anyhow::Result<String> {
-        self.read_file(&format!("NOTES/{filename}"))
-    }
-
-    fn list_notes(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self
-            .list_files("NOTES/")?
-            .into_iter()
-            .filter(|f| f != "SUMMARY.md")
-            .collect())
-    }
-
-    fn delete_note(&self, filename: &str) -> anyhow::Result<bool> {
-        let path = format!("NOTES/{filename}");
-        if !self.file_exists(&path) {
-            return Ok(false);
-        }
-        self.delete_and_sync(&path, &format!("Remove note: {filename}"))?;
-        Ok(true)
-    }
-
-    fn write_summary(&self, content: &str) -> anyhow::Result<()> {
-        self.write_and_sync("NOTES/SUMMARY.md", content, "Update notes summary")
-    }
-
-    fn read_summary(&self) -> anyhow::Result<Option<String>> {
-        if !self.file_exists("NOTES/SUMMARY.md") {
-            return Ok(None);
-        }
-        Ok(Some(self.read_file("NOTES/SUMMARY.md")?))
-    }
-}
-
 /// Pull remote changes into the repository when a fast-forward update is available.
 fn pull_impl(repo: &Repository) -> anyhow::Result<()> {
     // Check if remote exists

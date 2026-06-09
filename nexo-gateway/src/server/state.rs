@@ -1,6 +1,6 @@
 use crate::memory::git::GitStorage;
 use nexo_core::{ModelDescriptor, ToolRegistry};
-use nexo_ws_schema::{ConnectionRole, Frame, Scope, ToolEntry, ToolSpecEntry};
+use nexo_ws_schema::{ConnectionRole, Frame, Scope, ToolDefinition, ToolEntry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,7 +34,7 @@ pub struct PeerInfo {
 #[derive(Debug, Clone)]
 pub struct RegisteredTool {
     /// Tool specification advertised by the node.
-    pub spec: ToolSpecEntry,
+    pub definition: ToolDefinition,
     /// Peer currently hosting the tool.
     pub peer_id: PeerId,
     /// Timestamp at which the tool was registered.
@@ -190,15 +190,15 @@ impl GatewayState {
     }
 
     /// Register tools provided by a node. Returns the number of tools registered.
-    pub fn register_tools(&mut self, peer_id: &str, tools: Vec<ToolSpecEntry>) -> u32 {
+    pub fn register_tools(&mut self, peer_id: &str, tools: Vec<ToolDefinition>) -> u32 {
         let count = tools.len() as u32;
         let now = chrono::Utc::now();
-        for spec in tools {
-            tracing::debug!("Registered tool '{}' from peer {peer_id}", spec.name,);
+        for definition in tools {
+            tracing::debug!("Registered tool '{}' from peer {peer_id}", definition.name,);
             self.tool_registry.insert(
-                spec.name.clone(),
+                definition.name.clone(),
                 RegisteredTool {
-                    spec,
+                    definition,
                     peer_id: peer_id.to_string(),
                     registered_at: now,
                 },
@@ -234,7 +234,7 @@ impl GatewayState {
             .values()
             .map(|rt| {
                 ToolEntry::new(
-                    rt.spec.clone(),
+                    rt.definition.clone(),
                     "node",
                     self.peer_senders.contains_key(&rt.peer_id),
                 )
@@ -418,21 +418,19 @@ mod tests {
         state.add_peer(make_node_peer("n1", vec!["echo".into()]), dummy_sender());
 
         let tools = vec![
-            ToolSpecEntry {
+            ToolDefinition {
                 name: "echo.run".into(),
                 description: "Echo input".into(),
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: None,
                 execution: Default::default(),
-                metadata: Default::default(),
             },
-            ToolSpecEntry {
+            ToolDefinition {
                 name: "echo.ping".into(),
                 description: "Ping".into(),
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: None,
                 execution: Default::default(),
-                metadata: Default::default(),
             },
         ];
         let count = state.register_tools("n1", tools);
@@ -452,22 +450,21 @@ mod tests {
         state.add_peer(make_node_peer("n1", vec!["echo".into()]), dummy_sender());
         state.register_tools(
             "n1",
-            vec![ToolSpecEntry {
+            vec![ToolDefinition {
                 name: "echo.run".into(),
                 description: "Echo input".into(),
                 parameters: serde_json::json!({"type": "object"}),
                 contract_version: Some("2026-05-22".into()),
                 execution: Default::default(),
-                metadata: Default::default(),
             }],
         );
 
         let entries = state.all_tool_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].spec.name, "echo.run");
+        assert_eq!(entries[0].definition.name, "echo.run");
         assert_eq!(entries[0].source, "node");
         assert!(entries[0].available);
-        assert_eq!(entries[0].spec.parameters["type"], "object");
+        assert_eq!(entries[0].definition.parameters["type"], "object");
     }
 
     #[test]
@@ -477,13 +474,12 @@ mod tests {
         state.tool_registry.insert(
             "orphan.tool".into(),
             RegisteredTool {
-                spec: ToolSpecEntry {
+                definition: ToolDefinition {
                     name: "orphan.tool".into(),
                     description: "Orphan".into(),
                     parameters: serde_json::json!({}),
                     contract_version: None,
                     execution: Default::default(),
-                    metadata: Default::default(),
                 },
                 peer_id: "gone".into(),
                 registered_at: chrono::Utc::now(),

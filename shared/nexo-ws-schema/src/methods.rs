@@ -286,7 +286,7 @@ pub struct RunRoundRequest {
     pub messages: Vec<ConversationMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     /// Field value.
-    pub tools: Vec<ToolSpecEntry>,
+    pub tools: Vec<ToolDefinition>,
     #[serde(default)]
     /// Tool use policy for the round.
     pub tool_choice: ToolChoice,
@@ -356,13 +356,12 @@ pub struct ToolsCatalogResponse {
 // -- tools.register --
 
 /// A tool specification entry for registration.
-pub type ToolSpecEntry = ToolDefinition;
 
 /// Parameters for the `tools.register` method (sent by nodes).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ToolsRegisterParams {
     /// Field value.
-    pub tools: Vec<ToolSpecEntry>,
+    pub tools: Vec<ToolDefinition>,
 }
 
 /// Response payload for `tools.register`.
@@ -1206,7 +1205,7 @@ mod tests {
     #[test]
     fn tools_register_params_roundtrip() {
         let params = ToolsRegisterParams {
-            tools: vec![ToolSpecEntry {
+            tools: vec![ToolDefinition {
                 name: "echo".into(),
                 description: "Echo tool".into(),
                 parameters: serde_json::json!({"type": "object", "properties": {"input": {"type": "string"}}}),
@@ -1289,7 +1288,7 @@ mod tests {
                 })],
                 metadata: HashMap::new(),
             }],
-            tools: vec![ToolSpecEntry {
+            tools: vec![ToolDefinition {
                 name: "echo.run".into(),
                 description: "Echo input".into(),
                 parameters: serde_json::json!({"type": "object"}),

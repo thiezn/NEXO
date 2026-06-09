@@ -4,3 +4,6 @@
 pub mod git;
 /// SQLite persistence helpers for users, devices, and gateway state.
 pub mod persistent;
+
+/// Implementation of the NotesStorage, on top of our GitStorage.
+pub mod notes;
