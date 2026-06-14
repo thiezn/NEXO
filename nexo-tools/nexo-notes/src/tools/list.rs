@@ -20,6 +20,16 @@ where
     storage: Arc<S>,
 }
 
+impl<S> NotesListTool<S>
+where
+    S: NoteStorage + 'static,
+{
+    /// Create a new `NotesListTool` with the provided storage implementation.
+    pub fn new(storage: Arc<S>) -> Self {
+        Self { storage }
+    }
+}
+
 #[async_trait]
 impl<S> Tool for NotesListTool<S>
 where

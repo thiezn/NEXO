@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::engine::any_tts::AnyTtsModelConfig;
 use crate::engine::mistralrs::{MistralRsModelConfig, MistralRsRuntimeConfig};
 use crate::engine::mold::{MoldModelConfig, MoldRuntimeConfig};
-use crate::{Error, ModelDescriptor, Result};
+use crate::{Error, ModelDefinition, Result};
 
 /// Runtime-default configuration for a concrete inference implementation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,11 +88,11 @@ impl ModelRuntimeImplementation {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct InferenceEngineConfig {
-    /// Runtime-wide defaults and scheduler policy shared across configured models.
-    pub runtime: RuntimeConfig,
+    ///Scheduler policy shared across configured models.
+    pub scheduler: SchedulerPolicy,
 
     /// The logical models exposed through the local registry and runtime.
-    pub models: Vec<RegisteredModelConfig>,
+    pub models: Vec<ModelDefinition>,
 }
 
 impl InferenceEngineConfig {
@@ -116,62 +116,6 @@ impl InferenceEngineConfig {
         cli_helpers::config::save(self, path).map_err(|error| Error::Config {
             message: error.to_string(),
         })
-    }
-}
-
-/// Runtime-wide settings that govern request scheduling and per-runtime defaults.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct RuntimeConfig {
-    /// The scheduler policy used for generation requests.
-    pub scheduler: SchedulerPolicy,
-
-    /// Concrete runtime defaults keyed by implementation.
-    pub runtimes: Vec<RuntimeImplementation>,
-}
-
-impl Default for RuntimeConfig {
-    fn default() -> Self {
-        Self {
-            scheduler: SchedulerPolicy::default(),
-            runtimes: vec![
-                RuntimeImplementation::MistralRs(Default::default()),
-                RuntimeImplementation::Mold(Default::default()),
-            ],
-        }
-    }
-}
-
-impl RuntimeConfig {
-    /// Returns the configured defaults for a concrete runtime implementation.
-    pub fn runtime(&self, runtime: InferenceRuntime) -> Option<&RuntimeImplementation> {
-        self.runtimes
-            .iter()
-            .find(|implementation| implementation.runtime() == runtime)
-    }
-}
-
-/// A single logical model exposed through `nexo-ai`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegisteredModelConfig {
-    /// The stable `nexo-core` descriptor surfaced to callers.
-    pub descriptor: ModelDescriptor,
-
-    /// Per-runtime implementations available for this logical model.
-    pub runtimes: Vec<ModelRuntimeImplementation>,
-}
-
-impl RegisteredModelConfig {
-    /// Returns the configured implementation for the given runtime, if available.
-    pub fn runtime(&self, runtime: InferenceRuntime) -> Option<&ModelRuntimeImplementation> {
-        self.runtimes
-            .iter()
-            .find(|implementation| implementation.runtime() == runtime)
-    }
-
-    /// Returns whether this model can be loaded on the given runtime.
-    pub fn supports_runtime(&self, runtime: InferenceRuntime) -> bool {
-        self.runtime(runtime).is_some()
     }
 }
 

@@ -5,7 +5,7 @@ use crate::message::ConversationMessage;
 
 use super::errors::InferenceFailure;
 use super::finish::FinishReason;
-use super::request::{GeneratedAudio, GeneratedImage};
+use super::requests::{GeneratedAudio, GeneratedImage};
 use super::stream::GenerateDelta;
 use super::usage::{PerformanceMetrics, TokenUsage};
 

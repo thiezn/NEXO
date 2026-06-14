@@ -23,6 +23,16 @@ where
     storage: Arc<S>,
 }
 
+impl<S> NotesDeleteTool<S>
+where
+    S: NoteStorage + 'static,
+{
+    /// Create a new `NotesDeleteTool` with the provided storage implementation.
+    pub fn new(storage: Arc<S>) -> Self {
+        Self { storage }
+    }
+}
+
 #[async_trait]
 impl<S> Tool for NotesDeleteTool<S>
 where

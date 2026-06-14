@@ -15,12 +15,12 @@ pub async fn execute_tool(
     state: &SharedState,
 ) -> Result<ToolsExecuteResponse, String> {
     let tool_name = call.name.clone();
-    let gateway_tools = {
+    let gateway_tool_registry = {
         let state_read = state.read().await;
-        state_read.gateway_tools.clone()
+        state_read.gateway_tool_registry.clone()
     };
 
-    match gateway_tools.try_execute(call.clone()).await {
+    match gateway_tool_registry.try_execute(call.clone()).await {
         Ok(Some(result)) => return Ok(response_from_tool_result(result)),
         Ok(None) => {}
         Err(error) => return Err(format!("Gateway tool error: {error}")),
@@ -29,7 +29,7 @@ pub async fn execute_tool(
     let (node_sender, forwarded_id) = {
         let state_read = state.read().await;
         let tool = state_read
-            .tool_registry
+            .node_tool_registry
             .get(&tool_name)
             .ok_or_else(|| format!("Tool '{tool_name}' not found"))?;
         let sender = state_read

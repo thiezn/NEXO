@@ -192,7 +192,7 @@ Current model flow:
 
 1. A node discovers downloaded models and includes their IDs in the `connect` payload.
 2. The node may auto-load startup models based on configured startup capabilities.
-3. The node sends `model.status` with loaded `ModelDescriptor` values and available
+3. The node sends `model.status` with loaded `ModelDefinition` values and available
    model IDs.
 4. If a run requests a model that is available but not loaded, the Gateway sends
    `model.unload` for other loaded models on that node, then `model.load` for the

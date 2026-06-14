@@ -2,9 +2,7 @@
 use super::*;
 use crate::agent::RunHandle;
 use crate::server::state::{GatewayState, PeerInfo, SharedState, dummy_sender};
-use nexo_core::{
-    MetadataMap, ModelCapability, ModelId, ModelModalities, RoleStrategy, SupportedModality,
-};
+use nexo_core::{MetadataMap, ModelCapability, ModelId, RoleStrategy};
 use nexo_ws_schema::{
     ConnectionRole, EventKind, Frame, Method, ModelLoadResponse, ModelUnloadResponse,
 };
@@ -31,17 +29,13 @@ fn make_run_handle(state: &SharedState, db: &SqlitePool) -> RunHandle {
 fn make_loaded_model(
     model_id: &str,
     capabilities: Vec<ModelCapability>,
-) -> nexo_core::ModelDescriptor {
-    nexo_core::ModelDescriptor {
+) -> nexo_core::ModelDefinition {
+    nexo_core::ModelDefinition {
         id: ModelId::from(model_id),
         display_name: model_id.into(),
         provider: Some("test".into()),
         runtime: nexo_core::InferenceRuntime::AnyTts,
         capabilities,
-        modalities: ModelModalities {
-            input: vec![SupportedModality::Text],
-            output: vec![SupportedModality::Image],
-        },
         role_strategy: RoleStrategy::Default,
         context_window_tokens: Some(4096),
         max_output_tokens: Some(1024),

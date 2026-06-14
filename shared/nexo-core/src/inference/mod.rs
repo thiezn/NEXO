@@ -15,12 +15,19 @@ pub mod stream;
 /// Token usage and performance metric types.
 pub mod usage;
 
+/// Inference request payload types.
+pub mod requests;
+
+/// Model selection primitives.
+pub mod selection;
+
 pub use errors::{InferenceErrorCode, InferenceFailure, Retryability};
 pub use finish::FinishReason;
-pub use request::{
-    AudioFormat, DetokenizationRequest, EmbedRequest, GenerationPromptPolicy,
-    ImageGenerationRequest, ImageGenerationSize, InferenceRequest, SpecialTokenPolicy,
-    SpeechGenerationRequest, SpeechLanguage, TokenizationInput, TokenizationRequest,
+pub use request::{InferenceOperation, InferenceRequest};
+pub use requests::{
+    AudioFormat, DetokenizationPayload, EmbedPayload, GeneratedImage, GenerationPromptPolicy,
+    ImageGenerationPayload, ImageGenerationSize, MultiModalPayload, SpecialTokenPolicy,
+    SpeechGenerationPayload, SpeechLanguage, TokenizationPayload,
 };
 pub use response::{
     DetokenizationResponse, EmbeddingResponse, EmbeddingVector, GenerateChunk, GenerateCompleted,
@@ -28,6 +35,7 @@ pub use response::{
     TokenizationResponse,
 };
 pub use sampling::{OutputConstraint, SamplingConfig, StreamingMode};
+pub use selection::ModelSelection;
 pub use stream::GenerateDelta;
 pub use stream::InferenceStream;
 pub use usage::{PerformanceMetrics, TokenUsage};

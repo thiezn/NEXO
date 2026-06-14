@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 use futures_util::StreamExt;
+use nexo_ai::registry::Model;
 use nexo_ai::{
     InferenceEngine, InferenceEngineConfig, RegisteredModelConfig, RuntimeConfig,
     StaticModelRegistry,
@@ -9,9 +10,9 @@ use nexo_ai::{
 use nexo_core::inference::request::GenerateRequest;
 use nexo_core::{
     AudioFormat, ContentPart, ConversationMessage, FinishReason, GenerateDelta, InferenceRequest,
-    InferenceResponse, InferenceStream, MediaSource, MessageRole, ModelCapability, ModelDescriptor,
-    ModelId, ModelSelection, PerformanceMetrics, RequestId, RoundId, RunId, SessionId, TextPart,
-    TokenUsage, ToolCall, ToolCallDelta, ToolCallId, ToolChoice,
+    InferenceResponse, InferenceStream, MediaSource, MessageRole, ModelCapability, ModelDefinition,
+    ModelId, ModelSelection, PerformanceMetrics, RequestId, RoundId, RunId, SessionId, TokenUsage,
+    ToolCall, ToolCallDelta, ToolCallId, ToolChoice,
 };
 use nexo_ws_client::WriteHalf;
 use nexo_ws_schema::{
@@ -64,14 +65,14 @@ impl LoadedModels {
         self.available.keys().map(ToString::to_string).collect()
     }
 
-    pub(super) fn available_model_descriptors(&self) -> Vec<ModelDescriptor> {
+    pub(super) fn available_model_descriptors(&self) -> Vec<ModelDefinition> {
         self.available
             .values()
             .map(|model| model.descriptor.clone())
             .collect()
     }
 
-    async fn loaded_model_descriptors(&self) -> Vec<ModelDescriptor> {
+    async fn loaded_model_descriptors(&self) -> Vec<ModelDefinition> {
         match &self.engine {
             Some(engine) => engine.loaded_models().await,
             None => Vec::new(),
@@ -101,17 +102,10 @@ impl LoadedModels {
             }
 
             let specific_model = config.default_models.get(&capability).cloned();
-            let runtime_preference = specific_model
-                .as_ref()
-                .and_then(|model_id| self.available.get(model_id))
-                .map(|model| model.descriptor.runtime)
-                .unwrap_or(nexo_core::InferenceRuntime::AnyTts);
 
             let selection = ModelSelection {
                 specific_model,
                 required_capabilities: vec![capability],
-                preferred_capabilities: config.startup_capabilities[index + 1..].to_vec(),
-                runtime_preference,
             };
             let Some(descriptor) = registry.resolve_model(&selection) else {
                 tracing::warn!(
@@ -404,18 +398,7 @@ pub(super) async fn queue_run_round(
         "Starting round inference"
     );
 
-    let runtime_preference = {
-        let models = models.lock().await;
-        request
-            .model_id
-            .as_ref()
-            .map(|model_id| ModelId::from(model_id.as_str()))
-            .and_then(|model_id| models.available.get(&model_id))
-            .map(|model| model.descriptor.runtime)
-            .unwrap_or(nexo_core::InferenceRuntime::AnyTts)
-    };
-
-    let request = run_round_request(request_id, request, enable_tool_calling, runtime_preference);
+    let request = run_round_request(request_id, request, enable_tool_calling);
     let models = models.clone();
     let tx = tx.clone();
     let request_id = request_id.to_string();
@@ -585,8 +568,6 @@ pub(super) async fn queue_image_generate(
         model: ModelSelection {
             specific_model: None,
             required_capabilities: vec![ModelCapability::ImageGeneration],
-            preferred_capabilities: Vec::new(),
-            runtime_preference: nexo_core::InferenceRuntime::AnyTts,
         },
         prompt: params.prompt,
         negative_prompt: params.negative_prompt,
@@ -653,8 +634,6 @@ pub(super) async fn queue_audio_generate(
         model: ModelSelection {
             specific_model: None,
             required_capabilities: vec![ModelCapability::SpeechGeneration],
-            preferred_capabilities: Vec::new(),
-            runtime_preference: nexo_core::InferenceRuntime::AnyTts,
         },
         text: params.prompt,
         language: params.language,
@@ -752,7 +731,6 @@ fn run_round_request(
     request_id: &str,
     round: RunRoundRequest,
     enable_tool_calling: bool,
-    runtime_preference: nexo_core::InferenceRuntime,
 ) -> InferenceRequest {
     let use_tools = enable_tool_calling
         && !round.tools.is_empty()
@@ -769,13 +747,10 @@ fn run_round_request(
         RoundId::from(round.round_id),
         ModelSelection {
             specific_model: round.model_id.map(ModelId::from),
-            required_capabilities: vec![ModelCapability::TextGeneration],
-            preferred_capabilities: if use_tools {
-                vec![ModelCapability::ToolCalling]
-            } else {
-                Vec::new()
-            },
-            runtime_preference,
+            required_capabilities: vec![
+                ModelCapability::TextGeneration,
+                ModelCapability::ToolCalling,
+            ],
         },
         round.messages,
         if use_tools { round.tools } else { Vec::new() },
@@ -1151,7 +1126,7 @@ fn text_from_message(message: &ConversationMessage) -> String {
         .parts
         .iter()
         .filter_map(|part| match part {
-            ContentPart::Text(TextPart { text }) => Some(text.as_str()),
+            ContentPart::Text(text) => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -1272,48 +1247,11 @@ mod tests {
     use nexo_ai::engine::mistralrs::{MistralRsAutoLoader, MistralRsLoader, MistralRsModelConfig};
     use nexo_ai::{ModelDataType, ModelRuntimeImplementation};
     use nexo_core::{
-        GenerateChunk, InferenceErrorCode, InferenceFailure, MetadataMap, ModelModalities,
-        ReasoningSettings, Retryability, RoleStrategy, SupportedModality,
+        GenerateChunk, InferenceErrorCode, InferenceFailure, MetadataMap, ReasoningSettings,
+        Retryability, RoleStrategy,
     };
 
     use super::*;
-
-    #[test]
-    fn run_round_with_tools_prefers_tool_calling() {
-        let request = run_round_request(
-            "request-1",
-            RunRoundRequest {
-                run_id: "run-1".to_string(),
-                round_id: "round-1".to_string(),
-                session_id: "session-1".to_string(),
-                messages: Vec::new(),
-                tools: vec![nexo_core::ToolDefinition {
-                    name: "ping".to_string(),
-                    description: "Ping".to_string(),
-                    parameters: serde_json::json!({"type": "object"}),
-                    contract_version: None,
-                    execution: nexo_core::ToolExecutionConstraints::default(),
-                    metadata: MetadataMap::new(),
-                }],
-                tool_choice: ToolChoice::Automatic,
-                reasoning: ReasoningSettings::default(),
-                model_id: None,
-            },
-            true,
-            nexo_core::InferenceRuntime::AnyTts,
-        );
-
-        let InferenceRequest::Generate(request) = request else {
-            panic!("expected generate request");
-        };
-        assert_eq!(request.tool_choice, ToolChoice::Automatic);
-        assert!(
-            request
-                .model
-                .preferred_capabilities
-                .contains(&ModelCapability::ToolCalling)
-        );
-    }
 
     #[test]
     fn run_round_with_tool_calling_disabled_omits_tools() {
@@ -1330,7 +1268,6 @@ mod tests {
                     parameters: serde_json::json!({"type": "object"}),
                     contract_version: None,
                     execution: nexo_core::ToolExecutionConstraints::default(),
-                    metadata: MetadataMap::new(),
                 }],
                 tool_choice: ToolChoice::Automatic,
                 reasoning: ReasoningSettings::default(),
@@ -1345,7 +1282,6 @@ mod tests {
         };
         assert_eq!(request.tool_choice, ToolChoice::Disabled);
         assert!(request.tools.is_empty());
-        assert!(request.model.preferred_capabilities.is_empty());
     }
 
     #[test]
@@ -1363,7 +1299,6 @@ mod tests {
                     parameters: serde_json::json!({"type": "object"}),
                     contract_version: None,
                     execution: nexo_core::ToolExecutionConstraints::default(),
-                    metadata: MetadataMap::new(),
                 }],
                 tool_choice: ToolChoice::Disabled,
                 reasoning: ReasoningSettings::default(),
@@ -1378,7 +1313,6 @@ mod tests {
         };
         assert_eq!(request.tool_choice, ToolChoice::Disabled);
         assert!(request.tools.is_empty());
-        assert!(request.model.preferred_capabilities.is_empty());
     }
 
     #[test]
@@ -1506,16 +1440,13 @@ mod tests {
 
     fn model_config(id: &str, capabilities: Vec<ModelCapability>) -> RegisteredModelConfig {
         RegisteredModelConfig {
-            descriptor: ModelDescriptor {
+            descriptor: ModelDefinition {
                 id: ModelId::from(id),
                 display_name: id.to_string(),
                 provider: Some("test".to_string()),
                 runtime: nexo_core::InferenceRuntime::AnyTts,
                 capabilities,
-                modalities: ModelModalities {
-                    input: vec![SupportedModality::Text],
-                    output: vec![SupportedModality::Text],
-                },
+
                 role_strategy: RoleStrategy::Default,
                 context_window_tokens: Some(4096),
                 max_output_tokens: Some(1024),

@@ -29,22 +29,21 @@ pub use common::{MetadataMap, PageInfo, PageRequest, Timestamp};
 pub use error::{Error, Result};
 pub use ids::{ModelId, NodeId, RequestId, RoundId, RunId, SessionId, ToolCallId};
 pub use inference::{
-    AudioFormat, DetokenizationRequest, DetokenizationResponse, EmbedRequest, EmbeddingResponse,
+    AudioFormat, DetokenizationPayload, DetokenizationResponse, EmbedPayload, EmbeddingResponse,
     EmbeddingVector, FinishReason, GenerateChunk, GenerateCompleted, GenerateDelta,
-    GenerateStarted, GenerationPromptPolicy, ImageGenerationRequest, ImageGenerationResponse,
+    GenerateStarted, GenerationPromptPolicy, ImageGenerationPayload, ImageGenerationResponse,
     ImageGenerationSize, InferenceErrorCode, InferenceFailure, InferenceRequest, InferenceResponse,
-    InferenceStream, OutputConstraint, PerformanceMetrics, Retryability, SamplingConfig,
-    SpecialTokenPolicy, SpeechGenerationRequest, SpeechGenerationResponse, SpeechLanguage,
-    StreamingMode, TokenUsage, TokenizationInput, TokenizationRequest, TokenizationResponse,
+    InferenceStream, ModelSelection, OutputConstraint, PerformanceMetrics, Retryability,
+    SamplingConfig, SpecialTokenPolicy, SpeechGenerationPayload, SpeechGenerationResponse,
+    SpeechLanguage, StreamingMode, TokenUsage, TokenizationPayload, TokenizationResponse,
 };
 pub use message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
-    MessageRole, TextPart, VideoInput,
+    MessageRole, VideoInput,
 };
 pub use model::{
-    InferenceRuntime, ModelCapability, ModelDescriptor, ModelModalities, ModelRegistry,
-    ModelRuntimeState, ModelSelection, ReasoningEffort, ReasoningSettings, RoleStrategy,
-    SupportedModality, ThinkingMode,
+    ModelCapability, ModelDefinition, ModelFamily, ModelRegistry, ModelRuntimeState,
+    ReasoningEffort, ReasoningSettings, RoleStrategy, ThinkingMode,
 };
 pub use run::{
     RoundEvent, RoundStatus, RoundStatusUpdate, RoundSummary, RunEvent, RunStatus, RunStatusUpdate,

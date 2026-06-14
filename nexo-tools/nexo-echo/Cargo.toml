@@ -6,6 +6,9 @@ edition = "2024"
 [dependencies]
 nexo-core = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+schemars = { workspace = true }
+async-trait = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 use nexo_core::message::ConversationMessage;
 use nexo_core::{
-    ModelDescriptor, ReasoningSettings, SpeechLanguage, ToolCall, ToolChoice, ToolDefinition,
+    ModelDefinition, ReasoningSettings, SpeechLanguage, ToolCall, ToolChoice, ToolDefinition,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -136,7 +136,7 @@ pub struct StatusParams {}
 
 /// Parameters for the `send` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SendParams {
     /// Field value.
     pub target: String,
@@ -148,7 +148,7 @@ pub struct SendParams {
 
 /// Parameters for the `run.start` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunStartParams {
     /// Field value.
     pub input: String,
@@ -175,7 +175,7 @@ pub struct RunStartParams {
 
 /// Parameters for the `run.stop` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunStopParams {
     /// The active run to stop.
     pub run_id: String,
@@ -183,7 +183,7 @@ pub struct RunStopParams {
 
 /// Response payload for the `run.stop` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunStopResponse {
     /// Whether the run was still active and has now been stopped.
     pub stopped: bool,
@@ -191,7 +191,7 @@ pub struct RunStopResponse {
 
 /// Parameters for the `run.instructions.append` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunInstructionsAppendParams {
     /// The active run that should observe the new context on its next round.
     pub run_id: String,
@@ -201,7 +201,7 @@ pub struct RunInstructionsAppendParams {
 
 /// Response payload for the `run.instructions.append` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunInstructionsAppendResponse {
     /// Whether the instructions were accepted for the active run.
     pub queued: bool,
@@ -230,7 +230,7 @@ pub struct ToolsCatalogParams {
 
 /// Response payload for `health`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct HealthResponse {
     /// Field value.
     pub status: String,
@@ -240,7 +240,7 @@ pub struct HealthResponse {
 
 /// Response payload for `status`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct StatusResponse {
     /// Field value.
     pub connected_users: u32,
@@ -259,7 +259,7 @@ pub struct SendResponse {
 
 /// Response payload for `run.start` (initial ack and final result).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunStartResponse {
     /// Field value.
     pub run_id: String,
@@ -274,7 +274,7 @@ pub struct RunStartResponse {
 
 /// Gateway-to-node payload for a single run round inference.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunRoundRequest {
     /// Field value.
     pub run_id: String,
@@ -300,7 +300,7 @@ pub struct RunRoundRequest {
 
 /// A single tool call returned from a node for a round.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunRoundToolCall {
     #[serde(flatten)]
     /// Field value.
@@ -309,7 +309,7 @@ pub struct RunRoundToolCall {
 
 /// Node-to-gateway response payload for a single run round inference.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunRoundResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
@@ -375,7 +375,7 @@ pub struct ToolsRegisterResponse {
 
 /// Parameters for the `tools.execute` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ToolsExecuteParams {
     /// Field value.
     pub tool: String,
@@ -401,7 +401,7 @@ pub struct ToolsExecuteResponse {
 
 /// Parameters for the `session.create` method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SessionCreateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
@@ -414,7 +414,7 @@ pub struct SessionCreateParams {
 
 /// Response payload for `session.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SessionCreateResponse {
     /// Field value.
     pub session_id: String,
@@ -432,7 +432,7 @@ pub struct SessionListParams {}
 
 /// A single session entry in a session list response.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SessionEntry {
     /// Field value.
     pub session_id: String,
@@ -461,7 +461,7 @@ pub struct SessionListResponse {
 
 /// Parameters for the `session.get` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SessionGetParams {
     /// Field value.
     pub session_id: String,
@@ -469,7 +469,7 @@ pub struct SessionGetParams {
 
 /// Response payload for `session.get`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SessionGetResponse {
     /// Field value.
     pub session_id: String,
@@ -489,7 +489,7 @@ pub struct SessionGetResponse {
 
 /// Parameters for the `session.clear` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SessionClearParams {
     /// Field value.
     pub session_id: String,
@@ -506,7 +506,7 @@ pub struct SessionClearResponse {
 
 /// Parameters for the `cron.create` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CronCreateParams {
     /// Field value.
     pub name: String,
@@ -521,7 +521,7 @@ pub struct CronCreateParams {
 
 /// Response payload for `cron.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CronCreateResponse {
     /// Field value.
     pub job_id: String,
@@ -535,7 +535,7 @@ pub struct CronListParams {}
 
 /// A single cron job entry.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CronEntry {
     /// Field value.
     pub job_id: String,
@@ -564,7 +564,7 @@ pub struct CronListResponse {
 
 /// Parameters for the `cron.delete` method.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CronDeleteParams {
     /// Field value.
     pub job_id: String,
@@ -581,7 +581,7 @@ pub struct CronDeleteResponse {
 
 /// Parameters for `model.load` (gateway → node).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ModelLoadParams {
     /// Stable ID for the model to load.
     pub model_id: String,
@@ -589,7 +589,7 @@ pub struct ModelLoadParams {
 
 /// Response payload for `model.load`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ModelLoadResponse {
     /// Stable ID for the model.
     pub model_id: String,
@@ -604,7 +604,7 @@ pub struct ModelLoadResponse {
 
 /// Parameters for `model.unload` (gateway → node).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ModelUnloadParams {
     /// Stable ID for the model to unload.
     pub model_id: String,
@@ -621,17 +621,17 @@ pub struct ModelUnloadResponse {
 
 /// Sent by a node to report its model state.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ModelStatusParams {
     /// Models currently loaded with their categories.
     #[serde(default)]
-    pub loaded_models: Vec<ModelDescriptor>,
+    pub loaded_models: Vec<ModelDefinition>,
     /// All model IDs available on disk on this node.
     #[serde(default)]
     pub available_models: Vec<String>,
     /// All model descriptors available on disk on this node.
     #[serde(default)]
-    pub available_model_descriptors: Vec<ModelDescriptor>,
+    pub available_model_descriptors: Vec<ModelDefinition>,
 }
 
 // -- prompt.document.create --
@@ -723,7 +723,7 @@ pub struct PromptDocumentDeleteResponse {
 
 /// Parameters for `prompt.collection.create`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PromptCollectionCreateParams {
     /// Unique ID for the collection.
     pub id: String,
@@ -776,7 +776,7 @@ pub struct PromptCollectionDeleteResponse {
 
 /// Parameters for `image.analyze`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ImageAnalyzeParams {
     /// Base64-encoded image data.
     pub image_data: String,
@@ -811,7 +811,7 @@ fn default_image_analyze_temperature() -> f64 {
 
 /// Response payload for `image.analyze`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ImageAnalyzeResponse {
     /// Textual analysis result of the image.
     pub text: String,
@@ -825,7 +825,7 @@ pub struct ImageAnalyzeResponse {
 
 /// Parameters for `audio.analyze`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AudioAnalyzeParams {
     /// Base64-encoded audio data.
     pub audio_data: String,
@@ -863,7 +863,7 @@ fn default_audio_analyze_temperature() -> f64 {
 
 /// Response payload for `audio.analyze`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AudioAnalyzeResponse {
     /// Textual analysis result of the audio.
     pub text: String,
@@ -877,7 +877,7 @@ pub struct AudioAnalyzeResponse {
 
 /// Parameters for `image.generate`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ImageGenerateParams {
     /// The positive prompt used for generation.
     pub prompt: String,
@@ -923,7 +923,7 @@ fn default_image_generate_sample_count() -> u32 {
 
 /// A generated image returned by `image.generate`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct GeneratedImagePayload {
     /// Zero-based index of this image in the generated batch.
     pub index: usize,
@@ -942,7 +942,7 @@ pub struct GeneratedImagePayload {
 
 /// Response payload for `image.generate`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ImageGenerateResponse {
     /// Generated images.
     pub images: Vec<GeneratedImagePayload>,
@@ -954,7 +954,7 @@ pub struct ImageGenerateResponse {
 
 /// Parameters for `audio.generate`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AudioGenerateParams {
     /// The text prompt to synthesize into audio.
     pub prompt: String,
@@ -979,7 +979,7 @@ pub struct AudioGenerateParams {
 
 /// Response payload for `audio.generate`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AudioGenerateResponse {
     /// Base64-encoded audio bytes.
     pub audio_data: String,
@@ -1003,7 +1003,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use nexo_core::ToolExecutionConstraints;
-    use nexo_core::message::{ContentPart, MessageRole, TextPart};
+    use nexo_core::message::{ContentPart, MessageRole};
     use std::collections::HashMap;
 
     #[test]
@@ -1283,9 +1283,7 @@ mod tests {
             session_id: "sess-1".into(),
             messages: vec![ConversationMessage {
                 role: MessageRole::System,
-                parts: vec![ContentPart::Text(TextPart {
-                    text: "You are helpful".into(),
-                })],
+                parts: vec![ContentPart::Text("You are helpful".into())],
                 metadata: HashMap::new(),
             }],
             tools: vec![ToolDefinition {
@@ -1433,9 +1431,7 @@ mod tests {
     fn conversation_message_roundtrip() {
         let msg = ConversationMessage {
             role: MessageRole::Assistant,
-            parts: vec![ContentPart::Text(TextPart {
-                text: "hello".into(),
-            })],
+            parts: vec![ContentPart::Text("hello".into())],
             metadata: HashMap::new(),
         };
         let json = serde_json::to_string(&msg).unwrap();

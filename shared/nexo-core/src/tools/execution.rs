@@ -32,7 +32,7 @@ pub enum ToolParallelism {
 /// Execution constraints used by orchestrators when scheduling a tool.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ToolExecutionConstraints {
     /// The declared side-effect level of the tool.
     pub side_effect_level: ToolSideEffectLevel,

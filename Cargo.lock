@@ -5014,7 +5014,10 @@ dependencies = [
 name = "nexo-echo"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "nexo-core",
+ "schemars 0.9.0",
+ "serde",
  "serde_json",
 ]
 

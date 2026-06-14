@@ -4,8 +4,8 @@ use super::db_types::{
     ConversationEntryKind, message_role_to_db, parse_entry_kind, parse_message_role,
 };
 use nexo_core::{
-    ContentPart, ConversationMessage, MessageRole, MetadataMap, TextPart, ToolCall, ToolCallId,
-    ToolResult, ToolResultContent, ToolResultStatus,
+    ContentPart, ConversationMessage, MessageRole, MetadataMap, ToolCall, ToolCallId, ToolResult,
+    ToolResultContent, ToolResultStatus,
 };
 use nexo_ws_schema::Frame;
 use sqlx::SqlitePool;
@@ -154,7 +154,7 @@ fn conversation_message_from_row(
 }
 
 fn text_parts(content: String) -> Vec<ContentPart> {
-    vec![ContentPart::Text(TextPart { text: content })]
+    vec![ContentPart::Text(content)]
 }
 
 fn tool_call_parts(content: &str) -> Vec<ContentPart> {
@@ -304,7 +304,7 @@ mod tests {
     }
 
     fn message_text(message: &ConversationMessage) -> &str {
-        let ContentPart::Text(TextPart { text }) = &message.parts[0] else {
+        let ContentPart::Text(text) = &message.parts[0] else {
             panic!("expected text part");
         };
         text

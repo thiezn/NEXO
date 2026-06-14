@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Parameters for the `connect` handshake request.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ConnectParams {
     /// Minimum protocol version supported by the client.
     pub min_protocol: u32,
@@ -39,7 +39,7 @@ pub struct ConnectParams {
 
 /// Tick/heartbeat policy sent in the hello-ok response.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Policy {
     /// Tick/heartbeat interval in milliseconds.
     pub tick_interval_ms: u64,

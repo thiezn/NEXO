@@ -6,11 +6,12 @@
 pub mod catalog;
 /// Inference engine implementation and configuration.
 pub mod engine;
+
 /// Crate-local error and result types.
 pub mod error;
-pub mod registry;
 
-pub use catalog::{downloaded_model_configs, model_config_from_manifest};
+pub use catalog::{ModelCatalog, ModelManifest};
+
 pub use engine::InferenceEngine;
 pub use engine::any_tts::AnyTtsModelConfig;
 pub use engine::config::default_config_path;
@@ -19,9 +20,3 @@ pub use engine::config::{
     RegisteredModelConfig, RuntimeConfig, RuntimeImplementation, SchedulerPolicy,
 };
 pub use error::{Error, Result};
-pub use registry::StaticModelRegistry;
-
-pub use nexo_core::{
-    InferenceRequest, InferenceResponse, InferenceStream, ModelDescriptor, ModelId, ModelRegistry,
-    ModelRuntimeState,
-};

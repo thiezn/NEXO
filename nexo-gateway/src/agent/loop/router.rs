@@ -1,5 +1,5 @@
 use crate::server::state::{GatewayState, PeerId, SharedState};
-use nexo_core::{ModelCapability, ModelDescriptor};
+use nexo_core::{ModelCapability, ModelDefinition};
 use nexo_ws_schema::{
     ConnectionRole, Frame, Method, ModelLoadParams, ModelLoadResponse, ModelUnloadParams,
 };
@@ -198,7 +198,7 @@ impl Router {
         })
     }
 
-    fn supports_capability(model: &ModelDescriptor, capability: ModelCapability) -> bool {
+    fn supports_capability(model: &ModelDefinition, capability: ModelCapability) -> bool {
         model.capabilities.contains(&capability)
     }
 
@@ -445,7 +445,7 @@ mod tests {
 
     use super::*;
     use crate::server::state::PeerInfo;
-    use nexo_core::{MetadataMap, ModelId, ModelModalities, RoleStrategy, SupportedModality};
+    use nexo_core::{MetadataMap, ModelId, RoleStrategy};
     use std::path::PathBuf;
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -453,17 +453,13 @@ mod tests {
     fn make_loaded_model(
         model_id: &str,
         capabilities: Vec<ModelCapability>,
-    ) -> nexo_core::ModelDescriptor {
-        nexo_core::ModelDescriptor {
+    ) -> nexo_core::ModelDefinition {
+        nexo_core::ModelDefinition {
             id: ModelId::from(model_id),
             display_name: model_id.into(),
             provider: Some("test".into()),
             runtime: nexo_core::InferenceRuntime::AnyTts,
             capabilities,
-            modalities: ModelModalities {
-                input: vec![SupportedModality::Text],
-                output: vec![SupportedModality::Text],
-            },
             role_strategy: RoleStrategy::Default,
             context_window_tokens: Some(4096),
             max_output_tokens: Some(1024),

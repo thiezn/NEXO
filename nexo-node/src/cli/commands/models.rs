@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use cli_helpers::{CommandContext, Runnable};
 use comfy_table::{ContentArrangement, Table, presets::ASCII_MARKDOWN};
-use nexo_core::{ModelCapability, SupportedModality};
+use nexo_core::ModelCapability;
 
 use crate::registry::{
     capability_label, find_manifest, known_manifests, list_models, manifests_for_capability,
@@ -189,12 +189,11 @@ fn manifests_for_query(query: &str) -> Option<Vec<&'static crate::manifest::Mode
         "chat" | "text" => Some(manifests_for_capability(ModelCapability::TextGeneration)),
         "tool" | "tools" => Some(manifests_for_capability(ModelCapability::ToolCalling)),
         "embedding" | "embeddings" => Some(manifests_for_capability(ModelCapability::Embeddings)),
-        "image" | "vision" => Some(merge_manifests(
-            manifests_for_modality(SupportedModality::Image),
-            manifests_for_capability(ModelCapability::ImageGeneration),
-        )),
+        "image" | "vision" => Some(merge_manifests(manifests_for_capability(
+            ModelCapability::ImageGeneration,
+        ))),
         "listen" | "audio" | "speech" | "stt" | "asr" => {
-            Some(manifests_for_modality(SupportedModality::Audio))
+            Some(manifests_for_capability(ModelCapability::SpeechRecognition))
         }
         "talk" | "tts" | "speech-generation" => {
             Some(manifests_for_capability(ModelCapability::SpeechGeneration))

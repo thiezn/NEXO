@@ -3,29 +3,20 @@ use serde::{Deserialize, Serialize};
 use crate::common::MetadataMap;
 use crate::ids::ModelId;
 
-use super::{InferenceRuntime, ModelCapability, ModelModalities, RoleStrategy};
+use super::{ModelCapability, RoleStrategy};
 
 /// Describes a model that may be selected for inference.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ModelDescriptor {
-    /// The stable model identifier used across the workspace.
+pub struct ModelDefinition {
+    /// The stable model identifier
     pub id: ModelId,
 
-    /// The human-readable model label shown in logs or user interfaces.
+    /// The human-readable model label
     pub display_name: String,
 
-    /// The provider or runtime family responsible for the model.
-    pub provider: Option<String>,
-
-    /// The runtime implementation required or preferred when loading this model.
-    pub runtime: InferenceRuntime,
-
-    /// The declared model capabilities.
+    /// The declared model capabilities
     pub capabilities: Vec<ModelCapability>,
-
-    /// The modalities accepted and emitted by the model.
-    pub modalities: ModelModalities,
 
     /// The conversation role handling strategy required by the model adapter.
     pub role_strategy: RoleStrategy,

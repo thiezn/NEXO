@@ -21,7 +21,6 @@ metal = [
 
 [dependencies]
 any-tts = { version = "0.1", default-features = false, features = ["kokoro"] }
-anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 candle-core = { workspace = true }
@@ -37,6 +36,12 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 tracing = { workspace = true }
+
+# We only bring anyhow in here as MistralRs requires it when initializing
+# its MistralTokenizationRequest and MistralDetokenizationRequest structs.
+# Do NOT use this anywhere else, since nexo-ai is a library crate we
+# only want to leverage thiserror.
+anyhow = { workspace = true }
 
 [dependencies.either]
 version = "1"

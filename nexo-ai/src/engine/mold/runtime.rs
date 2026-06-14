@@ -10,7 +10,7 @@ use mold_ai_inference::{
 use nexo_core::inference::request::{GeneratedImage, ImageGenerationRequest};
 use nexo_core::{
     InferenceErrorCode, InferenceFailure, InferenceRequest, InferenceResponse, InferenceRuntime,
-    InferenceStream, MediaSource, ModelDescriptor, ModelId, RequestId, Retryability,
+    InferenceStream, MediaSource, ModelDefinition, ModelId, RequestId, Retryability,
 };
 use nexo_model_mgmt::resolve_model_storage_dir;
 
@@ -59,7 +59,7 @@ impl MoldRuntime {
 
     pub(crate) async fn submit(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: InferenceRequest,
     ) -> Result<InferenceStream> {
         match request {
@@ -74,7 +74,7 @@ impl MoldRuntime {
 
     async fn submit_generate_image(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: ImageGenerationRequest,
     ) -> Result<InferenceStream> {
         let engine = self.engine.clone();
@@ -227,7 +227,7 @@ fn missing_path_error(component: &str, model_dir: &Path) -> Error {
 }
 
 fn map_image_generation_request(
-    descriptor: &ModelDescriptor,
+    descriptor: &ModelDefinition,
     request: &ImageGenerationRequest,
 ) -> MoldGenerateRequest {
     MoldGenerateRequest {
@@ -446,16 +446,15 @@ mod tests {
 
     #[test]
     fn map_request_uses_flux2_defaults() {
-        let descriptor = ModelDescriptor {
+        let descriptor = ModelDefinition {
             id: "flux.2-klein-9b".into(),
             display_name: "FLUX.2 Klein 9B".to_string(),
             provider: None,
             runtime: nexo_core::InferenceRuntime::Mold,
-            capabilities: vec![nexo_core::ModelCapability::ImageGeneration],
-            modalities: nexo_core::ModelModalities {
-                input: vec![nexo_core::SupportedModality::Text],
-                output: vec![nexo_core::SupportedModality::Image],
-            },
+            capabilities: vec![
+                nexo_core::ModelCapability::ImageGeneration,
+                nexo_core::ModelCapability::TextGeneration,
+            ],
             role_strategy: nexo_core::RoleStrategy::Default,
             context_window_tokens: None,
             max_output_tokens: None,
@@ -467,8 +466,6 @@ mod tests {
             model: nexo_core::ModelSelection {
                 specific_model: None,
                 required_capabilities: Vec::new(),
-                preferred_capabilities: Vec::new(),
-                runtime_preference: nexo_core::InferenceRuntime::AnyTts,
             },
             prompt: "a test image".to_string(),
             negative_prompt: None,

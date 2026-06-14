@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use nexo_core::{InferenceRuntime, ModelDescriptor};
+use nexo_core::{InferenceRuntime, ModelDefinition};
 use serde_json::Value;
 
 /// Component types for files that make up a model artifact.
@@ -38,7 +38,6 @@ pub enum ModelComponent {
 
 impl ModelComponent {
     /// Returns the stable component identifier used in CLI output.
-    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Weights => "weights",
@@ -103,16 +102,26 @@ impl ModelFileSelector {
 pub struct ModelFile {
     /// The logical component this file belongs to.
     pub component: ModelComponent,
+
     /// Hugging Face model repository.
     pub hf_repo: String,
+
     /// Path selector inside the Hugging Face repository.
     pub selector: ModelFileSelector,
+
     /// Optional clean path under this manifest's local storage directory.
     pub local_path: Option<String>,
+
     /// Expected file size in bytes, when known.
     pub size_bytes: Option<u64>,
+
     /// Whether the source repository is gated.
+    ///
+    /// This happens when the model publisher restricts
+    /// access to the repository, for example by requiring
+    /// users to accept a license on Hugging Face before downloading.
     pub gated: bool,
+
     /// Expected SHA-256 hex digest. `None` means no digest is pinned yet.
     pub sha256: Option<&'static str>,
 }
@@ -277,43 +286,43 @@ pub enum MoldManifestLoader {
     Flux2,
 }
 
-/// A complete model definition: canonical descriptor, runtime metadata, and files.
-#[derive(Debug, Clone)]
-pub struct ModelManifest {
-    /// Canonical model identity and capabilities shared with the rest of Nexo.
-    pub descriptor: ModelDescriptor,
-    /// Runtime bindings supported by this manifest.
-    pub runtime_bindings: Vec<ManifestRuntimeBinding>,
-    /// Approximate total download size in gigabytes.
-    pub size_gb: f32,
-    /// Files required for this model.
-    pub files: Vec<ModelFile>,
-}
+// /// A complete model definition: canonical descriptor, runtime metadata, and files.
+// #[derive(Debug, Clone)]
+// pub struct ModelManifest {
+//     /// Canonical model identity and capabilities shared with the rest of Nexo.
+//     pub descriptor: ModelDefinition,
+//     /// Runtime bindings supported by this manifest.
+//     pub runtime_bindings: Vec<ManifestRuntimeBinding>,
+//     /// Approximate total download size in gigabytes.
+//     pub size_gb: f32,
+//     /// Files required for this model.
+//     pub files: Vec<ModelFile>,
+// }
 
-impl ModelManifest {
-    /// Stable local model id used by `models pull` and storage paths.
-    #[must_use]
-    pub fn id(&self) -> &str {
-        self.descriptor.id.as_str()
-    }
+// impl ModelManifest {
+//     /// Stable local model id used by `models pull` and storage paths.
+//     #[must_use]
+//     pub fn id(&self) -> &str {
+//         self.descriptor.id.as_str()
+//     }
 
-    /// Human-readable display name.
-    #[must_use]
-    pub fn display_name(&self) -> &str {
-        &self.descriptor.display_name
-    }
+//     /// Human-readable display name.
+//     #[must_use]
+//     pub fn display_name(&self) -> &str {
+//         &self.descriptor.display_name
+//     }
 
-    /// Shared local storage key used for downloaded artifacts.
-    #[must_use]
-    pub fn storage_id(&self) -> String {
-        self.descriptor
-            .metadata
-            .get("source_model")
-            .and_then(Value::as_str)
-            .map(base_storage_id)
-            .unwrap_or_else(|| sanitize_model_name(self.id()))
-    }
-}
+//     /// Shared local storage key used for downloaded artifacts.
+//     #[must_use]
+//     pub fn storage_id(&self) -> String {
+//         self.descriptor
+//             .metadata
+//             .get("source_model")
+//             .and_then(Value::as_str)
+//             .map(base_storage_id)
+//             .unwrap_or_else(|| sanitize_model_name(self.id()))
+//     }
+// }
 
 /// Determine the clean storage path for a remote filename relative to the models directory.
 #[must_use]
@@ -356,16 +365,13 @@ mod tests {
     #[test]
     fn storage_path_preserves_subdirectories() {
         let manifest = ModelManifest {
-            descriptor: nexo_core::ModelDescriptor {
+            descriptor: nexo_core::ModelDefinition {
                 id: "org/test:model".into(),
                 display_name: "Test model".to_string(),
                 provider: Some("test".to_string()),
                 runtime: nexo_core::InferenceRuntime::MistralRs,
                 capabilities: vec![nexo_core::ModelCapability::TextGeneration],
-                modalities: nexo_core::ModelModalities {
-                    input: vec![nexo_core::SupportedModality::Text],
-                    output: vec![nexo_core::SupportedModality::Text],
-                },
+
                 role_strategy: nexo_core::RoleStrategy::Default,
                 context_window_tokens: None,
                 max_output_tokens: None,
@@ -408,16 +414,13 @@ mod tests {
         );
 
         let manifest = ModelManifest {
-            descriptor: nexo_core::ModelDescriptor {
+            descriptor: nexo_core::ModelDefinition {
                 id: "gemma-4-e4b-it-uqff-afq8".into(),
                 display_name: "Gemma 4 E4B IT UQFF AFQ8".to_string(),
                 provider: Some("mistralrs-community".to_string()),
                 runtime: nexo_core::InferenceRuntime::MistralRs,
                 capabilities: vec![nexo_core::ModelCapability::TextGeneration],
-                modalities: nexo_core::ModelModalities {
-                    input: vec![nexo_core::SupportedModality::Text],
-                    output: vec![nexo_core::SupportedModality::Text],
-                },
+
                 role_strategy: nexo_core::RoleStrategy::Default,
                 context_window_tokens: None,
                 max_output_tokens: None,
@@ -442,16 +445,12 @@ mod tests {
     #[test]
     fn storage_path_uses_file_local_path_override() {
         let manifest = ModelManifest {
-            descriptor: nexo_core::ModelDescriptor {
+            descriptor: nexo_core::ModelDefinition {
                 id: "dia-1.6b-tts".into(),
                 display_name: "Dia 1.6B TTS".to_string(),
                 provider: Some("nari-labs".to_string()),
                 runtime: nexo_core::InferenceRuntime::MistralRs,
                 capabilities: vec![nexo_core::ModelCapability::SpeechGeneration],
-                modalities: nexo_core::ModelModalities {
-                    input: vec![nexo_core::SupportedModality::Text],
-                    output: vec![nexo_core::SupportedModality::Audio],
-                },
                 role_strategy: nexo_core::RoleStrategy::Default,
                 context_window_tokens: None,
                 max_output_tokens: None,

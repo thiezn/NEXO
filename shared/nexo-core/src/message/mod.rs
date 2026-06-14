@@ -9,7 +9,7 @@ pub mod multimodal;
 /// Message role definitions.
 pub mod role;
 
-pub use content_part::{ContentPart, TextPart};
+pub use content_part::ContentPart;
 pub use conversation::{Conversation, ConversationMessage};
 pub use multimodal::{AudioInput, ImageInput, MediaSource, VideoInput};
 pub use role::MessageRole;

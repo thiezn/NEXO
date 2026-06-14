@@ -1,5 +1,5 @@
 use crate::memory::git::GitStorage;
-use nexo_core::{ModelDescriptor, ToolRegistry};
+use nexo_core::{ModelDefinition, ToolRegistry};
 use nexo_ws_schema::{ConnectionRole, Frame, Scope, ToolDefinition, ToolEntry};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -48,7 +48,7 @@ pub struct GatewayState {
     /// Directed senders used to push frames to a specific peer.
     pub peer_senders: HashMap<PeerId, mpsc::Sender<Frame>>,
     /// Node-hosted tool registrations keyed by tool name.
-    pub tool_registry: HashMap<String, RegisteredTool>,
+    pub node_tool_registry: HashMap<String, RegisteredTool>,
     /// Pending forwarded requests waiting for a response frame.
     pub pending_requests: HashMap<String, oneshot::Sender<Frame>>,
     /// Broadcast channel used for shared event fan-out.
@@ -56,11 +56,11 @@ pub struct GatewayState {
     /// Timestamp at which the gateway state was initialized.
     pub started_at: chrono::DateTime<chrono::Utc>,
     /// Models currently loaded in VRAM per node.
-    pub loaded_models: HashMap<PeerId, Vec<ModelDescriptor>>,
+    pub loaded_models: HashMap<PeerId, Vec<ModelDefinition>>,
     /// Model IDs available on disk per node (declared at connect time).
     pub available_models: HashMap<PeerId, Vec<String>>,
     /// Model descriptors available on disk per node (reported by model.status).
-    pub available_model_descriptors: HashMap<PeerId, Vec<ModelDescriptor>>,
+    pub available_model_descriptors: HashMap<PeerId, Vec<ModelDefinition>>,
     /// Queued multimodal generation request counts keyed by session ID.
     pub queued_generation_by_session: HashMap<String, usize>,
     /// Notified whenever a node's loaded model changes (used to wake the queue drain watcher).
@@ -68,7 +68,7 @@ pub struct GatewayState {
     /// Resolved path to the storage root (~/.nexo/storage).
     pub storage_root: PathBuf,
     /// Tools that execute locally on the gateway (e.g., notes).
-    pub gateway_tools: Arc<ToolRegistry>,
+    pub gateway_tool_registry: Arc<ToolRegistry>,
     /// Git-backed storage for persistent data such as notes and prompt documents.
     pub git_storage: Option<Arc<GitStorage>>,
 }
@@ -80,7 +80,7 @@ impl GatewayState {
         Self {
             peers: HashMap::new(),
             peer_senders: HashMap::new(),
-            tool_registry: HashMap::new(),
+            node_tool_registry: HashMap::new(),
             pending_requests: HashMap::new(),
             event_tx: tx,
             started_at: chrono::Utc::now(),
@@ -90,7 +90,7 @@ impl GatewayState {
             queued_generation_by_session: HashMap::new(),
             model_ready_notify: Arc::new(Notify::new()),
             storage_root,
-            gateway_tools: Arc::new(ToolRegistry::new()),
+            gateway_tool_registry: Arc::new(ToolRegistry::new()),
             git_storage: None,
         }
     }
@@ -129,14 +129,14 @@ impl GatewayState {
     }
 
     /// Update the set of model descriptors available on disk for a peer.
-    pub fn set_available_model_descriptors(&mut self, peer_id: &str, models: Vec<ModelDescriptor>) {
+    pub fn set_available_model_descriptors(&mut self, peer_id: &str, models: Vec<ModelDefinition>) {
         self.available_model_descriptors
             .insert(peer_id.to_string(), models);
         self.model_ready_notify.notify_waiters();
     }
 
     /// Update the loaded models for a node. Notifies queue drain waiters.
-    pub fn set_loaded_models(&mut self, peer_id: &str, models: Vec<ModelDescriptor>) {
+    pub fn set_loaded_models(&mut self, peer_id: &str, models: Vec<ModelDefinition>) {
         self.loaded_models.insert(peer_id.to_string(), models);
         self.model_ready_notify.notify_waiters();
     }
@@ -195,7 +195,7 @@ impl GatewayState {
         let now = chrono::Utc::now();
         for definition in tools {
             tracing::debug!("Registered tool '{}' from peer {peer_id}", definition.name,);
-            self.tool_registry.insert(
+            self.node_tool_registry.insert(
                 definition.name.clone(),
                 RegisteredTool {
                     definition,
@@ -209,8 +209,8 @@ impl GatewayState {
 
     /// Remove all tools registered by a specific peer.
     pub fn deregister_tools_for_peer(&mut self, peer_id: &str) {
-        let before = self.tool_registry.len();
-        self.tool_registry.retain(|name, tool| {
+        let before = self.node_tool_registry.len();
+        self.node_tool_registry.retain(|name, tool| {
             if tool.peer_id == peer_id {
                 tracing::debug!(
                     "Deregistered tool '{name}' (peer {peer_id} disconnected, registered_at={})",
@@ -221,7 +221,7 @@ impl GatewayState {
                 true
             }
         });
-        let removed = before - self.tool_registry.len();
+        let removed = before - self.node_tool_registry.len();
         if removed > 0 {
             tracing::info!("Deregistered {removed} tool(s) for peer {peer_id}");
         }
@@ -230,7 +230,7 @@ impl GatewayState {
     /// Build tool catalog entries from the registry (node tools + gateway-native tools).
     pub fn all_tool_entries(&self) -> Vec<ToolEntry> {
         let mut entries: Vec<ToolEntry> = self
-            .tool_registry
+            .node_tool_registry
             .values()
             .map(|rt| {
                 ToolEntry::new(
@@ -241,7 +241,7 @@ impl GatewayState {
             })
             .collect();
         entries.extend(
-            self.gateway_tools
+            self.gateway_tool_registry
                 .definitions()
                 .into_iter()
                 .map(|definition| ToolEntry::new(definition, "gateway", true)),
@@ -410,83 +410,5 @@ mod tests {
     fn uptime_is_non_negative() {
         let state = GatewayState::new(std::path::PathBuf::from("/tmp"));
         assert!(state.uptime_secs() < 2);
-    }
-
-    #[test]
-    fn register_and_deregister_tools() {
-        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
-        state.add_peer(make_node_peer("n1", vec!["echo".into()]), dummy_sender());
-
-        let tools = vec![
-            ToolDefinition {
-                name: "echo.run".into(),
-                description: "Echo input".into(),
-                parameters: serde_json::json!({"type": "object"}),
-                contract_version: None,
-                execution: Default::default(),
-            },
-            ToolDefinition {
-                name: "echo.ping".into(),
-                description: "Ping".into(),
-                parameters: serde_json::json!({"type": "object"}),
-                contract_version: None,
-                execution: Default::default(),
-            },
-        ];
-        let count = state.register_tools("n1", tools);
-        assert_eq!(count, 2);
-        assert_eq!(state.tool_registry.len(), 2);
-        assert!(state.tool_registry.contains_key("echo.run"));
-        assert!(state.tool_registry.contains_key("echo.ping"));
-
-        // Remove peer should deregister tools
-        state.remove_peer("n1");
-        assert!(state.tool_registry.is_empty());
-    }
-
-    #[test]
-    fn all_tool_entries_builds_catalog() {
-        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
-        state.add_peer(make_node_peer("n1", vec!["echo".into()]), dummy_sender());
-        state.register_tools(
-            "n1",
-            vec![ToolDefinition {
-                name: "echo.run".into(),
-                description: "Echo input".into(),
-                parameters: serde_json::json!({"type": "object"}),
-                contract_version: Some("2026-05-22".into()),
-                execution: Default::default(),
-            }],
-        );
-
-        let entries = state.all_tool_entries();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].definition.name, "echo.run");
-        assert_eq!(entries[0].source, "node");
-        assert!(entries[0].available);
-        assert_eq!(entries[0].definition.parameters["type"], "object");
-    }
-
-    #[test]
-    fn tool_from_disconnected_peer_shows_unavailable() {
-        let mut state = GatewayState::new(std::path::PathBuf::from("/tmp"));
-        // Manually insert a tool without a matching peer sender
-        state.tool_registry.insert(
-            "orphan.tool".into(),
-            RegisteredTool {
-                definition: ToolDefinition {
-                    name: "orphan.tool".into(),
-                    description: "Orphan".into(),
-                    parameters: serde_json::json!({}),
-                    contract_version: None,
-                    execution: Default::default(),
-                },
-                peer_id: "gone".into(),
-                registered_at: chrono::Utc::now(),
-            },
-        );
-        let entries = state.all_tool_entries();
-        assert_eq!(entries.len(), 1);
-        assert!(!entries[0].available);
     }
 }

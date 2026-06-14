@@ -18,5 +18,4 @@ pub use paths::{default_models_dir, model_storage_dir, resolve_model_storage_dir
 pub use pull::{DownloadError, pull_model, verify_sha256};
 pub use registry::{
     ModelEntry, capability_label, find_manifest, known_manifests, manifests_for_capability,
-    manifests_for_modality,
 };

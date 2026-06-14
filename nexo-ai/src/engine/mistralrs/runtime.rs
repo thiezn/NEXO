@@ -17,7 +17,7 @@ use nexo_core::inference::request::{
 };
 use nexo_core::{
     DetokenizationRequest, InferenceRequest, InferenceResponse, InferenceRuntime, InferenceStream,
-    ModelDescriptor, ModelId, TokenUsage, TokenizationRequest,
+    ModelDefinition, ModelId, TokenUsage, TokenizationRequest,
 };
 use nexo_model_mgmt::resolve_model_storage_dir;
 use tokio::sync::mpsc;
@@ -41,6 +41,9 @@ use crate::engine::config::{
 use crate::{Error, Result};
 
 /// Shared `mistralrs-core` runtime state used by `InferenceEngine`.
+///
+/// Mistral.rs creates a single MistralRs instance, that can have one or
+/// more engines added. Every engine maps to a single loaded model.
 #[derive(Clone)]
 pub(crate) struct MistralRuntime {
     engine: Arc<MistralRs>,
@@ -81,6 +84,8 @@ impl MistralRuntime {
         let first = models.next().ok_or(Error::EmptyModelCatalog)?;
         let paged_attn_config = resolve_paged_attention_config(runtime_config, device)?;
 
+        /// MistralRs does not seem to expose an initializer that allows you to submit
+        /// multiple models at once, so we build the first model and then add the rest.
         let first_pipeline = build_pipeline(first, runtime_config, device, paged_attn_config)?;
         let scheduler = map_scheduler(scheduler_policy, &first_pipeline, paged_attn_config).await;
         let engine = MistralRsBuilder::new(
@@ -119,7 +124,7 @@ impl MistralRuntime {
     /// Submits a shared `nexo-core` request to the backing runtime.
     pub(crate) async fn submit(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: InferenceRequest,
     ) -> Result<InferenceStream> {
         match request {
@@ -138,7 +143,7 @@ impl MistralRuntime {
 
     async fn submit_generate(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: GenerateRequest,
     ) -> Result<InferenceStream> {
         let context = ResponseContext {
@@ -177,9 +182,11 @@ impl MistralRuntime {
             "Submitting generate request to mistralrs"
         );
 
+        /// Build a mistralrs inference request
         let mistral_request =
             map_generate_request(&request, &descriptor, response_tx, request_ordinal)?;
 
+        /// RUN ACTUAL INFERENCE ON MISTRALRS ENGINE
         if let Err(error) = self
             .dispatch_request(&descriptor.id, Request::Normal(Box::new(mistral_request)))
             .await
@@ -198,6 +205,7 @@ impl MistralRuntime {
             "Dispatched generate request to mistralrs"
         );
 
+        /// Parse incoming responses from mistralrs and map them to nexo-core responses
         let started = stream::once({
             let context = context.clone();
             async move { Ok(generation_started(&context)) }
@@ -243,7 +251,7 @@ impl MistralRuntime {
 
     fn submit_embed(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: EmbedRequest,
     ) -> Result<InferenceStream> {
         let runtime = self.clone();
@@ -266,7 +274,7 @@ impl MistralRuntime {
 
     async fn submit_generate_image(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: ImageGenerationRequest,
     ) -> Result<InferenceStream> {
         let context = ResponseContext {
@@ -277,8 +285,12 @@ impl MistralRuntime {
         };
         let (response_tx, mut response_rx) = mpsc::channel(1);
         let request_ordinal = self.next_request_ordinal();
+
+        // map the incoming request to a mistralrs-compatible request and submit it to the engine
         let mistral_request =
             map_image_generation_request(&request, &descriptor, response_tx, request_ordinal);
+
+        // Run actual inference on mistralrs engine
         self.dispatch_request(&descriptor.id, Request::Normal(Box::new(mistral_request)))
             .await?;
 
@@ -301,7 +313,7 @@ impl MistralRuntime {
 
     async fn submit_generate_speech(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: SpeechGenerationRequest,
     ) -> Result<InferenceStream> {
         let context = ResponseContext {
@@ -337,7 +349,7 @@ impl MistralRuntime {
 
     fn submit_tokenize(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: TokenizationRequest,
     ) -> Result<InferenceStream> {
         let runtime = self.clone();
@@ -355,7 +367,7 @@ impl MistralRuntime {
 
     fn submit_detokenize(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: DetokenizationRequest,
     ) -> Result<InferenceStream> {
         let runtime = self.clone();
@@ -373,7 +385,7 @@ impl MistralRuntime {
 
     async fn execute_embeddings(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: EmbedRequest,
         first_request_ordinal: usize,
     ) -> Result<(Vec<nexo_core::EmbeddingVector>, Option<TokenUsage>)> {
@@ -438,7 +450,7 @@ impl MistralRuntime {
 
     async fn execute_tokenization(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: TokenizationRequest,
     ) -> Result<Vec<u32>> {
         let (response_tx, mut response_rx) = mpsc::channel(1);
@@ -459,7 +471,7 @@ impl MistralRuntime {
 
     async fn execute_detokenization(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: DetokenizationRequest,
     ) -> Result<String> {
         let (response_tx, mut response_rx) = mpsc::channel(1);
@@ -479,6 +491,7 @@ impl MistralRuntime {
         }
     }
 
+    /// Sends a request to the backing runtime and returns an error if the dispatch fails.
     async fn dispatch_request(&self, model_id: &ModelId, request: Request) -> Result {
         let sender = self
             .engine
@@ -1044,7 +1057,7 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::catalog::model_config_from_manifest;
+    use crate::_catalog::model_config_from_manifest;
     use nexo_model_mgmt::registry::find_manifest;
 
     use super::*;

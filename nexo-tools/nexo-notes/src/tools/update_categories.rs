@@ -32,6 +32,16 @@ where
     storage: Arc<S>,
 }
 
+impl<S> NotesUpdateCategoriesTool<S>
+where
+    S: NoteStorage + 'static,
+{
+    /// Create a new `NotesUpdateCategoriesTool` with the provided storage implementation.
+    pub fn new(storage: Arc<S>) -> Self {
+        Self { storage }
+    }
+}
+
 #[async_trait]
 impl<S> Tool for NotesUpdateCategoriesTool<S>
 where

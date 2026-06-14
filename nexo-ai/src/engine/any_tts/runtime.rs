@@ -5,7 +5,7 @@ use futures_util::{StreamExt, stream};
 use nexo_core::inference::request::{GeneratedAudio, SpeechGenerationRequest};
 use nexo_core::{
     InferenceErrorCode, InferenceFailure, InferenceRequest, InferenceResponse, InferenceStream,
-    MediaSource, ModelDescriptor, ModelId, RequestId, Retryability, SpeechLanguage,
+    MediaSource, ModelDefinition, ModelId, RequestId, Retryability, SpeechLanguage,
 };
 use nexo_model_mgmt::resolve_model_storage_dir;
 use serde::{Deserialize, Serialize};
@@ -54,7 +54,7 @@ impl AnyTtsRuntime {
 
     pub(crate) async fn submit(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: InferenceRequest,
     ) -> Result<InferenceStream> {
         match request {
@@ -69,7 +69,7 @@ impl AnyTtsRuntime {
 
     async fn submit_generate_speech(
         &self,
-        descriptor: ModelDescriptor,
+        descriptor: ModelDefinition,
         request: SpeechGenerationRequest,
     ) -> Result<InferenceStream> {
         let model = self.model.clone();
@@ -82,7 +82,11 @@ impl AnyTtsRuntime {
                 let audio = model
                     .synthesize(&synth_request)
                     .map_err(map_any_tts_error)?;
-                Ok::<_, Error>(map_speech_generation_response(request.request_id, model_id, audio))
+                Ok::<_, Error>(map_speech_generation_response(
+                    request.request_id,
+                    model_id,
+                    audio,
+                ))
             })
             .await;
 
@@ -129,7 +133,7 @@ async fn load_kokoro_model(model: &RegisteredModelConfig) -> Result<AnyTtsRuntim
     })?
 }
 
-fn model_storage_reference(descriptor: &ModelDescriptor) -> String {
+fn model_storage_reference(descriptor: &ModelDefinition) -> String {
     descriptor
         .metadata
         .get("source_model")
@@ -139,8 +143,8 @@ fn model_storage_reference(descriptor: &ModelDescriptor) -> String {
 }
 
 fn map_speech_request(request: &SpeechGenerationRequest) -> SynthesisRequest {
-    let mut synth_request = SynthesisRequest::new(request.text.clone())
-        .with_language(language_code(request.language));
+    let mut synth_request =
+        SynthesisRequest::new(request.text.clone()).with_language(language_code(request.language));
 
     if let Some(voice) = &request.voice {
         synth_request = synth_request.with_voice(voice.clone());
@@ -237,8 +241,6 @@ mod tests {
             model: nexo_core::ModelSelection {
                 specific_model: None,
                 required_capabilities: Vec::new(),
-                preferred_capabilities: Vec::new(),
-                runtime_preference: nexo_core::InferenceRuntime::AnyTts,
             },
             text: "hello".to_string(),
             language: SpeechLanguage::Dutch,
@@ -254,16 +256,13 @@ mod tests {
 
     #[test]
     fn internal_runtime_kind_detects_kokoro_backend() {
-        let descriptor = ModelDescriptor {
+        let descriptor = ModelDefinition {
             id: "kokoro-82m-tts".into(),
             display_name: "Kokoro 82M TTS".to_string(),
             provider: Some("hexgrad".to_string()),
             runtime: nexo_core::InferenceRuntime::AnyTts,
             capabilities: vec![nexo_core::ModelCapability::SpeechGeneration],
-            modalities: nexo_core::ModelModalities {
-                input: vec![nexo_core::SupportedModality::Text],
-                output: vec![nexo_core::SupportedModality::Audio],
-            },
+
             role_strategy: nexo_core::RoleStrategy::Default,
             context_window_tokens: None,
             max_output_tokens: None,
@@ -273,7 +272,9 @@ mod tests {
         assert_eq!(
             internal_runtime_kind(&RegisteredModelConfig {
                 descriptor,
-                runtimes: vec![ModelRuntimeImplementation::AnyTts(AnyTtsModelConfig::Kokoro)],
+                runtimes: vec![ModelRuntimeImplementation::AnyTts(
+                    AnyTtsModelConfig::Kokoro
+                )],
             }),
             Some(InternalRuntimeKind::Kokoro)
         );

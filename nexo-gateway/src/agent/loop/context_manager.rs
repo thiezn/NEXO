@@ -1,7 +1,7 @@
 //! Run-context assembly for model inference rounds.
 
 use crate::{agent::persistence, server::state::SharedState};
-use nexo_core::{ContentPart, ConversationMessage, MessageRole, MetadataMap, TextPart};
+use nexo_core::{ContentPart, ConversationMessage, MessageRole, MetadataMap};
 use nexo_ws_schema::SystemPrompt;
 use sqlx::SqlitePool;
 
@@ -80,9 +80,7 @@ fn assemble_round_messages(
 
     let system_message = ConversationMessage {
         role: MessageRole::System,
-        parts: vec![ContentPart::Text(TextPart {
-            text: system_prompt,
-        })],
+        parts: vec![ContentPart::Text(system_prompt)],
         metadata: MetadataMap::new(),
     };
 
@@ -102,7 +100,7 @@ mod tests {
             panic!("expected system message");
         };
 
-        let Some(ContentPart::Text(TextPart { text })) = parts.first() else {
+        let Some(ContentPart::Text(text)) = parts.first() else {
             panic!("expected text system prompt");
         };
 

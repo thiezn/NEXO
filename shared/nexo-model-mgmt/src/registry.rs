@@ -4,10 +4,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use nexo_core::{
-    InferenceRuntime, MetadataMap, ModelCapability, ModelDescriptor, ModelModalities,
-    RoleStrategy, SupportedModality,
-};
+use nexo_core::{InferenceRuntime, MetadataMap, ModelCapability, ModelDefinition, RoleStrategy};
 use serde_json::Value;
 
 use crate::manifest::{
@@ -18,29 +15,29 @@ use crate::manifest::{
 };
 use crate::paths::default_models_dir;
 
-/// Printable model entry with local download status.
+/// A model in our catalog.
 #[derive(Debug, Clone)]
-pub struct ModelEntry {
-    /// Stable model identifier.
-    pub id: String,
-    /// Human-readable model label.
-    pub display_name: String,
-    /// Model provider or publishing organization.
-    pub provider: Option<String>,
-    /// Model family identifier.
-    pub family: String,
-    /// Runtime binding labels declared by the model manifest.
-    pub runtime_bindings: Vec<String>,
-    /// Declared model capabilities.
-    pub capabilities: Vec<ModelCapability>,
-    /// Declared input and output modalities.
-    pub modalities: ModelModalities,
-    /// Approximate total size in GB.
-    pub size_gb: f32,
+pub struct ModelManifest {
+    /// Model Defintion
+    pub definition: ModelDefinition,
+
+    // Approximate total size in GB.
+    // TODO: calculate this from all files. Make FileSize non-optional.
+    // pub size_gb: f32,
     /// Human-readable description.
     pub description: String,
+
+    /// Model provider or publishing organization.
+    pub provider: Option<String>,
+
+    /// Model family identifier
+    pub family: String,
+
     /// Whether the known local artifact selectors are present.
     pub is_downloaded: bool,
+
+    /// Model files associated with this entry.
+    pub files: Vec<ModelFile>,
 }
 
 /// Returns all known manifests.
@@ -73,18 +70,6 @@ pub fn manifests_for_capability(capability: ModelCapability) -> Vec<&'static Mod
     known_manifests()
         .iter()
         .filter(|manifest| manifest.descriptor.capabilities.contains(&capability))
-        .collect()
-}
-
-/// Returns all manifests that accept or emit a core modality.
-#[must_use]
-pub fn manifests_for_modality(modality: SupportedModality) -> Vec<&'static ModelManifest> {
-    known_manifests()
-        .iter()
-        .filter(|manifest| {
-            manifest.descriptor.modalities.input.contains(&modality)
-                || manifest.descriptor.modalities.output.contains(&modality)
-        })
         .collect()
 }
 
@@ -184,7 +169,10 @@ fn mistral_auto_binding(
 fn mistral_gguf_binding(filenames: &[&str]) -> ManifestRuntimeBinding {
     ManifestRuntimeBinding::MistralRs(MistralRsManifestBinding {
         loader: MistralRsManifestLoader::Gguf(MistralRsGgufManifestLoader {
-            quantized_filenames: filenames.iter().map(|filename| (*filename).to_string()).collect(),
+            quantized_filenames: filenames
+                .iter()
+                .map(|filename| (*filename).to_string())
+                .collect(),
             dtype: ManifestModelDataType::Auto,
         }),
         revision: None,
@@ -235,13 +223,6 @@ fn gemma_4_e2b_it_q5_manifest() -> ModelManifest {
                 ModelCapability::StructuredOutput,
                 ModelCapability::Streaming,
             ],
-            vec![
-                SupportedModality::Text,
-                SupportedModality::Image,
-                SupportedModality::Video,
-                SupportedModality::Audio,
-            ],
-            vec![SupportedModality::Text],
             "Gemma 4 E2B instruction-tuned GGUF multimodal chat model.",
             orig_repo,
             "gguf",
@@ -303,8 +284,6 @@ fn gemma_4_26b_a4b_it_q4_manifest() -> ModelManifest {
                 ModelCapability::StructuredOutput,
                 ModelCapability::Streaming,
             ],
-            vec![SupportedModality::Text, SupportedModality::Image],
-            vec![SupportedModality::Text],
             "Gemma 4 26B-A4B instruction-tuned GGUF multimodal MoE model.",
             orig_repo,
             "gguf",
@@ -370,13 +349,6 @@ fn gemma_4_12b_it_manifest() -> ModelManifest {
                 ModelCapability::StructuredOutput,
                 ModelCapability::Streaming,
             ],
-            vec![
-                SupportedModality::Text,
-                SupportedModality::Image,
-                SupportedModality::Video,
-                SupportedModality::Audio,
-            ],
-            vec![SupportedModality::Text],
             "Gemma 4 12B instruction-tuned safetensors multimodal chat model.",
             repo,
             "safetensors",
@@ -443,13 +415,7 @@ fn gemma_4_uqff_manifests() -> Vec<ModelManifest> {
                     ModelCapability::StructuredOutput,
                     ModelCapability::Streaming,
                 ],
-                input_modalities: vec![
-                    SupportedModality::Text,
-                    SupportedModality::Image,
-                    SupportedModality::Video,
-                    SupportedModality::Audio,
-                ],
-                output_modalities: vec![SupportedModality::Text],
+
                 description: "Mistral UQFF Gemma 4 artifact set with quantized shards and residual tensors.",
                 source_model,
                 size_gb,
@@ -501,8 +467,6 @@ fn qwen_3_5_apple_metal_manifests() -> Vec<ModelManifest> {
                     ModelCapability::ImageInput,
                     ModelCapability::Streaming,
                 ],
-                input_modalities: vec![SupportedModality::Text, SupportedModality::Image],
-                output_modalities: vec![SupportedModality::Text],
                 description: "Mistral UQFF Qwen 3.5 artifact set intended for Apple Metal AFQ execution.",
                 source_model,
                 size_gb,
@@ -530,8 +494,6 @@ struct UqffManifestSpec<'a> {
     provider: &'a str,
     family: &'a str,
     capabilities: Vec<ModelCapability>,
-    input_modalities: Vec<SupportedModality>,
-    output_modalities: Vec<SupportedModality>,
     description: &'a str,
     source_model: &'a str,
     size_gb: f32,
@@ -580,8 +542,6 @@ fn voxtral_mini_asr_stt_manifest() -> ModelManifest {
                 ModelCapability::AudioInput,
                 ModelCapability::Streaming,
             ],
-            vec![SupportedModality::Text, SupportedModality::Audio],
-            vec![SupportedModality::Text],
             "Voxtral speech-to-text and audio understanding model for ASR/STT workflows.",
             repo,
             "safetensors",
@@ -604,8 +564,6 @@ fn dia_1_6b_tts_manifest() -> ModelManifest {
             InferenceRuntime::MistralRs,
             "dia",
             vec![ModelCapability::SpeechGeneration],
-            vec![SupportedModality::Text],
-            vec![SupportedModality::Audio],
             "Dia text-to-speech model for synthesizing audio from text prompts.",
             repo,
             "safetensors",
@@ -647,8 +605,6 @@ fn kokoro_82m_tts_manifest() -> ModelManifest {
             InferenceRuntime::AnyTts,
             "kokoro",
             vec![ModelCapability::SpeechGeneration],
-            vec![SupportedModality::Text],
-            vec![SupportedModality::Audio],
             "Kokoro text-to-speech model for fast local speech synthesis.",
             repo,
             "pytorch",
@@ -706,8 +662,6 @@ fn flux_2_manifests() -> Vec<ModelManifest> {
             InferenceRuntime::Mold,
             "flux2",
             vec![ModelCapability::ImageGeneration],
-            vec![SupportedModality::Text],
-            vec![SupportedModality::Image],
             "FLUX.2 image generation artifact snapshot.",
             repo,
             "diffusers",
@@ -730,8 +684,6 @@ fn embedding_gemma_manifest() -> ModelManifest {
             InferenceRuntime::MistralRs,
             "embedding-gemma",
             vec![ModelCapability::Embeddings],
-            vec![SupportedModality::Text],
-            Vec::new(),
             "Google Embedding Gemma model for text embedding vectors.",
             repo,
             "safetensors",
@@ -751,13 +703,11 @@ fn descriptor(
     runtime: InferenceRuntime,
     family: &str,
     capabilities: Vec<ModelCapability>,
-    input_modalities: Vec<SupportedModality>,
-    output_modalities: Vec<SupportedModality>,
     description: &str,
     source_model: &str,
     artifact_format: &str,
     context_window_tokens: Option<usize>,
-) -> ModelDescriptor {
+) -> ModelDefinition {
     let mut metadata = MetadataMap::new();
     metadata.insert("family".to_string(), Value::String(family.to_string()));
     metadata.insert(
@@ -773,16 +723,12 @@ fn descriptor(
         Value::String(artifact_format.to_string()),
     );
 
-    ModelDescriptor {
+    ModelDefinition {
         id: id.into(),
         display_name: display_name.to_string(),
         provider: provider.map(str::to_string),
         runtime,
         capabilities,
-        modalities: ModelModalities {
-            input: input_modalities,
-            output: output_modalities,
-        },
         role_strategy: RoleStrategy::Default,
         context_window_tokens,
         max_output_tokens: None,
@@ -1087,14 +1033,6 @@ mod tests {
                 .descriptor
                 .capabilities
                 .contains(&ModelCapability::SpeechGeneration)
-        );
-        assert_eq!(
-            manifest.descriptor.modalities.input,
-            vec![SupportedModality::Text]
-        );
-        assert_eq!(
-            manifest.descriptor.modalities.output,
-            vec![SupportedModality::Audio]
         );
         assert!(manifest.files.iter().any(|file| {
             file.hf_repo == "EricB/dac_44khz"

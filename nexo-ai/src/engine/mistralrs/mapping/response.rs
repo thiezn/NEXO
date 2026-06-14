@@ -8,7 +8,7 @@ use nexo_core::{
     AudioFormat, ContentPart, ConversationMessage, FinishReason, GenerateChunk, GenerateCompleted,
     GenerateDelta, GenerateStarted, InferenceErrorCode, InferenceFailure, InferenceResponse,
     MediaSource, MessageRole, PerformanceMetrics, RequestId, Retryability, RoundId, RunId,
-    TextPart, TokenUsage, ToolCall, ToolCallDelta, ToolCallId,
+    TokenUsage, ToolCall, ToolCallDelta, ToolCallId,
 };
 
 use crate::Error;
@@ -282,7 +282,7 @@ fn map_completion_done(done: CompletionResponse, context: &ResponseContext) -> G
         (
             ConversationMessage {
                 role: MessageRole::Assistant,
-                parts: vec![ContentPart::Text(TextPart { text: choice.text })],
+                parts: vec![ContentPart::Text(choice.text)],
                 metadata: nexo_core::MetadataMap::new(),
             },
             map_finish_reason(Some(&choice.finish_reason)),
@@ -341,7 +341,7 @@ fn map_response_message(message: ResponseMessage) -> ConversationMessage {
     if let Some(content) = message.content
         && !content.is_empty()
     {
-        parts.push(ContentPart::Text(TextPart { text: content }));
+        parts.push(ContentPart::Text(content));
     }
     if let Some(tool_calls) = message.tool_calls {
         parts.extend(

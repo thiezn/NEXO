@@ -16,8 +16,8 @@ use nexo_core::inference::request::{
 };
 use nexo_core::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
-    MessageRole, ModelDescriptor, OutputConstraint, RoleStrategy, SamplingConfig,
-    SpecialTokenPolicy, TextPart, ToolCall, ToolChoice, ToolDefinition, ToolResultContent,
+    MessageRole, ModelDefinition, OutputConstraint, RoleStrategy, SamplingConfig,
+    SpecialTokenPolicy, ToolCall, ToolChoice, ToolDefinition, ToolResultContent,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -26,7 +26,7 @@ use crate::{Error, Result};
 /// Builds a `mistralrs-core` normal request for conversational generation.
 pub(crate) fn map_generate_request(
     request: &GenerateRequest,
-    descriptor: &ModelDescriptor,
+    descriptor: &ModelDefinition,
     response: Sender<Response>,
     request_ordinal: usize,
 ) -> Result<NormalRequest> {
@@ -68,7 +68,7 @@ pub(crate) fn map_generate_request(
 /// Builds a `mistralrs-core` normal request for a single embedding input.
 pub(crate) fn map_embedding_request(
     prompt: String,
-    descriptor: &ModelDescriptor,
+    descriptor: &ModelDefinition,
     response: Sender<Response>,
     request_ordinal: usize,
 ) -> NormalRequest {
@@ -88,7 +88,7 @@ pub(crate) fn map_embedding_request(
 /// Builds a `mistralrs-core` normal request for image generation.
 pub(crate) fn map_image_generation_request(
     request: &ImageGenerationRequest,
-    descriptor: &ModelDescriptor,
+    descriptor: &ModelDefinition,
     response: Sender<Response>,
     request_ordinal: usize,
 ) -> NormalRequest {
@@ -117,7 +117,7 @@ pub(crate) fn map_image_generation_request(
 /// Builds a `mistralrs-core` normal request for speech generation.
 pub(crate) fn map_speech_generation_request(
     request: &SpeechGenerationRequest,
-    descriptor: &ModelDescriptor,
+    descriptor: &ModelDefinition,
     response: Sender<Response>,
     request_ordinal: usize,
 ) -> NormalRequest {
@@ -140,7 +140,7 @@ pub(crate) fn map_speech_generation_request(
 /// Builds a `mistralrs-core` tokenization request.
 pub(crate) fn map_tokenization_request(
     request: &TokenizationRequest,
-    descriptor: &ModelDescriptor,
+    descriptor: &ModelDefinition,
     response: Sender<anyhow::Result<Vec<u32>>>,
 ) -> Result<MistralTokenizationRequest> {
     let text = match &request.input {
@@ -229,7 +229,7 @@ fn map_generate_message(
 
     for part in &message.parts {
         match part {
-            ContentPart::Text(TextPart { text }) => text_parts.push(text.clone()),
+            ContentPart::Text(text) => text_parts.push(text.clone()),
             ContentPart::ToolCall(call) => tool_calls.push(call.clone()),
             ContentPart::ToolResult(result) => tool_results.push(result.clone()),
             ContentPart::Image(image) => image_parts.push(image),
@@ -380,7 +380,7 @@ fn map_message(
 
     for part in &message.parts {
         match part {
-            ContentPart::Text(TextPart { text }) => text_parts.push(text.clone()),
+            ContentPart::Text(text) => text_parts.push(text.clone()),
             ContentPart::ToolCall(call) => tool_calls.push(call.clone()),
             ContentPart::ToolResult(result) => tool_results.push(result.clone()),
             ContentPart::Image(_) => {
@@ -633,9 +633,8 @@ fn map_reasoning_effort(
 #[cfg(test)]
 mod tests {
     use nexo_core::{
-        ConversationMessage, MetadataMap, ModelCapability, ModelId, ModelModalities,
-        ReasoningSettings, RequestId, SupportedModality, ToolChoice, ToolExecutionConstraints,
-        ToolParallelism, ToolSideEffectLevel,
+        ConversationMessage, MetadataMap, ModelCapability, ModelId, ReasoningSettings, RequestId,
+        ToolChoice, ToolExecutionConstraints, ToolParallelism, ToolSideEffectLevel,
     };
 
     use super::*;
@@ -651,15 +650,11 @@ mod tests {
             model: nexo_core::ModelSelection {
                 specific_model: Some(ModelId::from("chat")),
                 required_capabilities: Vec::new(),
-                preferred_capabilities: Vec::new(),
-                runtime_preference: nexo_core::InferenceRuntime::AnyTts,
             },
             conversation: Conversation {
                 messages: vec![ConversationMessage {
                     role: MessageRole::Developer,
-                    parts: vec![ContentPart::Text(TextPart {
-                        text: "be concise".to_string(),
-                    })],
+                    parts: vec![ContentPart::Text("be concise".to_string())],
                     metadata: MetadataMap::new(),
                 }],
                 metadata: MetadataMap::new(),
@@ -710,7 +705,6 @@ mod tests {
                 side_effect_level: ToolSideEffectLevel::ReadOnly,
                 parallelism: ToolParallelism::ParallelGlobal,
             },
-            metadata: MetadataMap::new(),
         };
 
         let tools = map_tool_definitions(std::slice::from_ref(&definition))
@@ -832,17 +826,13 @@ mod tests {
         bytes
     }
 
-    fn descriptor(role_strategy: RoleStrategy) -> ModelDescriptor {
-        ModelDescriptor {
+    fn descriptor(role_strategy: RoleStrategy) -> ModelDefinition {
+        ModelDefinition {
             id: ModelId::from("chat"),
             display_name: "chat".to_string(),
             provider: Some("test".to_string()),
             runtime: nexo_core::InferenceRuntime::AnyTts,
             capabilities: vec![ModelCapability::TextGeneration],
-            modalities: ModelModalities {
-                input: vec![SupportedModality::Text],
-                output: vec![SupportedModality::Text],
-            },
             role_strategy,
             context_window_tokens: Some(4096),
             max_output_tokens: Some(1024),

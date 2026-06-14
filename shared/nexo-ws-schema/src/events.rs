@@ -37,7 +37,7 @@ pub struct TickPayload {
 
 /// Payload for `run` streaming events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunEventPayload {
     /// Run identifier.
     pub run_id: String,
@@ -64,7 +64,7 @@ pub struct RunEventPayload {
 
 /// Payload for `session_closed` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SessionClosedPayload {
     /// Session identifier that was cleared.
     pub session_id: String,
@@ -72,7 +72,7 @@ pub struct SessionClosedPayload {
 
 /// Payload for `presence` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PresencePayload {
     /// Client identifier whose status changed.
     pub client_id: String,
@@ -84,7 +84,7 @@ pub struct PresencePayload {
 
 /// Payload for `message` events delivered by the gateway.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct MessagePayload {
     /// Message identifier.
     pub message_id: String,
@@ -109,7 +109,7 @@ pub struct HeartbeatPayload {}
 
 /// Payload for `cron` events.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CronPayload {
     /// Cron job identifier.
     pub job_id: String,

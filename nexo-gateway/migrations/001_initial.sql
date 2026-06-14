@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id              TEXT NOT NULL REFERENCES users(id),
     name                 TEXT,
     prompt_collection_id TEXT,
-    model_id             TEXT,
+    -- model_id             TEXT,
     created_at           TEXT NOT NULL DEFAULT (datetime('now')),
     last_active_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );

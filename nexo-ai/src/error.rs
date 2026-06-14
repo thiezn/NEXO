@@ -38,6 +38,26 @@ pub enum Error {
     ModelNotLoaded {
         /// The unloaded model identifier.
         model_id: ModelId,
+
+        /// The current runtime state of the model
+        current_state: ModelRuntimeState,
+    },
+
+    /// The requested model is known but could not be unloaded
+    #[error("model `{model_id}` is not unloaded")]
+    ModelNotUnloaded {
+        /// The unloaded model identifier.
+        model_id: ModelId,
+
+        /// The current runtime state of the model
+        current_state: ModelRuntimeState,
+    },
+
+    // The requested model is already running an inference request and cannot accept concurrent requests.
+    #[error("model `{model_id}` is already running an inference request")]
+    ModelBusy {
+        /// The busy model identifier.
+        model_id: ModelId,
     },
 
     /// The requested feature is not implemented for the current runtime setup.
@@ -78,11 +98,66 @@ pub enum Error {
         message: String,
     },
 
+    /// The current model runtime is not implemented for the requested model.
+    #[error("runtime not implemented for '{model_id}'")]
+    RuntimeNotImplemented { model_id: ModelId },
+
     /// A runtime interaction failed before a request stream was accepted.
     #[error("runtime error: {message}")]
     Runtime {
         /// The human-readable runtime failure message.
         message: String,
+    },
+
+    /// The source repository is gated and requires approval.
+    #[error("model requires access approval on Hugging Face: {repo}")]
+    GatedModel {
+        /// The gated Hugging Face repository.
+        repo: String,
+    },
+
+    /// The source repository requires authentication.
+    #[error("authentication required for Hugging Face repository {repo}")]
+    Unauthorized {
+        /// The Hugging Face repository that rejected unauthenticated access.
+        repo: String,
+    },
+
+    /// A file failed to download.
+    #[error("download failed for {filename} from {repo}: {source}")]
+    DownloadFailed {
+        /// The Hugging Face repository containing the file.
+        repo: String,
+        /// The repository-relative filename that failed to download.
+        filename: String,
+        /// The underlying Hugging Face API error.
+        source: ApiError,
+    },
+
+    /// A pattern selector did not match any remote files.
+    #[error("no files in {repo} matched selector {selector}")]
+    NoFilesMatched {
+        /// The Hugging Face repository being inspected.
+        repo: String,
+        /// The selector that matched no files.
+        selector: String,
+    },
+
+    /// Hugging Face API client setup failed.
+    #[error("failed to build Hugging Face API client: {0}")]
+    ApiSetup(#[from] ApiError),
+
+    /// Placing a downloaded file into the clean local model directory failed.
+    #[error("failed to place downloaded file: {0}")]
+    FilePlacement(String),
+
+    /// SHA-256 verification could not read the file.
+    #[error("failed to verify SHA-256 for {path}: {source}")]
+    VerifyHash {
+        /// The local file path being verified.
+        path: PathBuf,
+        /// The underlying file read error.
+        source: std::io::Error,
     },
 
     /// A standard I/O operation failed.
@@ -96,46 +171,4 @@ pub enum Error {
     /// A `nexo-core` contract rejected the operation.
     #[error(transparent)]
     Core(#[from] nexo_core::Error),
-}
-
-impl Error {
-    /// Converts the crate-local error into a `nexo-core` contract error.
-    pub(crate) fn into_core_error(self) -> nexo_core::Error {
-        match self {
-            Self::Core(error) => error,
-            Self::UnsupportedFeature { feature } => {
-                nexo_core::Error::UnsupportedFeature { feature }
-            }
-            Self::UnsupportedRequest { kind } => nexo_core::Error::UnsupportedFeature {
-                feature: kind.to_string(),
-            },
-            Self::ModelNotLoaded { model_id } => nexo_core::Error::InvalidState {
-                message: format!("model `{model_id}` is not loaded"),
-            },
-            Self::UnknownModel { model_id } => nexo_core::Error::InvalidRequest {
-                message: format!("unknown model `{model_id}`"),
-            },
-            Self::UnresolvedModelSelection { message }
-            | Self::Config { message }
-            | Self::Runtime { message } => nexo_core::Error::InvalidState { message },
-            Self::UnsupportedMessagePart { part } => nexo_core::Error::InvalidState {
-                message: part.to_string(),
-            },
-            Self::InvalidToolPayload { tool_name, message } => nexo_core::Error::InvalidRequest {
-                message: format!("invalid tool payload for `{tool_name}`: {message}"),
-            },
-            Self::EmptyModelCatalog => nexo_core::Error::InvalidState {
-                message: "at least one model must be configured".to_string(),
-            },
-            Self::DuplicateModelId { model_id } => nexo_core::Error::InvalidState {
-                message: format!("duplicate model identifier `{model_id}`"),
-            },
-            Self::Io(error) => nexo_core::Error::InvalidState {
-                message: error.to_string(),
-            },
-            Self::Json(error) => nexo_core::Error::InvalidRequest {
-                message: error.to_string(),
-            },
-        }
-    }
 }

@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ModelRuntimeState {
+    /// The model is currently Unloading
+    Unloading,
+
     /// The model is not currently loaded into the runtime.
     Unloaded,
 
@@ -14,8 +17,8 @@ pub enum ModelRuntimeState {
     /// The model is loaded and ready to serve requests.
     Loaded,
 
-    /// The model is reloading after an unload or configuration change.
-    Reloading,
+    /// The model is currently running an inference request
+    RunningInference,
 
     /// The model failed to become available.
     Failed,
