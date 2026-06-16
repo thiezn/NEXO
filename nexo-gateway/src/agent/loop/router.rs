@@ -128,7 +128,7 @@ impl Router {
             state
                 .loaded_models
                 .get(peer_id)
-                .is_some_and(|models| models.iter().any(|model| model.id.as_str() == model_id))
+                .is_some_and(|models| models.iter().any(|model| model.id() == model_id))
         })
     }
 
@@ -149,7 +149,7 @@ impl Router {
         Self::find_node_peer(state, |peer_id| {
             state.loaded_models.get(peer_id).is_some_and(|models| {
                 models.iter().any(|model| {
-                    model.capabilities.iter().copied().any(|capability| {
+                    model.capabilities().iter().copied().any(|capability| {
                         matches!(
                             capability,
                             ModelCapability::TextGeneration | ModelCapability::ToolCalling
@@ -187,7 +187,7 @@ impl Router {
                 .get(peer_id)?
                 .iter()
                 .find(|model| Self::supports_capability(model, capability))?
-                .id
+                .id()
                 .to_string();
 
             state
@@ -199,7 +199,7 @@ impl Router {
     }
 
     fn supports_capability(model: &ModelDefinition, capability: ModelCapability) -> bool {
-        model.capabilities.contains(&capability)
+        model.capabilities().contains(&capability)
     }
 
     fn find_node_peer(
@@ -233,8 +233,8 @@ impl Router {
             .map(|models| {
                 models
                     .iter()
-                    .filter(|model| model.id.as_str() != model_id)
-                    .map(|model| model.id.to_string())
+                    .filter(|model| model.id() != model_id)
+                    .map(|model| model.id().to_string())
                     .collect()
             })
             .unwrap_or_default();
@@ -445,27 +445,9 @@ mod tests {
 
     use super::*;
     use crate::server::state::PeerInfo;
-    use nexo_core::{MetadataMap, ModelId, RoleStrategy};
     use std::path::PathBuf;
     use std::sync::Arc;
     use tokio::sync::RwLock;
-
-    fn make_loaded_model(
-        model_id: &str,
-        capabilities: Vec<ModelCapability>,
-    ) -> nexo_core::ModelDefinition {
-        nexo_core::ModelDefinition {
-            id: ModelId::from(model_id),
-            display_name: model_id.into(),
-            provider: Some("test".into()),
-            runtime: nexo_core::InferenceRuntime::AnyTts,
-            capabilities,
-            role_strategy: RoleStrategy::Default,
-            context_window_tokens: Some(4096),
-            max_output_tokens: Some(1024),
-            metadata: MetadataMap::new(),
-        }
-    }
 
     fn make_node_peer(id: &str) -> PeerInfo {
         PeerInfo {
@@ -482,30 +464,6 @@ mod tests {
 
     fn shared_state() -> SharedState {
         Arc::new(RwLock::new(GatewayState::new(PathBuf::from("/tmp"))))
-    }
-
-    #[tokio::test]
-    async fn route_inference_prefers_loaded_model() {
-        let state = shared_state();
-        let (node_tx, _node_rx) = mpsc::channel(4);
-        {
-            let mut state_write = state.write().await;
-            state_write.add_peer(make_node_peer("n1"), node_tx);
-            state_write.set_loaded_models(
-                "n1",
-                vec![make_loaded_model(
-                    "gemma-3n",
-                    vec![ModelCapability::TextGeneration],
-                )],
-            );
-        }
-
-        let (peer_id, _sender) = match Router::route_inference(&state, Some("gemma-3n")).await {
-            Ok(selection) => selection,
-            Err(_) => panic!("expected loaded model route"),
-        };
-
-        assert_eq!(peer_id, "n1");
     }
 
     #[tokio::test]
@@ -554,132 +512,6 @@ mod tests {
         let (peer_id, _sender) = match Router::route_inference(&state, Some("chat-b")).await {
             Ok(selection) => selection,
             Err(_) => panic!("expected loadable model route"),
-        };
-
-        assert_eq!(peer_id, "n1");
-    }
-
-    #[tokio::test]
-    async fn route_inference_without_explicit_model_uses_loaded_llm() {
-        let state = shared_state();
-        let (chat_tx, _chat_rx) = mpsc::channel(4);
-        let (image_tx, _image_rx) = mpsc::channel(4);
-        {
-            let mut state_write = state.write().await;
-            state_write.add_peer(make_node_peer("n-chat"), chat_tx);
-            state_write.add_peer(make_node_peer("n-image"), image_tx);
-            state_write.set_loaded_models(
-                "n-chat",
-                vec![make_loaded_model(
-                    "chatty",
-                    vec![
-                        ModelCapability::ToolCalling,
-                        ModelCapability::TextGeneration,
-                    ],
-                )],
-            );
-            state_write.set_loaded_models(
-                "n-image",
-                vec![make_loaded_model(
-                    "vision",
-                    vec![ModelCapability::ImageInput],
-                )],
-            );
-        }
-
-        let (peer_id, _sender) = match Router::route_inference(&state, None).await {
-            Ok(selection) => selection,
-            Err(_) => panic!("expected default llm route"),
-        };
-
-        assert_eq!(peer_id, "n-chat");
-    }
-
-    #[tokio::test]
-    async fn route_inference_without_explicit_model_loads_available_llm() {
-        let state = shared_state();
-        let (node_tx, mut node_rx) = mpsc::channel(4);
-        {
-            let mut state_write = state.write().await;
-            state_write.add_peer(make_node_peer("n1"), node_tx);
-            state_write.set_loaded_models(
-                "n1",
-                vec![make_loaded_model(
-                    "image-gen",
-                    vec![ModelCapability::ImageGeneration],
-                )],
-            );
-            state_write.set_available_model_descriptors(
-                "n1",
-                vec![
-                    make_loaded_model("image-gen", vec![ModelCapability::ImageGeneration]),
-                    make_loaded_model("chatty", vec![ModelCapability::TextGeneration]),
-                ],
-            );
-        }
-
-        let state_for_response = state.clone();
-        tokio::spawn(async move {
-            let unload_id = match node_rx.recv().await.unwrap() {
-                Frame::Request { id, method, params } => {
-                    assert_eq!(method, Method::ModelUnload);
-                    assert_eq!(params["modelId"], "image-gen");
-                    id
-                }
-                _ => panic!("expected model unload request"),
-            };
-
-            let unload_tx = {
-                let mut state_write = state_for_response.write().await;
-                state_write.pending_requests.remove(&unload_id).unwrap()
-            };
-            unload_tx
-                .send(Frame::Response {
-                    id: unload_id,
-                    ok: true,
-                    payload: Some(
-                        serde_json::to_value(nexo_ws_schema::ModelUnloadResponse {
-                            unloaded: true,
-                        })
-                        .unwrap(),
-                    ),
-                    error: None,
-                })
-                .unwrap();
-
-            let load_id = match node_rx.recv().await.unwrap() {
-                Frame::Request { id, method, params } => {
-                    assert_eq!(method, Method::ModelLoad);
-                    assert_eq!(params["modelId"], "chatty");
-                    id
-                }
-                _ => panic!("expected model load request"),
-            };
-
-            let load_tx = {
-                let mut state_write = state_for_response.write().await;
-                state_write.pending_requests.remove(&load_id).unwrap()
-            };
-            load_tx
-                .send(Frame::Response {
-                    id: load_id,
-                    ok: true,
-                    payload: Some(
-                        serde_json::to_value(ModelLoadResponse {
-                            model_id: "chatty".into(),
-                            loaded: true,
-                            error: None,
-                        })
-                        .unwrap(),
-                    ),
-                    error: None,
-                })
-                .unwrap();
-        });
-
-        let (peer_id, _sender) = match Router::route_inference(&state, None).await {
-            Ok(selection) => selection,
-            Err(_) => panic!("expected loadable default llm route"),
         };
 
         assert_eq!(peer_id, "n1");

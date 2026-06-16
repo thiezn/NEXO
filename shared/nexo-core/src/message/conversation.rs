@@ -5,8 +5,7 @@ use crate::common::MetadataMap;
 use super::{ContentPart, MessageRole};
 
 /// A single message in a conversation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConversationMessage {
     /// The semantic author role of the message.
     pub role: MessageRole,
@@ -19,8 +18,7 @@ pub struct ConversationMessage {
 }
 
 /// The ordered message history submitted to a model.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Conversation {
     /// The ordered messages that make up the conversation.
     pub messages: Vec<ConversationMessage>,

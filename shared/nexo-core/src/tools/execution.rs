@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Declares the side-effect profile of a tool.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSideEffectLevel {
     /// The tool is read-only and may be scheduled more aggressively.
@@ -14,8 +15,9 @@ pub enum ToolSideEffectLevel {
 }
 
 /// Declares whether a tool may run in parallel with other tool calls.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolParallelism {
     /// The tool must run sequentially.
@@ -30,8 +32,7 @@ pub enum ToolParallelism {
 }
 
 /// Execution constraints used by orchestrators when scheduling a tool.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ToolExecutionConstraints {
     /// The declared side-effect level of the tool.

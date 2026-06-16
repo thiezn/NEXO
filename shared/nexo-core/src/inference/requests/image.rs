@@ -1,10 +1,8 @@
-use crate::ModelSelection;
 use crate::message::MediaSource;
 use serde::{Deserialize, Serialize};
 
 /// A request to generate one or more images from text.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ImageGenerationPayload {
     /// The positive prompt used for generation.
     pub prompt: String,
@@ -29,8 +27,7 @@ pub struct ImageGenerationPayload {
 }
 
 /// A transport-safe generated image payload.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GeneratedImage {
     /// The zero-based order of the image within the response.
     pub index: usize,
@@ -49,8 +46,7 @@ pub struct GeneratedImage {
 }
 
 /// The desired image size for an image generation request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ImageGenerationSize {
     /// The image width, in pixels.
     pub width: u32,

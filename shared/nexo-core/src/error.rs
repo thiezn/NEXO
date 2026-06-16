@@ -26,4 +26,11 @@ pub enum Error {
         /// The human-readable state violation message.
         message: String,
     },
+
+    /// An error occured during inference
+    #[error("inference error: {message}")]
+    Inference {
+        /// The human-readable inference error message.
+        message: String,
+    },
 }

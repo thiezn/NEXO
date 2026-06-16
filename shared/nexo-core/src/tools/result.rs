@@ -2,8 +2,7 @@ use crate::ids::ToolCallId;
 use serde::{Deserialize, Serialize};
 
 /// Indicates whether a tool execution succeeded or failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolResultStatus {
     /// The tool completed successfully.
@@ -14,8 +13,7 @@ pub enum ToolResultStatus {
 }
 
 /// The payload returned by a tool execution.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ToolResultContent {
     /// Plain textual tool output.
@@ -26,8 +24,7 @@ pub enum ToolResultContent {
 }
 
 /// A tool execution result that can be fed back into a conversation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub struct ToolResult {
     /// The identifier of the tool call this result satisfies.

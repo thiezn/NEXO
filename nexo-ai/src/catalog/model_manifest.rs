@@ -1,8 +1,9 @@
 use super::model_file::ModelFile;
 use crate::Result;
-use nexo_core::{ModelDefinition, ModelId, ids::model_id::ModelFamily};
+use nexo_core::{ModelDefinition, ModelFamily, ModelId};
 
 /// A single logical AI Model used for inference
+#[derive(Clone)]
 pub struct ModelManifest {
     /// The definition of the model, including its unique identifier and metadata.
     definition: ModelDefinition,
@@ -29,10 +30,51 @@ pub struct ModelManifest {
 
 /// Shared local storage key used for downloaded artifacts.
 impl ModelManifest {
-    pub fn storage_folder(&self) -> &str {
+    /// Creates a new ModelManifest with the given Model Id, RAM size, and associated files.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_id` - The unique identifier for the model.
+    /// * `ram_size_gb` - The estimated RAM size in gigabytes required to load this model.
+    /// * `files` - The list of files associated with this model manifest.
+    pub fn new(model_id: ModelId, ram_size_gb: f32, files: Vec<ModelFile>) -> Self {
+        Self {
+            definition: ModelDefinition::new(model_id),
+            ram_size_gb,
+            files,
+            storage_folder: None,
+        }
+    }
+
+    /// Creates a new ModelManifest with the given Model Id, RAM size, associated files
+    /// and override storage folder.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_id` - The unique identifier for the model.
+    /// * `ram_size_gb` - The estimated RAM size in gigabytes required to load this model.
+    /// * `files` - The list of files associated with this model manifest.
+    /// * `storage_folder` - The storage folder name relative to the base storage path.
+    pub fn new_with_folder(
+        model_id: ModelId,
+        ram_size_gb: f32,
+        files: Vec<ModelFile>,
+        storage_folder: impl Into<String>,
+    ) -> Self {
+        Self {
+            definition: ModelDefinition::new(model_id),
+            ram_size_gb,
+            files,
+            storage_folder: Some(storage_folder.into()),
+        }
+    }
+
+    /// Returns the storage folder for this model manifest, which is either the explicitly
+    /// set storage folder or defaults to the model ID.
+    pub fn storage_folder(&self) -> String {
         self.storage_folder
-            .as_deref()
-            .unwrap_or_else(|| self.definition.id.to_string().to_lowercase().as_str())
+            .clone()
+            .unwrap_or_else(|| self.definition.id().clone().to_string())
     }
 
     /// Returns whether this model manifest has been downloaded and verified locally.
@@ -50,7 +92,7 @@ impl ModelManifest {
 
     /// Returns the unique identifier of the model defined by this manifest.
     pub fn model_id(&self) -> &ModelId {
-        &self.definition.id
+        &self.definition.id()
     }
 
     /// Returns the model definition associated with this manifest.
@@ -73,7 +115,7 @@ impl ModelManifest {
 
     /// Returns the total download size in bytes for all files associated with this model.
     pub fn download_size(&self) -> u64 {
-        self.files.iter().map(|file| file.size_bytes).sum()
+        self.files.iter().map(|file| file.size_bytes()).sum()
     }
 
     /// Returns the list of files associated with this model manifest.

@@ -1,6 +1,7 @@
+use hf_hub::api::tokio::ApiError;
+use nexo_core::{ModelId, ModelRuntimeState};
+use std::path::PathBuf;
 use thiserror::Error as ThisError;
-
-use nexo_core::ModelId;
 
 /// The result type used by the `nexo-ai` crate.
 pub type Result<T = (), E = Error> = std::result::Result<T, E>;
@@ -143,10 +144,6 @@ pub enum Error {
         selector: String,
     },
 
-    /// Hugging Face API client setup failed.
-    #[error("failed to build Hugging Face API client: {0}")]
-    ApiSetup(#[from] ApiError),
-
     /// Placing a downloaded file into the clean local model directory failed.
     #[error("failed to place downloaded file: {0}")]
     FilePlacement(String),
@@ -160,6 +157,10 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// Hugging Face API client setup failed.
+    #[error("failed in Hugging Face API client: {0}")]
+    Hf(#[from] ApiError),
+
     /// A standard I/O operation failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -171,4 +172,8 @@ pub enum Error {
     /// A `nexo-core` contract rejected the operation.
     #[error(transparent)]
     Core(#[from] nexo_core::Error),
+
+    /// A 'anytts' runtime error occurred.
+    #[error(transparent)]
+    AnyTts(#[from] any_tts::TtsError),
 }

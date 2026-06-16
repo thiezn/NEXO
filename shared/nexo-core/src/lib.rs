@@ -31,11 +31,12 @@ pub use ids::{ModelId, NodeId, RequestId, RoundId, RunId, SessionId, ToolCallId}
 pub use inference::{
     AudioFormat, DetokenizationPayload, DetokenizationResponse, EmbedPayload, EmbeddingResponse,
     EmbeddingVector, FinishReason, GenerateChunk, GenerateCompleted, GenerateDelta,
-    GenerateStarted, GenerationPromptPolicy, ImageGenerationPayload, ImageGenerationResponse,
-    ImageGenerationSize, InferenceErrorCode, InferenceFailure, InferenceRequest, InferenceResponse,
-    InferenceStream, ModelSelection, OutputConstraint, PerformanceMetrics, Retryability,
-    SamplingConfig, SpecialTokenPolicy, SpeechGenerationPayload, SpeechGenerationResponse,
-    SpeechLanguage, StreamingMode, TokenUsage, TokenizationPayload, TokenizationResponse,
+    GenerateStarted, GeneratedAudio, GenerationPromptPolicy, ImageGenerationPayload,
+    ImageGenerationResponse, ImageGenerationSize, InferenceErrorCode, InferenceFailure,
+    InferenceOperation, InferenceRequest, InferenceResponse, InferenceStream, ModelSelection,
+    OutputConstraint, PerformanceMetrics, Retryability, SamplingConfig, SpecialTokenPolicy,
+    SpeechGenerationPayload, SpeechGenerationResponse, SpeechLanguage, StreamingMode, TokenUsage,
+    TokenizationPayload, TokenizationResponse,
 };
 pub use message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,

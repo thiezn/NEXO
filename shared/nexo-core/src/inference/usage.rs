@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Token accounting for an inference operation.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct TokenUsage {
     /// The number of input tokens processed by the model.
     pub input_tokens: usize,
@@ -15,8 +16,7 @@ pub struct TokenUsage {
 }
 
 /// Optional performance metrics recorded for a completed inference operation.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PerformanceMetrics {
     /// The total request duration in milliseconds.
     pub total_duration_ms: u64,

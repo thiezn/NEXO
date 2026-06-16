@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Controls how the model may use available tools during generation.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum ToolChoice {
     /// Disable tool use for the request.

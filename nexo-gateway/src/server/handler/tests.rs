@@ -26,23 +26,6 @@ fn make_run_handle(state: &SharedState, db: &SqlitePool) -> RunHandle {
     RunHandle::spawn(db.clone(), state.clone(), event_tx)
 }
 
-fn make_loaded_model(
-    model_id: &str,
-    capabilities: Vec<ModelCapability>,
-) -> nexo_core::ModelDefinition {
-    nexo_core::ModelDefinition {
-        id: ModelId::from(model_id),
-        display_name: model_id.into(),
-        provider: Some("test".into()),
-        runtime: nexo_core::InferenceRuntime::AnyTts,
-        capabilities,
-        role_strategy: RoleStrategy::Default,
-        context_window_tokens: Some(4096),
-        max_output_tokens: Some(1024),
-        metadata: MetadataMap::new(),
-    }
-}
-
 // Helper: dispatch with a real DB pool
 async fn dispatch(
     req_id: &str,

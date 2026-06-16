@@ -25,9 +25,9 @@ pub use errors::{InferenceErrorCode, InferenceFailure, Retryability};
 pub use finish::FinishReason;
 pub use request::{InferenceOperation, InferenceRequest};
 pub use requests::{
-    AudioFormat, DetokenizationPayload, EmbedPayload, GeneratedImage, GenerationPromptPolicy,
-    ImageGenerationPayload, ImageGenerationSize, MultiModalPayload, SpecialTokenPolicy,
-    SpeechGenerationPayload, SpeechLanguage, TokenizationPayload,
+    AudioFormat, DetokenizationPayload, EmbedPayload, GeneratedAudio, GeneratedImage,
+    GenerationPromptPolicy, ImageGenerationPayload, ImageGenerationSize, MultiModalPayload,
+    SpecialTokenPolicy, SpeechGenerationPayload, SpeechLanguage, TokenizationPayload,
 };
 pub use response::{
     DetokenizationResponse, EmbeddingResponse, EmbeddingVector, GenerateChunk, GenerateCompleted,

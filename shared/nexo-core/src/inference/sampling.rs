@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Controls whether a response should be buffered or streamed.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamingMode {
     /// Buffer the full response and emit it only when complete.
@@ -14,8 +15,7 @@ pub enum StreamingMode {
 }
 
 /// A structured output constraint applied during generation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum OutputConstraint {
     /// No output constraint is applied.
@@ -32,8 +32,7 @@ pub enum OutputConstraint {
 }
 
 /// Sampling and decoding controls applied to a generation request.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SamplingConfig {
     /// The maximum number of output tokens to generate.
     pub max_output_tokens: Option<usize>,

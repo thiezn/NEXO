@@ -3,8 +3,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 /// A stable identifier for a gateway-level run lifecycle.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct RunId(String);
 

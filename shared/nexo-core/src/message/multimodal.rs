@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A transport-safe reference to binary media content.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum MediaSource {
     /// Raw in-memory bytes.
@@ -16,8 +15,7 @@ pub enum MediaSource {
 }
 
 /// An image input attached to a conversation message.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ImageInput {
     /// The media source that contains the image bytes.
     pub source: MediaSource,
@@ -27,8 +25,7 @@ pub struct ImageInput {
 }
 
 /// A video input attached to a conversation message.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct VideoInput {
     /// The media source that contains the video bytes.
     pub source: MediaSource,
@@ -41,8 +38,7 @@ pub struct VideoInput {
 }
 
 /// An audio input attached to a conversation message.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AudioInput {
     /// The media source that contains the audio bytes.
     pub source: MediaSource,

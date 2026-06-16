@@ -8,8 +8,7 @@ use crate::{ModelDefinition, ModelSelection, Result};
 use serde::{Deserialize, Serialize};
 
 /// A unified request struct for all supported inference operations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[allow(clippy::large_enum_variant)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct InferenceRequest {
@@ -47,14 +46,14 @@ impl InferenceRequest {
             ModelSelection::SpecificModel(model_id) => {
                 if let Some(_) = available_model_definitions
                     .iter()
-                    .find(|def| &def.id == model_id)
+                    .find(|def| def.id() == model_id)
                 {
                     Ok(model_id)
                 } else {
                     todo!("Raise model not known error");
                 }
             }
-            ModelSelection::Capabilities(capabilities) => {
+            ModelSelection::Capabilities(_capabilities) => {
                 todo!("Find the first loaded model that satisfies the required capabilities")
             }
         }
@@ -62,8 +61,7 @@ impl InferenceRequest {
 }
 
 /// The specific inference operation being requested, with associated payload.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum InferenceOperation {
     /// Generate text or multimodal conversational output.

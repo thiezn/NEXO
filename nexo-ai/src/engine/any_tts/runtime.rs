@@ -1,282 +1,160 @@
-use std::sync::Arc;
-
-use any_tts::{ModelType, SynthesisRequest, TtsConfig, TtsModel, load_model};
+use crate::{Error, Result};
 use futures_util::{StreamExt, stream};
-use nexo_core::inference::request::{GeneratedAudio, SpeechGenerationRequest};
 use nexo_core::{
-    InferenceErrorCode, InferenceFailure, InferenceRequest, InferenceResponse, InferenceStream,
-    MediaSource, ModelDefinition, ModelId, RequestId, Retryability, SpeechLanguage,
+    AudioFormat, GeneratedAudio, InferenceOperation, InferenceRequest, InferenceResponse,
+    InferenceStream, MediaSource, ModelId, ModelRuntimeState, RequestId, SpeechGenerationPayload,
+    SpeechGenerationResponse,
 };
-use nexo_model_mgmt::resolve_model_storage_dir;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use tracing::warn;
 
-use crate::{Error, ModelRuntimeImplementation, RegisteredModelConfig, Result};
-
-/// AnyTTS-specific configuration for a model binding.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "engine", rename_all = "snake_case")]
-pub enum AnyTtsModelConfig {
-    /// Kokoro TTS model binding.
-    Kokoro,
-}
-
-type SharedTtsModel = Arc<dyn TtsModel>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InternalRuntimeKind {
-    Kokoro,
-}
-
-#[derive(Clone)]
+/// Model Runtime for the AnyTTS inference engine.
 pub(crate) struct AnyTtsRuntime {
-    model: SharedTtsModel,
-}
-
-impl std::fmt::Debug for AnyTtsRuntime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AnyTtsRuntime").finish_non_exhaustive()
-    }
+    models: BTreeMap<ModelId, Arc<dyn any_tts::TtsModel>>,
 }
 
 impl AnyTtsRuntime {
-    pub(crate) async fn from_model_config(model: &RegisteredModelConfig) -> Result<Self> {
-        match internal_runtime_kind(model) {
-            Some(InternalRuntimeKind::Kokoro) => load_kokoro_model(model).await,
-            None => Err(Error::UnsupportedFeature {
-                feature: format!(
-                    "model `{}` is not configured for a private any-tts runtime",
-                    model.descriptor.id
-                ),
-            }),
+    /// Creates a new AnyTtsRuntime with no pre-loaded models.
+    pub(crate) fn new() -> Self {
+        Self {
+            models: BTreeMap::new(),
         }
     }
 
-    pub(crate) async fn submit(
+    /// Loads a model into the AnyTTS runtime.
+    pub(crate) async fn load_model(&mut self, model_id: &ModelId) -> Result {
+        if self.models.contains_key(model_id) {
+            warn!(
+                model_id = %model_id,
+                "Model is already loaded in AnyTTS runtime"
+            );
+            return Ok(());
+        }
+
+        match model_id {
+            ModelId::Kokoro82m => {
+                let config = any_tts::TtsConfig::new(any_tts::ModelType::Kokoro)
+                    .with_model_path("TODO")
+                    .with_preferred_runtime();
+
+                let model = any_tts::load_model(config)?;
+                self.models.insert(model_id.clone(), Arc::from(model));
+            }
+            _ => {
+                return Err(Error::UnsupportedFeature {
+                    feature: format!("Model `{}` is not supported", model_id),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Unload a model from the AnyTTS runtime.
+    pub(crate) async fn unload_model(&mut self, model_id: &ModelId) -> Result {
+        match self.models.remove(model_id) {
+            Some(_) => Ok(()),
+            None => {
+                warn!(model_id = %model_id, "Model is not loaded in AnyTTS runtime");
+                Ok(())
+            }
+        }
+    }
+
+    /// Submits an inference request to the specified model in the AnyTTS runtime.
+    pub(crate) async fn infer(
         &self,
-        descriptor: ModelDefinition,
+        model_id: &ModelId,
         request: InferenceRequest,
     ) -> Result<InferenceStream> {
-        match request {
-            InferenceRequest::GenerateSpeech(request) => {
-                self.submit_generate_speech(descriptor, request).await
-            }
-            other => Err(Error::UnsupportedRequest {
-                kind: request_kind(&other),
-            }),
+        if !self.models.contains_key(model_id) {
+            return Err(Error::ModelNotLoaded {
+                model_id: model_id.clone(),
+                current_state: ModelRuntimeState::Unloaded,
+            });
         }
-    }
 
-    async fn submit_generate_speech(
-        &self,
-        descriptor: ModelDefinition,
-        request: SpeechGenerationRequest,
-    ) -> Result<InferenceStream> {
-        let model = self.model.clone();
-        let request_id = request.request_id.clone();
-        let model_id = descriptor.id.clone();
-
-        Ok(stream::once(async move {
-            let response = tokio::task::spawn_blocking(move || {
-                let synth_request = map_speech_request(&request);
-                let audio = model
-                    .synthesize(&synth_request)
-                    .map_err(map_any_tts_error)?;
-                Ok::<_, Error>(map_speech_generation_response(
-                    request.request_id,
-                    model_id,
-                    audio,
-                ))
-            })
-            .await;
-
-            Ok(match response {
-                Ok(Ok(output)) => output,
-                Ok(Err(error)) => map_failure_response(error, request_id),
-                Err(error) => map_failure_response(
-                    Error::Runtime {
-                        message: format!("failed to join any-tts request task: {error}"),
-                    },
-                    request_id,
-                ),
-            })
-        })
-        .boxed())
-    }
-}
-
-pub(crate) fn internal_runtime_kind(model: &RegisteredModelConfig) -> Option<InternalRuntimeKind> {
-    model.runtimes.iter().find_map(|runtime| match runtime {
-        ModelRuntimeImplementation::AnyTts(AnyTtsModelConfig::Kokoro) => {
-            Some(InternalRuntimeKind::Kokoro)
-        }
-        ModelRuntimeImplementation::MistralRs(_) | ModelRuntimeImplementation::Mold(_) => None,
-    })
-}
-
-async fn load_kokoro_model(model: &RegisteredModelConfig) -> Result<AnyTtsRuntime> {
-    let storage_reference = model_storage_reference(&model.descriptor);
-
-    tokio::task::spawn_blocking(move || {
-        let model_dir = resolve_model_storage_dir(&storage_reference);
-        let config = TtsConfig::new(ModelType::Kokoro)
-            .with_model_path(model_dir.to_string_lossy().into_owned())
-            .with_preferred_runtime();
-        let model = load_model(config).map_err(map_any_tts_error)?;
-        Ok(AnyTtsRuntime {
-            model: Arc::<dyn TtsModel>::from(model),
-        })
-    })
-    .await
-    .map_err(|error| Error::Runtime {
-        message: format!("failed to join any-tts model-load task: {error}"),
-    })?
-}
-
-fn model_storage_reference(descriptor: &ModelDefinition) -> String {
-    descriptor
-        .metadata
-        .get("source_model")
-        .and_then(Value::as_str)
-        .unwrap_or_else(|| descriptor.id.as_str())
-        .to_string()
-}
-
-fn map_speech_request(request: &SpeechGenerationRequest) -> SynthesisRequest {
-    let mut synth_request =
-        SynthesisRequest::new(request.text.clone()).with_language(language_code(request.language));
-
-    if let Some(voice) = &request.voice {
-        synth_request = synth_request.with_voice(voice.clone());
-    }
-
-    synth_request
-}
-
-fn language_code(language: SpeechLanguage) -> &'static str {
-    match language {
-        SpeechLanguage::English => "en",
-        SpeechLanguage::Dutch => "nl",
-    }
-}
-
-fn map_speech_generation_response(
-    request_id: Option<RequestId>,
-    model_id: ModelId,
-    audio: any_tts::AudioSamples,
-) -> InferenceResponse {
-    let audio = GeneratedAudio {
-        source: MediaSource::Bytes(audio.get_wav()),
-        format: nexo_core::AudioFormat::Wav,
-        sample_rate_hz: Some(audio.sample_rate),
-        channel_count: Some(audio.channels),
-    };
-
-    InferenceResponse::Speech(nexo_core::SpeechGenerationResponse {
-        request_id,
-        model_id: Some(model_id),
-        audio,
-    })
-}
-
-fn map_failure_response(error: Error, request_id: Option<RequestId>) -> InferenceResponse {
-    let (code, retryability) = match error {
-        Error::UnsupportedRequest { .. } | Error::UnsupportedFeature { .. } => {
-            (InferenceErrorCode::UnsupportedFeature, Retryability::Fatal)
-        }
-        Error::UnknownModel { .. } | Error::ModelNotLoaded { .. } => {
-            (InferenceErrorCode::ModelUnavailable, Retryability::Fatal)
-        }
-        Error::Json(_) | Error::Core(_) => {
-            (InferenceErrorCode::InvalidRequest, Retryability::Fatal)
-        }
-        Error::EmptyModelCatalog
-        | Error::DuplicateModelId { .. }
-        | Error::UnresolvedModelSelection { .. }
-        | Error::UnsupportedMessagePart { .. }
-        | Error::InvalidToolPayload { .. }
-        | Error::Config { .. }
-        | Error::Runtime { .. }
-        | Error::Io(_) => (InferenceErrorCode::Internal, Retryability::Retryable),
-    };
-
-    InferenceResponse::Failure(InferenceFailure {
-        request_id,
-        run_id: None,
-        round_id: None,
-        code,
-        message: error.to_string(),
-        retryability,
-    })
-}
-
-fn map_any_tts_error(error: any_tts::TtsError) -> Error {
-    Error::Runtime {
-        message: error.to_string(),
-    }
-}
-
-fn request_kind(request: &InferenceRequest) -> &'static str {
-    match request {
-        InferenceRequest::Generate(_) => "generate",
-        InferenceRequest::Embed(_) => "embed",
-        InferenceRequest::GenerateImage(_) => "generate_image",
-        InferenceRequest::GenerateSpeech(_) => "generate_speech",
-        InferenceRequest::Tokenize(_) => "tokenize",
-        InferenceRequest::Detokenize(_) => "detokenize",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-
-    use super::*;
-
-    #[test]
-    fn request_language_prefers_speech_specific_metadata() {
-        let request = SpeechGenerationRequest {
-            request_id: None,
-            session_id: None,
-            model: nexo_core::ModelSelection {
-                specific_model: None,
-                required_capabilities: Vec::new(),
+        match model_id {
+            ModelId::Kokoro82m => match request.operation {
+                InferenceOperation::GenerateSpeech(payload) => {
+                    self.infer_speech_generation(model_id.clone(), request.request_id, payload)
+                        .await
+                }
+                _ => Err(Error::UnsupportedRequest {
+                    kind: "Kokoro82m only supports SpeechGeneration requests",
+                }),
             },
-            text: "hello".to_string(),
-            language: SpeechLanguage::Dutch,
-            voice: None,
-            format: nexo_core::AudioFormat::Wav,
-            sample_rate_hz: None,
-            speed: None,
-            metadata: Default::default(),
-        };
-
-        assert_eq!(language_code(request.language), "nl");
+            _ => {
+                return Err(Error::UnsupportedFeature {
+                    feature: format!("Model `{}` is not supported on AnyTts runtime", model_id),
+                });
+            }
+        }
     }
 
-    #[test]
-    fn internal_runtime_kind_detects_kokoro_backend() {
-        let descriptor = ModelDefinition {
-            id: "kokoro-82m-tts".into(),
-            display_name: "Kokoro 82M TTS".to_string(),
-            provider: Some("hexgrad".to_string()),
-            runtime: nexo_core::InferenceRuntime::AnyTts,
-            capabilities: vec![nexo_core::ModelCapability::SpeechGeneration],
+    /// Performs speech generation inference using the specified model and request payload.
+    async fn infer_speech_generation(
+        &self,
+        model_id: ModelId,
+        request_id: RequestId,
+        payload: SpeechGenerationPayload,
+    ) -> Result<InferenceStream> {
+        // Retrieve loaded model instance
+        let model = self
+            .models
+            .get(&model_id)
+            .ok_or_else(|| Error::ModelNotLoaded {
+                model_id: model_id.clone(),
+                current_state: ModelRuntimeState::Unloaded,
+            })?
+            .clone();
 
-            role_strategy: nexo_core::RoleStrategy::Default,
-            context_window_tokens: None,
-            max_output_tokens: None,
-            metadata: Default::default(),
-        };
+        // Perform speech inference on model in a blocking task
+        let response = stream::once(async move {
+            let result = match tokio::task::spawn_blocking(move || match model_id {
+                ModelId::Kokoro82m => {
+                    let mut synth_request = any_tts::SynthesisRequest::new(payload.text)
+                        .with_language(payload.language);
 
-        assert_eq!(
-            internal_runtime_kind(&RegisteredModelConfig {
-                descriptor,
-                runtimes: vec![ModelRuntimeImplementation::AnyTts(
-                    AnyTtsModelConfig::Kokoro
-                )],
-            }),
-            Some(InternalRuntimeKind::Kokoro)
-        );
+                    if let Some(voice) = payload.voice {
+                        synth_request = synth_request.with_voice(voice);
+                    }
+
+                    let audio = model.synthesize(&synth_request)?;
+
+                    let generated_audio = GeneratedAudio {
+                        source: MediaSource::Bytes(audio.get_wav()),
+                        format: AudioFormat::Wav,
+                        sample_rate_hz: Some(audio.sample_rate),
+                        channel_count: Some(audio.channels),
+                    };
+
+                    Ok(InferenceResponse::Speech(SpeechGenerationResponse {
+                        request_id,
+                        model_id,
+                        audio: generated_audio,
+                    }))
+                }
+                _ => Err(Error::UnsupportedFeature {
+                    feature: format!("Model `{}` is not supported on AnyTts runtime", model_id),
+                }),
+            })
+            .await
+            {
+                Ok(inner) => inner,
+                Err(e) => Err(Error::Runtime {
+                    message: format!("Join error: {e}"),
+                }),
+            };
+
+            result.map_err(|e| match e {
+                other => nexo_core::Error::Inference {
+                    message: format!("Inference error: {other}"),
+                },
+            })
+        });
+
+        Ok(response.boxed())
     }
 }

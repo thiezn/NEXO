@@ -1,5 +1,6 @@
+use super::{AnyTtsRuntime, MistralRsRuntime, MoldRuntime};
 use crate::catalog::ModelManifest;
-use crate::{Error, Result, engine::mistralrs};
+use crate::{Error, Result};
 use nexo_core::{InferenceRequest, InferenceStream, ModelDefinition, ModelId, ModelRuntimeState};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{Mutex, watch};
@@ -10,16 +11,15 @@ use tracing::{info, warn};
 /// Each model will have exactly one ModelRuntime instance, and will NOT be shared across multiple models.
 /// This could cause some overhead but for now suspect this is negligible in comparison with the
 /// actual model loaded in memory.
-#[derive(Debug)]
 enum ModelRuntime {
-    MistralRs(mistralrs::MistralRsRuntime),
-    AnyTts(engine::any_tts::AnyTtsRuntime),
-    Mold(engine::mold::MoldRuntime),
+    MistralRs(MistralRsRuntime),
+    AnyTts(AnyTtsRuntime),
+    Mold(MoldRuntime),
 }
 
 impl ModelRuntime {
     /// Loads the model into memory and starts its runtime, making it available for inference requests.
-    async fn load_model(&self, model_id: &ModelId) -> Result {
+    async fn load_model(&mut self, model_id: &ModelId) -> Result {
         match self {
             ModelRuntime::MistralRs(runtime) => runtime.load_model(model_id).await,
             ModelRuntime::AnyTts(runtime) => runtime.load_model(model_id).await,
@@ -30,7 +30,7 @@ impl ModelRuntime {
     /// Unloads the model from memory and stops its runtime, freeing up resources.
     ///
     /// InferenceEngine is expected to deallocate the runtime after unloading.
-    async fn unload_model(&self, model_id: &ModelId) -> Result {
+    async fn unload_model(&mut self, model_id: &ModelId) -> Result {
         match self {
             ModelRuntime::MistralRs(runtime) => runtime.unload_model(model_id).await,
             ModelRuntime::AnyTts(runtime) => runtime.unload_model(model_id).await,
@@ -92,15 +92,12 @@ impl ModelHandle {
     /// Initializes a new ModelHandle for the given model definition, setting up the necessary channels and runtime task.
     pub fn new(definition: ModelDefinition) -> Result<Self> {
         let (state_tx, state_rx) = watch::channel(ModelRuntimeState::Unloaded);
-        let runtime = match definition.runtime_type() {
-            "mistralrs" => ModelRuntime::MistralRs(mistralrs::MistralRsRuntime::new()),
-            "anytts" => ModelRuntime::AnyTts(engine::any_tts::AnyTtsRuntime::new()),
-            "mold" => ModelRuntime::Mold(engine::mold::MoldRuntime::new()),
-            _ => {
-                return Err(Error::UnsupportedFeature {
-                    feature: format!("Unsupported runtime type: {}", definition.runtime_type()),
-                });
-            }
+        let runtime = match definition.id() {
+            ModelId::Gemma426bA4bItUqffQ80
+            | ModelId::EmbeddingGemma300m
+            | ModelId::Gemma4E4bItUqffQ80 => ModelRuntime::MistralRs(MistralRsRuntime::new()),
+            ModelId::Flux2Klein9b => ModelRuntime::Mold(MoldRuntime::new()),
+            ModelId::Kokoro82m => ModelRuntime::AnyTts(AnyTtsRuntime::new()),
         };
 
         Ok(Self {
@@ -121,30 +118,30 @@ impl ModelHandle {
 
         match inner.state {
             ModelRuntimeState::Loaded => {
-                warn!(model_id = %self.definition.id, "Model is already loaded");
+                warn!(model_id = %self.definition.id(), "Model is already loaded");
                 return Ok(());
             }
             ModelRuntimeState::Unloaded | ModelRuntimeState::Failed => {
                 inner.state = ModelRuntimeState::Loading;
-                self.state_tx.send(inner.state)?;
+                let _ = self.state_tx.send(inner.state);
             }
             _ => {
                 return Err(Error::ModelNotUnloaded {
-                    model_id: self.definition.id.clone(),
+                    model_id: self.definition.id().clone(),
                     current_state: inner.state,
                 });
             }
         }
 
-        match inner.runtime.load_model(&self.definition.id).await {
+        match inner.runtime.load_model(&self.definition.id()).await {
             Ok(()) => {
                 inner.state = ModelRuntimeState::Loaded;
-                self.state_tx.send(inner.state)?;
+                let _ = self.state_tx.send(inner.state);
                 Ok(())
             }
             Err(err) => {
                 inner.state = ModelRuntimeState::Failed;
-                self.state_tx.send(inner.state)?;
+                let _ = self.state_tx.send(inner.state);
                 Err(err)
             }
         }
@@ -157,30 +154,30 @@ impl ModelHandle {
 
         match inner.state {
             ModelRuntimeState::Unloaded => {
-                warn!(model_id = %self.definition.id, "Model is already unloaded");
+                warn!(model_id = %self.definition.id(), "Model is already unloaded");
                 return Ok(());
             }
             ModelRuntimeState::Loaded | ModelRuntimeState::Failed => {
                 inner.state = ModelRuntimeState::Unloading;
-                self.state_tx.send(inner.state)?;
+                let _ = self.state_tx.send(inner.state);
             }
             _ => {
                 return Err(Error::ModelNotUnloaded {
-                    model_id: self.definition.id.clone(),
+                    model_id: self.definition.id().clone(),
                     current_state: inner.state,
                 });
             }
         }
 
-        match inner.runtime.unload_model(&self.definition.id).await {
+        match inner.runtime.unload_model(&self.definition.id()).await {
             Ok(()) => {
                 inner.state = ModelRuntimeState::Unloaded;
-                self.state_tx.send(inner.state)?;
+                let _ = self.state_tx.send(inner.state);
                 Ok(())
             }
             Err(err) => {
                 inner.state = ModelRuntimeState::Failed;
-                self.state_tx.send(inner.state)?;
+                let _ = self.state_tx.send(inner.state);
                 Err(err)
             }
         }
@@ -195,24 +192,24 @@ impl ModelHandle {
         // For now I think this is what I want so the gateway gets a signal
         // it's trying to run inference on a model that is already busy.
         let mut inner = self.inner.try_lock().map_err(|_| Error::ModelBusy {
-            model_id: self.definition.id.clone(),
+            model_id: self.definition.id().clone(),
         })?;
 
         if inner.state != ModelRuntimeState::Loaded {
             return Err(Error::ModelNotLoaded {
-                model_id: self.definition.id.clone(),
+                model_id: self.definition.id().clone(),
                 current_state: inner.state,
             });
         }
 
         inner.state = ModelRuntimeState::RunningInference;
-        self.state_tx.send(inner.state)?;
+        let _ = self.state_tx.send(inner.state);
 
-        /// Note: If result is an error, we are assuming the model runtime will still
-        /// be usable (loaded state) here. We might need to revisit this.
-        let result = inner.runtime.infer(&self.definition.id, request).await;
+        // NOTE: If result is an error, we are assuming the model runtime will still
+        // be usable (loaded state) here. We might need to revisit this.
+        let result = inner.runtime.infer(&self.definition.id(), request).await;
         inner.state = ModelRuntimeState::Loaded;
-        self.state_tx.send(inner.state)?;
+        let _ = self.state_tx.send(inner.state);
 
         result
     }
@@ -231,7 +228,7 @@ impl ModelHandle {
 /// - Multiple inference requests can be active concurrently if they are targeting
 ///   different models. This allows for multi-modal scenarios where, for example,
 ///   both audio generation and text generation are running at the same time.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct InferenceEngine {
     /// The set of all models known to the engine, indexed by their unique identifier.
     models: BTreeMap<ModelId, Arc<ModelHandle>>,
@@ -245,10 +242,10 @@ impl InferenceEngine {
             .map(|m| {
                 let definition = m.definition().clone();
                 let model_id = m.model_id().clone();
-                let handle = Arc::new(ModelHandle::new(definition)?);
-                (model_id, handle)
+                let handle = ModelHandle::new(definition)?;
+                Ok((model_id, Arc::new(handle)))
             })
-            .collect();
+            .collect::<Result<BTreeMap<_, _>>>()?;
 
         Ok(Self { models })
     }
@@ -296,7 +293,7 @@ impl InferenceEngine {
 
         // Route to the appropriate model runtime based on the payload's model selection criteria
         // and the currently loaded models.
-        let model_id = request.model(self.model_definitions()).await?;
+        let model_id = request.model(self.model_definitions())?;
 
         if let Some(handle) = self.models.get(&model_id) {
             handle.infer(request).await

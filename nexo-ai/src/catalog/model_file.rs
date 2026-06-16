@@ -1,40 +1,80 @@
+use crate::Result;
+
 /// A single file to download from Hugging Face.
 #[derive(Debug, Clone)]
 pub struct ModelFile {
     /// The kind of file
-    pub kind: ModelFileKind,
+    kind: ModelFileKind,
 
     /// Hugging Face model repository.
-    pub hf_repo: String,
+    hf_repo: &'static str,
 
     /// Path selector inside the Hugging Face repository.
-    pub selector: ModelFileSelector,
+    selector: ModelFileSelector,
 
-    /// Optional clean path under this manifest's local storage directory.
-    pub local_path: Option<String>,
-
-    /// Expected file size in bytes, when known.
+    /// File size in bytes.
     ///
-    /// It's a rough estimate, used for calculating the total required download for a model
-    pub size_bytes: u64,
-
-    /// Whether the source repository is gated.
-    ///
-    /// This happens when the model publisher restricts
-    /// access to the repository, for example by requiring
-    /// users to accept a license on Hugging Face before downloading.
-    pub gated: bool,
+    /// Used for calculating the total required download for a model. If the ModelFileSelector
+    /// is a suffix or prefix, this is the total size of all matching files.
+    size_bytes: u64,
 
     /// Expected SHA-256 hex digest. `None` means no digest is pinned yet.
-    pub sha256: Option<&'static str>,
+    sha256: &'static str,
 }
 
 impl ModelFile {
-    /// Returns the local path for this file, relative to the manifest's storage folder.
-    pub fn local_path(&self) -> &str {
-        self.local_path
-            .as_deref()
-            .unwrap_or_else(|| self.selector.label())
+    /// Initialize new ModelFile with the given parameters.
+    pub const fn new(
+        kind: ModelFileKind,
+        hf_repo: &'static str,
+        filename: &'static str,
+        size_bytes: u64,
+        sha256: &'static str,
+    ) -> Self {
+        Self {
+            kind,
+            hf_repo,
+            selector: ModelFileSelector::Exact(filename),
+            size_bytes,
+            sha256,
+        }
+    }
+
+    /// Initialize new ModelFile with a filename suffix selector.
+    ///
+    /// Useful to match on any file with a certain suffix, that have
+    /// the same ModelFileKind and are interchangeable in the manifest.
+    pub fn new_with_suffix(
+        kind: ModelFileKind,
+        hf_repo: &'static str,
+        suffix: &'static str,
+        size_bytes: u64,
+        sha256: &'static str,
+    ) -> Self {
+        Self {
+            kind,
+            hf_repo,
+            selector: ModelFileSelector::Suffix(suffix),
+            size_bytes,
+            sha256,
+        }
+    }
+
+    /// Initialize new ModelFile with a filename prefix selector.
+    pub fn new_with_prefix(
+        kind: ModelFileKind,
+        hf_repo: &'static str,
+        prefix: &'static str,
+        size_bytes: u64,
+        sha256: &'static str,
+    ) -> Self {
+        Self {
+            kind,
+            hf_repo,
+            selector: ModelFileSelector::Prefix(prefix),
+            size_bytes,
+            sha256,
+        }
     }
 
     /// Checks if this model file has already been downloaded and verified locally.
@@ -45,6 +85,10 @@ impl ModelFile {
     /// Downloads this model file, returning an error if the download or verification fails.
     pub fn download(&self) -> Result {
         todo!("Implement download of this ModelFile, with verification and error handling")
+    }
+
+    pub fn size_bytes(&self) -> u64 {
+        self.size_bytes
     }
 }
 
@@ -83,11 +127,11 @@ pub enum ModelFileKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelFileSelector {
     /// A single known path in the remote repository.
-    Exact(String),
+    Exact(&'static str),
     /// Every remote path ending with this suffix.
-    Suffix(String),
+    Suffix(&'static str),
     /// Every remote path starting with this prefix.
-    Prefix(String),
+    Prefix(&'static str),
 }
 
 impl ModelFileSelector {
@@ -98,9 +142,9 @@ impl ModelFileSelector {
     /// * `filename` - The remote filename to check against this selector.
     pub fn matches(&self, filename: &str) -> bool {
         match self {
-            Self::Exact(exact) => filename == exact,
-            Self::Suffix(suffix) => filename.ends_with(suffix),
-            Self::Prefix(prefix) => filename.starts_with(prefix),
+            Self::Exact(exact) => filename == *exact,
+            Self::Suffix(suffix) => filename.ends_with(*suffix),
+            Self::Prefix(prefix) => filename.starts_with(*prefix),
         }
     }
 

@@ -2,5 +2,4 @@
 
 mod runtime;
 
-pub use runtime::AnyTtsModelConfig;
-pub(crate) use runtime::{AnyTtsRuntime, internal_runtime_kind};
+pub(crate) use runtime::AnyTtsRuntime;

@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{RequestId, RoundId, RunId};
 
 /// Indicates whether a failed request may be retried safely.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Retryability {
     /// The failure may be retried.
@@ -15,8 +14,7 @@ pub enum Retryability {
 }
 
 /// A coarse-grained error code for inference failures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceErrorCode {
     /// The request payload is invalid.
@@ -39,8 +37,7 @@ pub enum InferenceErrorCode {
 }
 
 /// A structured failure returned from an inference engine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InferenceFailure {
     /// The request identifier associated with the failure, if one exists.
     pub request_id: Option<RequestId>,

@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The semantic role of a conversation message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
     /// System-level instructions and global context.

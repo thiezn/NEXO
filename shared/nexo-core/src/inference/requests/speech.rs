@@ -1,10 +1,10 @@
 use crate::MediaSource;
-use crate::ModelSelection;
 use serde::{Deserialize, Serialize};
 
 /// The requested spoken language for speech synthesis.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SpeechLanguage {
     /// English speech output.
@@ -15,9 +15,29 @@ pub enum SpeechLanguage {
     Dutch,
 }
 
+impl AsRef<str> for SpeechLanguage {
+    fn as_ref(&self) -> &str {
+        match self {
+            SpeechLanguage::English => "english",
+            SpeechLanguage::Dutch => "dutch",
+        }
+    }
+}
+
+impl std::fmt::Display for SpeechLanguage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
+    }
+}
+
+impl From<SpeechLanguage> for String {
+    fn from(language: SpeechLanguage) -> Self {
+        language.as_ref().to_string()
+    }
+}
+
 /// The requested audio encoding for synthesized speech output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioFormat {
     /// Raw pulse-code modulation samples.
@@ -31,8 +51,7 @@ pub enum AudioFormat {
 }
 
 /// A request to synthesize speech from text.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SpeechGenerationPayload {
     /// The text to synthesize into speech.
     pub text: String,
@@ -55,8 +74,7 @@ pub struct SpeechGenerationPayload {
 }
 
 /// A transport-safe generated audio payload.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GeneratedAudio {
     /// The generated audio content.
     pub source: MediaSource,

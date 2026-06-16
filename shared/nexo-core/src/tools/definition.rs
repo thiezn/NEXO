@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::ToolExecutionConstraints;
 
 /// Declares a tool that may be exposed to a model for tool calling.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ToolDefinition {
     /// The unique tool name used in model-facing schemas.

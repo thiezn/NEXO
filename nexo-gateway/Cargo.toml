@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 nexo-ws-schema = { workspace = true, features = ["clap"] }
-nexo-core = { workspace = true, features = ["schema"] }
+nexo-core = { workspace = true }
 cli-helpers = { workspace = true, features = [
     "clap",
     "config",

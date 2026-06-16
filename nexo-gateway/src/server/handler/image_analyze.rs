@@ -54,7 +54,7 @@ fn find_image_analyze_sender(state: &GatewayState) -> Option<(String, mpsc::Send
         let supports_image_analysis = state.loaded_models.get(peer_id).is_some_and(|models| {
             models.iter().any(|model| {
                 model
-                    .capabilities
+                    .capabilities()
                     .iter()
                     .any(|capability| matches!(capability, ModelCapability::ImageInput))
             })

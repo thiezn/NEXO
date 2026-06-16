@@ -9,8 +9,7 @@ use crate::{OutputConstraint, SamplingConfig, StreamingMode};
 use serde::{Deserialize, Serialize};
 
 /// A request for text or multimodal conversational generation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MultiModalPayload {
     /// The conversation submitted to the model.
     pub conversation: Conversation,

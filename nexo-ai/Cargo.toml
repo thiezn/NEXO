@@ -30,12 +30,16 @@ dirs = { workspace = true }
 futures-util = { workspace = true }
 image = { workspace = true }
 nexo-core = { path = "../shared/nexo-core" }
-nexo-model-mgmt = { path = "../shared/nexo-model-mgmt" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 tracing = { workspace = true }
+hf-hub = { version = "0", default-features = false, features = [
+    "tokio",
+    "ureq",
+    "rustls-tls",
+] }
 
 # We only bring anyhow in here as MistralRs requires it when initializing
 # its MistralTokenizationRequest and MistralDetokenizationRequest structs.

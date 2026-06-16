@@ -11,8 +11,7 @@ use super::response::InferenceResponse;
 pub type InferenceStream = BoxStream<'static, Result<InferenceResponse>>;
 
 /// A streamed delta for an in-progress generation request.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GenerateDelta {
     /// The assistant role emitted with the delta, if this chunk establishes one.
     pub role: Option<MessageRole>,

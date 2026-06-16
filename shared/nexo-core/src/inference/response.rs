@@ -10,8 +10,7 @@ use super::stream::GenerateDelta;
 use super::usage::{PerformanceMetrics, TokenUsage};
 
 /// The unified response enum returned by inference engines.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum InferenceResponse {
     /// Signals that a generation request has started.
@@ -43,37 +42,35 @@ pub enum InferenceResponse {
 }
 
 /// Metadata emitted when generation begins.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GenerateStarted {
     /// The request identifier associated with the generation.
-    pub request_id: Option<RequestId>,
+    pub request_id: RequestId,
 
     /// The run identifier associated with the generation.
-    pub run_id: Option<RunId>,
+    pub run_id: RunId,
 
     /// The round identifier associated with the generation.
-    pub round_id: Option<RoundId>,
+    pub round_id: RoundId,
 
     /// The selected model, if one has been resolved.
-    pub model_id: Option<ModelId>,
+    pub model_id: ModelId,
 }
 
 /// A streamed chunk for a generation request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GenerateChunk {
     /// The request identifier associated with the chunk.
-    pub request_id: Option<RequestId>,
+    pub request_id: RequestId,
 
     /// The run identifier associated with the chunk.
-    pub run_id: Option<RunId>,
+    pub run_id: RunId,
 
     /// The round identifier associated with the chunk.
-    pub round_id: Option<RoundId>,
+    pub round_id: RoundId,
 
-    /// The selected model, if one has been resolved.
-    pub model_id: Option<ModelId>,
+    /// The selected model.
+    pub model_id: ModelId,
 
     /// The streamed content delta.
     pub delta: GenerateDelta,
@@ -86,20 +83,19 @@ pub struct GenerateChunk {
 }
 
 /// The final response for a completed generation request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GenerateCompleted {
     /// The request identifier associated with the response.
-    pub request_id: Option<RequestId>,
+    pub request_id: RequestId,
 
     /// The run identifier associated with the response.
-    pub run_id: Option<RunId>,
+    pub run_id: RunId,
 
     /// The round identifier associated with the response.
-    pub round_id: Option<RoundId>,
+    pub round_id: RoundId,
 
-    /// The selected model, if one has been resolved.
-    pub model_id: Option<ModelId>,
+    /// The selected model.
+    pub model_id: ModelId,
 
     /// The final assistant message.
     pub message: ConversationMessage,
@@ -118,8 +114,7 @@ pub struct GenerateCompleted {
 }
 
 /// A single embedding vector.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EmbeddingVector {
     /// The zero-based order of the vector within the response.
     pub index: usize,
@@ -129,14 +124,13 @@ pub struct EmbeddingVector {
 }
 
 /// The response returned for an embedding request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EmbeddingResponse {
     /// The request identifier associated with the response.
-    pub request_id: Option<RequestId>,
+    pub request_id: RequestId,
 
-    /// The selected model, if one has been resolved.
-    pub model_id: Option<ModelId>,
+    /// The selected model
+    pub model_id: ModelId,
 
     /// The embedding vectors returned by the runtime.
     pub vectors: Vec<EmbeddingVector>,
@@ -146,50 +140,46 @@ pub struct EmbeddingResponse {
 }
 
 /// The response returned for an image generation request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ImageGenerationResponse {
     /// The request identifier associated with the response.
-    pub request_id: Option<RequestId>,
+    pub request_id: RequestId,
 
-    /// The selected model, if one has been resolved.
-    pub model_id: Option<ModelId>,
+    /// The selected model
+    pub model_id: ModelId,
 
     /// The generated images.
     pub images: Vec<GeneratedImage>,
 }
 
 /// The response returned for a speech generation request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SpeechGenerationResponse {
     /// The request identifier associated with the response.
-    pub request_id: Option<RequestId>,
+    pub request_id: RequestId,
 
     /// The selected model, if one has been resolved.
-    pub model_id: Option<ModelId>,
+    pub model_id: ModelId,
 
     /// The generated speech audio payload.
     pub audio: GeneratedAudio,
 }
 
 /// The response returned for a tokenization request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TokenizationResponse {
     /// The request identifier associated with the response.
-    pub request_id: Option<RequestId>,
+    pub request_id: RequestId,
 
     /// The resulting token ids.
     pub tokens: Vec<u32>,
 }
 
 /// The response returned for a detokenization request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DetokenizationResponse {
     /// The request identifier associated with the response.
-    pub request_id: Option<RequestId>,
+    pub request_id: RequestId,
 
     /// The detokenized text.
     pub text: String,

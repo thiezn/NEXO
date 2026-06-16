@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::ToolCallId;
 
 /// A concrete tool call emitted by a model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub struct ToolCall {
     /// The unique identifier assigned to the tool call.
@@ -21,8 +20,7 @@ pub struct ToolCall {
 }
 
 /// A partial streamed update for a tool call under construction.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub struct ToolCallDelta {
     /// The zero-based order of the call within the response.

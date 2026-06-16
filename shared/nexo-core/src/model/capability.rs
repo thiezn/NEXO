@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A discrete capability that a model may support.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelCapability {
     /// The model can generate text responses from conversational input.

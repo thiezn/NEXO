@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Criteria for selecting a model to fulfill an inference request,
 /// either by specific identifier or by required capabilities.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ModelSelection {
     /// Select a specific model by its unique identifier.
     SpecificModel(ModelId),

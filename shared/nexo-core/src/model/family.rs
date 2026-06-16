@@ -9,7 +9,6 @@ pub enum ModelFamily {
     Gemma4,
     Qwen35,
     Voxtral,
-    Dia,
     Kokoro,
     Flux2,
 }
