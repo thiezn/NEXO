@@ -13,7 +13,7 @@ pub enum ToolResultStatus {
 }
 
 /// The payload returned by a tool execution.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ToolResultContent {
     /// Plain textual tool output.
@@ -24,7 +24,7 @@ pub enum ToolResultContent {
 }
 
 /// A tool execution result that can be fed back into a conversation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub struct ToolResult {
     /// The identifier of the tool call this result satisfies.

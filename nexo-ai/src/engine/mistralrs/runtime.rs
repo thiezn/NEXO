@@ -1,15 +1,6 @@
-use crate::{Error, Result};
-use futures_util::{StreamExt, stream};
-use mistralrs_core::MistralRsBuilder;
-use mold_ai_inference::Flux2Engine;
-use nexo_core::{
-    AudioFormat, GeneratedAudio, InferenceOperation, InferenceRequest, InferenceResponse,
-    InferenceStream, MediaSource, ModelId, RequestId, SpeechGenerationPayload,
-    SpeechGenerationResponse,
-};
-use std::collections::BTreeMap;
+use crate::Result;
+use nexo_core::{InferenceRequest, InferenceStream, ModelId};
 use std::sync::Arc;
-use tracing::warn;
 
 /// Model Runtime for the MistralRs inference engine.
 pub(crate) struct MistralRsRuntime {
@@ -40,20 +31,20 @@ impl MistralRsRuntime {
     }
 
     /// Loads a model into the MistralRs runtime.
-    pub(crate) async fn load_model(&self, model_id: &ModelId) -> Result {
+    pub(crate) async fn load_model(&self, _model_id: &ModelId) -> Result {
         todo!("Implement model loading for MistralRs runtime");
     }
 
     /// Unload a model from the MistralRs runtime.
-    pub(crate) async fn unload_model(&self, model_id: &ModelId) -> Result {
+    pub(crate) async fn unload_model(&self, _model_id: &ModelId) -> Result {
         todo!("Implement model unloading for MistralRs runtime");
     }
 
     /// Submits an inference request to the specified model in the MistralRs runtime.
     pub(crate) async fn infer(
         &self,
-        model_id: &ModelId,
-        request: InferenceRequest,
+        _model_id: &ModelId,
+        _request: InferenceRequest,
     ) -> Result<InferenceStream> {
         todo!("Implement inference request submission for MistralRs runtime");
     }

@@ -283,7 +283,6 @@ fn map_completion_done(done: CompletionResponse, context: &ResponseContext) -> G
             ConversationMessage {
                 role: MessageRole::Assistant,
                 parts: vec![ContentPart::Text(choice.text)],
-                metadata: nexo_core::MetadataMap::new(),
             },
             map_finish_reason(Some(&choice.finish_reason)),
         )
@@ -355,7 +354,6 @@ fn map_response_message(message: ResponseMessage) -> ConversationMessage {
     ConversationMessage {
         role: map_message_role(&message.role),
         parts,
-        metadata: nexo_core::MetadataMap::new(),
     }
 }
 
@@ -507,6 +505,5 @@ fn empty_assistant_message() -> ConversationMessage {
     ConversationMessage {
         role: MessageRole::Assistant,
         parts: Vec::new(),
-        metadata: nexo_core::MetadataMap::new(),
     }
 }

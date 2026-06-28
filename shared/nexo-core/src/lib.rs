@@ -25,18 +25,23 @@ pub mod run;
 /// Tool schemas, execution policies, calls, and results.
 pub mod tools;
 
-pub use common::{MetadataMap, PageInfo, PageRequest, Timestamp};
+/// System-level types for Nexo runtime and orchestration.
+pub mod system;
+
+pub use common::{PageInfo, PageRequest, Timestamp};
 pub use error::{Error, Result};
-pub use ids::{ModelId, NodeId, RequestId, RoundId, RunId, SessionId, ToolCallId};
+pub use ids::{
+    FrameId, ModelId, NodeId, OperationId, RequestId, RoundId, RunId, SessionId, ToolCallId,
+};
 pub use inference::{
     AudioFormat, DetokenizationPayload, DetokenizationResponse, EmbedPayload, EmbeddingResponse,
     EmbeddingVector, FinishReason, GenerateChunk, GenerateCompleted, GenerateDelta,
     GenerateStarted, GeneratedAudio, GenerationPromptPolicy, ImageGenerationPayload,
     ImageGenerationResponse, ImageGenerationSize, InferenceErrorCode, InferenceFailure,
     InferenceOperation, InferenceRequest, InferenceResponse, InferenceStream, ModelSelection,
-    OutputConstraint, PerformanceMetrics, Retryability, SamplingConfig, SpecialTokenPolicy,
-    SpeechGenerationPayload, SpeechGenerationResponse, SpeechLanguage, StreamingMode, TokenUsage,
-    TokenizationPayload, TokenizationResponse,
+    OutputConstraint, PerformanceMetrics, Retryability, SamplingConfig, Session, Sessions,
+    SpecialTokenPolicy, SpeechGenerationPayload, SpeechGenerationResponse, SpeechLanguage,
+    StreamingMode, TokenUsage, TokenizationPayload, TokenizationResponse,
 };
 pub use message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
@@ -49,6 +54,9 @@ pub use model::{
 pub use run::{
     RoundEvent, RoundStatus, RoundStatusUpdate, RoundSummary, RunEvent, RunStatus, RunStatusUpdate,
     RunSummary,
+};
+pub use system::{
+    ClientKind, NexoNodeMetrics, NexoState, NodeProperties, Platform, UserProperties,
 };
 pub use tools::{
     Tool, ToolCall, ToolCallDelta, ToolChoice, ToolDefinition, ToolExecutionConstraints,

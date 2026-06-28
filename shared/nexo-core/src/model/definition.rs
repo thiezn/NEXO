@@ -1,4 +1,4 @@
-use crate::{MetadataMap, ModelCapability, ModelId, RoleStrategy};
+use crate::{ModelCapability, ModelId, RoleStrategy};
 use serde::{Deserialize, Serialize};
 
 /// Describes a model that may be selected for inference.
@@ -21,9 +21,6 @@ pub struct ModelDefinition {
 
     /// The maximum output token budget, if the model exposes one.
     max_output_tokens: Option<usize>,
-
-    /// Additional provider-specific metadata.
-    metadata: MetadataMap,
 }
 
 impl ModelDefinition {
@@ -57,11 +54,6 @@ impl ModelDefinition {
         self.max_output_tokens
     }
 
-    /// Additional provider-specific metadata.
-    pub fn metadata(&self) -> &MetadataMap {
-        &self.metadata
-    }
-
     /// Initialize a new ModelDefinition for a given model ID.
     ///
     ///
@@ -83,7 +75,6 @@ impl ModelDefinition {
                 role_strategy: RoleStrategy::Default,
                 context_window_tokens: Some(32768),
                 max_output_tokens: Some(8192),
-                metadata: MetadataMap::new(),
             },
             ModelId::Gemma426bA4bItUqffQ80 => Self {
                 id: model_id,
@@ -100,7 +91,6 @@ impl ModelDefinition {
                 role_strategy: RoleStrategy::Default,
                 context_window_tokens: Some(32768),
                 max_output_tokens: Some(8192),
-                metadata: MetadataMap::new(),
             },
             ModelId::Kokoro82m => Self {
                 id: model_id,
@@ -109,7 +99,6 @@ impl ModelDefinition {
                 role_strategy: RoleStrategy::Default,
                 context_window_tokens: None,
                 max_output_tokens: None,
-                metadata: MetadataMap::new(),
             },
             ModelId::EmbeddingGemma300m => Self {
                 id: model_id,
@@ -118,7 +107,6 @@ impl ModelDefinition {
                 role_strategy: RoleStrategy::Default,
                 context_window_tokens: None,
                 max_output_tokens: None,
-                metadata: MetadataMap::new(),
             },
             ModelId::Flux2Klein9b => Self {
                 id: model_id,
@@ -127,7 +115,6 @@ impl ModelDefinition {
                 role_strategy: RoleStrategy::Default,
                 context_window_tokens: Some(32768),
                 max_output_tokens: Some(8192),
-                metadata: MetadataMap::new(),
             },
         }
     }

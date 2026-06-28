@@ -633,8 +633,8 @@ fn map_reasoning_effort(
 #[cfg(test)]
 mod tests {
     use nexo_core::{
-        ConversationMessage, MetadataMap, ModelCapability, ModelId, ReasoningSettings, RequestId,
-        ToolChoice, ToolExecutionConstraints, ToolParallelism, ToolSideEffectLevel,
+        ConversationMessage, ModelCapability, ModelId, ReasoningSettings, RequestId, ToolChoice,
+        ToolExecutionConstraints, ToolParallelism, ToolSideEffectLevel,
     };
 
     use super::*;
@@ -655,9 +655,7 @@ mod tests {
                 messages: vec![ConversationMessage {
                     role: MessageRole::Developer,
                     parts: vec![ContentPart::Text("be concise".to_string())],
-                    metadata: MetadataMap::new(),
                 }],
-                metadata: MetadataMap::new(),
             },
             tools: Vec::new(),
             tool_choice: ToolChoice::Disabled,
@@ -669,7 +667,6 @@ mod tests {
                 ..SamplingConfig::default()
             },
             streaming: nexo_core::StreamingMode::Buffered,
-            metadata: MetadataMap::new(),
         };
         let descriptor = descriptor(RoleStrategy::MergeDeveloperIntoSystem);
 
@@ -836,7 +833,6 @@ mod tests {
             role_strategy,
             context_window_tokens: Some(4096),
             max_output_tokens: Some(1024),
-            metadata: MetadataMap::new(),
         }
     }
 }

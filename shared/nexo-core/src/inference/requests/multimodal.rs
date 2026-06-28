@@ -1,5 +1,4 @@
 use crate::ReasoningSettings;
-use crate::common::MetadataMap;
 use crate::message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
     MessageRole,
@@ -31,9 +30,6 @@ pub struct MultiModalPayload {
 
     /// Whether the response should be buffered or streamed.
     pub streaming: StreamingMode,
-
-    /// Additional request metadata.
-    pub metadata: MetadataMap,
 }
 
 impl MultiModalPayload {
@@ -45,17 +41,13 @@ impl MultiModalPayload {
         reasoning: ReasoningSettings,
     ) -> Self {
         Self {
-            conversation: Conversation {
-                messages,
-                metadata: MetadataMap::new(),
-            },
+            conversation: Conversation { messages },
             tools,
             tool_choice,
             reasoning,
             output_constraint: OutputConstraint::None,
             sampling: SamplingConfig::default(),
             streaming: StreamingMode::Buffered,
-            metadata: MetadataMap::new(),
         }
     }
 
@@ -78,9 +70,7 @@ impl MultiModalPayload {
                         }),
                         ContentPart::Text(prompt),
                     ],
-                    metadata: MetadataMap::new(),
                 }],
-                metadata: MetadataMap::new(),
             },
             tools: Vec::new(),
             tool_choice: ToolChoice::Disabled,
@@ -92,7 +82,6 @@ impl MultiModalPayload {
                 ..SamplingConfig::default()
             },
             streaming: StreamingMode::Buffered,
-            metadata: MetadataMap::new(),
         }
     }
 
@@ -119,9 +108,7 @@ impl MultiModalPayload {
                         }),
                         ContentPart::Text(prompt),
                     ],
-                    metadata: MetadataMap::new(),
                 }],
-                metadata: MetadataMap::new(),
             },
             tools: Vec::new(),
             tool_choice: ToolChoice::Disabled,
@@ -133,7 +120,6 @@ impl MultiModalPayload {
                 ..SamplingConfig::default()
             },
             streaming: StreamingMode::Buffered,
-            metadata: MetadataMap::new(),
         }
     }
 }

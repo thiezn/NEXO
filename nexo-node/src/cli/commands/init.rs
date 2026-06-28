@@ -1,6 +1,4 @@
-//! `init` command implementation.
-
-use nexo_node::config::NodeConfig;
+use nexo_node::config::NexoNodeConfig;
 
 /// Create the default node configuration file on disk.
 ///
@@ -8,9 +6,9 @@ use nexo_node::config::NodeConfig;
 ///
 /// Returns an error if the default configuration cannot be written.
 pub fn run() -> cli_helpers::Result {
-    let config = NodeConfig::default();
+    let config = NexoNodeConfig::default();
     config.save()?;
-    let path = NodeConfig::config_path();
+    let path = NexoNodeConfig::config_path();
     tracing::info!("Configuration saved to {}", path.display());
     println!("Node configuration initialized at {}", path.display());
     Ok(())

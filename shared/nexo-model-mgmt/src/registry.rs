@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use nexo_core::{InferenceRuntime, MetadataMap, ModelCapability, ModelDefinition, RoleStrategy};
+use nexo_core::{InferenceRuntime, ModelCapability, ModelDefinition, RoleStrategy};
 use serde_json::Value;
 
 use crate::manifest::{
@@ -841,14 +841,6 @@ fn files_for_hf_snapshot(hf_repo: &str, gated: bool) -> Vec<ModelFile> {
         file_suffix(ModelComponent::WeightShard, hf_repo, ".safetensors", gated),
         file_suffix(ModelComponent::Config, hf_repo, ".json", gated),
     ]
-}
-
-fn metadata_string(metadata: &MetadataMap, key: &str) -> String {
-    metadata
-        .get(key)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string()
 }
 
 fn local_file_present(model_dir: &Path, file: &ModelFile) -> bool {

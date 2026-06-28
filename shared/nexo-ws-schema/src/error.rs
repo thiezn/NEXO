@@ -1,10 +1,26 @@
+use nexo_core::OperationId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
+use thiserror::Error as ThisError;
+
+/// Result alias for ws-schema operations.
+pub type Result<T = ()> = std::result::Result<T, Error>;
+
+/// Serializable wrapper for `serde_json::Error` that preserves only its display text.
+#[derive(Debug, Clone, ThisError, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[error("{0}")]
+#[serde(transparent)]
+pub struct SerializationErrorMessage(String);
+
+impl From<serde_json::Error> for SerializationErrorMessage {
+    fn from(error: serde_json::Error) -> Self {
+        Self(error.to_string())
+    }
+}
 
 /// Protocol-level errors surfaced by the ws-schema transport layer.
-#[derive(Debug, Error)]
-pub enum WsError {
+#[derive(Debug, ThisError, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub enum Error {
     /// Generic protocol framing or semantic error.
     #[error("Protocol error: {0}")]
     Protocol(String),
@@ -36,13 +52,42 @@ pub enum WsError {
         server: u32,
     },
 
-    /// Requested method was not recognized.
-    #[error("Method not found: {0}")]
-    MethodNotFound(String),
+    /// Expected a synchronous completed response
+    #[error(
+        "Expected synchronous completed response, but got: {error} (operation_id: {operation_id})"
+    )]
+    ExpectedCompletedResponse {
+        /// Operation ID of the request that was expected to be completed.
+        operation_id: OperationId,
+
+        /// Error payload from the remote side.
+        error: String,
+    },
+
+    /// Expected an asynchronous accepted response
+    #[error(
+        "Expected asynchronous accepted response, but got: {error} (operation_id: {operation_id})"
+    )]
+    ExpectedAcceptedResponse {
+        /// Operation ID of the request that was expected to be accepted.
+        operation_id: OperationId,
+
+        /// Error payload from the remote side.
+        error: String,
+    },
+
+    /// Failed response from the remote side.
+    #[error("Response failed: {error} (operation_id: {operation_id})")]
+    ResponseFailed {
+        /// Operation ID of the failed request.
+        operation_id: OperationId,
+        /// Error payload from the remote side.
+        error: String,
+    },
 
     /// JSON serialization/deserialization failure.
     #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+    Serialization(#[from] SerializationErrorMessage),
 
     /// Message processing failure.
     #[error("Message error: {0}")]
@@ -53,36 +98,9 @@ pub enum WsError {
     Timeout(String),
 }
 
-/// Result alias for ws-schema operations.
-pub type Result<T = ()> = std::result::Result<T, WsError>;
-
-/// Wire-format error payload included in error responses.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct ErrorPayload {
-    /// Stable machine-readable error code.
-    pub code: String,
-    /// Human-readable error message.
-    pub message: String,
-}
-
-impl From<&WsError> for ErrorPayload {
-    fn from(err: &WsError) -> Self {
-        let code = match err {
-            WsError::Protocol(_) => "protocol_error",
-            WsError::Validation(_) => "validation_error",
-            WsError::Connection(_) => "connection_error",
-            WsError::Handshake(_) => "handshake_failed",
-            WsError::Auth(_) => "auth_failed",
-            WsError::ProtocolMismatch { .. } => "protocol_mismatch",
-            WsError::MethodNotFound(_) => "method_not_found",
-            WsError::Serialization(_) => "serialization_error",
-            WsError::Message(_) => "message_error",
-            WsError::Timeout(_) => "timeout",
-        };
-        ErrorPayload {
-            code: code.to_string(),
-            message: err.to_string(),
-        }
+impl From<serde_json::Error> for Error {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Serialization(error.into())
     }
 }
 
@@ -93,13 +111,13 @@ mod tests {
 
     #[test]
     fn error_display_protocol() {
-        let e = WsError::Protocol("bad frame".into());
+        let e = Error::Protocol("bad frame".into());
         assert_eq!(e.to_string(), "Protocol error: bad frame");
     }
 
     #[test]
     fn error_display_protocol_mismatch() {
-        let e = WsError::ProtocolMismatch {
+        let e = Error::ProtocolMismatch {
             min: 1,
             max: 2,
             server: 3,
@@ -109,21 +127,10 @@ mod tests {
     }
 
     #[test]
-    fn error_payload_conversion() {
-        let e = WsError::Auth("invalid token".into());
-        let payload = ErrorPayload::from(&e);
-        assert_eq!(payload.code, "auth_failed");
-        assert!(payload.message.contains("invalid token"));
-    }
-
-    #[test]
-    fn error_payload_serialization_roundtrip() {
-        let payload = ErrorPayload {
-            code: "test_error".into(),
-            message: "something broke".into(),
-        };
-        let json = serde_json::to_string(&payload).unwrap();
-        let decoded: ErrorPayload = serde_json::from_str(&json).unwrap();
-        assert_eq!(payload, decoded);
+    fn error_serialization_roundtrip() {
+        let error = Error::Auth("invalid token".into());
+        let json = serde_json::to_string(&error).unwrap();
+        let decoded: Error = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, Error::Auth(message) if message == "invalid token"));
     }
 }

@@ -2,7 +2,12 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// A stable identifier for a single inference request.
+/// A stable identifier for a single request issued to the Nexo Gateway.
+///
+/// This is used to correlate requests with responses and events,
+/// especially for asynchronous processing.
+///
+/// TODO: We should decommision this in favor of operation_id.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
 )]

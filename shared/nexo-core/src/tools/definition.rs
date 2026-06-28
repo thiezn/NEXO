@@ -22,7 +22,4 @@ pub struct ToolDefinition {
     /// Execution-time orchestration constraints.
     #[serde(default)]
     pub execution: ToolExecutionConstraints,
-    // /// Additional tool metadata for higher-level consumers.
-    // #[serde(default)]
-    // pub metadata: MetadataMap,
 }

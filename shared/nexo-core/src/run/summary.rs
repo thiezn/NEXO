@@ -1,14 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::common::{MetadataMap, Timestamp};
+use crate::common::Timestamp;
 use crate::ids::{ModelId, RunId};
 use crate::inference::TokenUsage;
 
 use super::{RoundSummary, RunStatus};
 
 /// A compact summary of a completed or in-flight run.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunSummary {
     /// The unique run identifier.
     pub run_id: RunId,
@@ -30,7 +29,4 @@ pub struct RunSummary {
 
     /// The ordered round summaries observed for the run.
     pub rounds: Vec<RoundSummary>,
-
-    /// Additional run metadata.
-    pub metadata: MetadataMap,
 }

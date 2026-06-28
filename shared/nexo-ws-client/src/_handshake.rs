@@ -1,29 +1,26 @@
 use crate::connection::NexoConnection;
-use crate::error::{ClientError, Result};
+use crate::error::{Error, Result};
+use nexo_core::ClientKind;
 use nexo_ws_schema::{ConnectParams, Frame, HelloOk, Method, PROTOCOL_VERSION};
+use tracing::info;
 
 /// Perform the connect handshake with the gateway.
 ///
 /// Sends a `connect` request with the given params and waits for a `hello-ok` response.
 /// Validates the negotiated protocol version.
-pub async fn perform_handshake(
-    conn: &mut NexoConnection,
-    params: ConnectParams,
-) -> Result<HelloOk> {
+pub async fn perform_handshake(conn: &mut NexoConnection, role: ClientKind) -> Result<HelloOk> {
     let request_id = Frame::new_id();
     let frame = Frame::Request {
         id: request_id.clone(),
         method: Method::Connect,
-        params: serde_json::to_value(&params)?,
+        params: serde_json::to_value(&role)?,
     };
 
     conn.send_frame(&frame).await?;
     tracing::debug!("Sent connect request (id={request_id})");
 
-    let response = conn
-        .recv_frame()
-        .await?
-        .ok_or_else(|| ClientError::Handshake("Connection closed before hello-ok".into()))?;
+    let response = conn.recv_frame().await?;
+    // .ok_or_else(|| Error::Handshake("Connection closed before hello-ok".into()))?;
 
     match response {
         Frame::Response {
@@ -34,20 +31,18 @@ pub async fn perform_handshake(
         } if id == request_id => {
             let hello: HelloOk = serde_json::from_value(payload)?;
 
-            if hello.protocol < params.min_protocol || hello.protocol > params.max_protocol {
-                return Err(ClientError::Protocol(
-                    nexo_ws_schema::WsError::ProtocolMismatch {
-                        min: params.min_protocol,
-                        max: params.max_protocol,
-                        server: hello.protocol,
-                    },
-                ));
+            if hello.protocol < role.min_protocol || hello.protocol > role.max_protocol {
+                return Err(Error::Protocol(nexo_ws_schema::Error::ProtocolMismatch {
+                    min: role.min_protocol,
+                    max: role.max_protocol,
+                    server: hello.protocol,
+                }));
             }
 
-            tracing::info!(
-                "Handshake complete: protocol v{}, tick {}ms",
-                hello.protocol,
-                hello.policy.tick_interval_ms
+            info!(
+                protocol = hello.protocol,
+                tick_interval_ms = hello.policy.tick_interval_ms,
+                "Handshake complete"
             );
             Ok(hello)
         }
@@ -57,9 +52,9 @@ pub async fn perform_handshake(
             let msg = error
                 .map(|e| format!("{}: {}", e.code, e.message))
                 .unwrap_or_else(|| "Unknown error".into());
-            Err(ClientError::Handshake(msg))
+            Err(Error::Handshake(msg))
         }
-        other => Err(ClientError::Handshake(format!(
+        other => Err(Error::Handshake(format!(
             "Unexpected response frame: {other:?}"
         ))),
     }

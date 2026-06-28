@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The current lifecycle state of a gateway-managed run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
     /// The run has been accepted but not started.

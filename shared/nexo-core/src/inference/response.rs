@@ -1,13 +1,11 @@
-use serde::{Deserialize, Serialize};
-
-use crate::ids::{ModelId, RequestId, RoundId, RunId};
-use crate::message::ConversationMessage;
-
 use super::errors::InferenceFailure;
 use super::finish::FinishReason;
 use super::requests::{GeneratedAudio, GeneratedImage};
 use super::stream::GenerateDelta;
 use super::usage::{PerformanceMetrics, TokenUsage};
+use crate::message::ConversationMessage;
+use crate::{ModelId, OperationId, RoundId, RunId};
+use serde::{Deserialize, Serialize};
 
 /// The unified response enum returned by inference engines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -45,7 +43,7 @@ pub enum InferenceResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GenerateStarted {
     /// The request identifier associated with the generation.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The run identifier associated with the generation.
     pub run_id: RunId,
@@ -61,7 +59,7 @@ pub struct GenerateStarted {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GenerateChunk {
     /// The request identifier associated with the chunk.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The run identifier associated with the chunk.
     pub run_id: RunId,
@@ -86,7 +84,7 @@ pub struct GenerateChunk {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GenerateCompleted {
     /// The request identifier associated with the response.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The run identifier associated with the response.
     pub run_id: RunId,
@@ -127,7 +125,7 @@ pub struct EmbeddingVector {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EmbeddingResponse {
     /// The request identifier associated with the response.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The selected model
     pub model_id: ModelId,
@@ -143,7 +141,7 @@ pub struct EmbeddingResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ImageGenerationResponse {
     /// The request identifier associated with the response.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The selected model
     pub model_id: ModelId,
@@ -156,7 +154,7 @@ pub struct ImageGenerationResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SpeechGenerationResponse {
     /// The request identifier associated with the response.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The selected model, if one has been resolved.
     pub model_id: ModelId,
@@ -169,7 +167,7 @@ pub struct SpeechGenerationResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TokenizationResponse {
     /// The request identifier associated with the response.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The resulting token ids.
     pub tokens: Vec<u32>,
@@ -179,7 +177,7 @@ pub struct TokenizationResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DetokenizationResponse {
     /// The request identifier associated with the response.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The detokenized text.
     pub text: String,

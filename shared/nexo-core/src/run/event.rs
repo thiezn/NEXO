@@ -6,8 +6,7 @@ use crate::ids::{ModelId, RunId};
 use super::{RoundEvent, RunStatus};
 
 /// A point-in-time run status update.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunStatusUpdate {
     /// The run identifier associated with the update.
     pub run_id: RunId,
@@ -26,8 +25,7 @@ pub struct RunStatusUpdate {
 }
 
 /// An event emitted over the lifecycle of a run.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum RunEvent {
     /// A lifecycle status update.

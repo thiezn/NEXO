@@ -1,6 +1,7 @@
 use nexo_core::message::ConversationMessage;
 use nexo_core::{
-    ModelDefinition, ReasoningSettings, SpeechLanguage, ToolCall, ToolChoice, ToolDefinition,
+    ModelDefinition, ModelId, ReasoningSettings, RoundId, RunId, SessionId, SpeechLanguage,
+    ToolCall, ToolChoice, ToolDefinition, ToolResult, ToolResultContent, ToolResultStatus,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,18 +18,6 @@ pub enum Method {
     Status,
     /// Generic send request.
     Send,
-    #[serde(rename = "run.start")]
-    /// Run start request.
-    RunStart,
-    #[serde(rename = "run.stop")]
-    /// Run stop request.
-    RunStop,
-    #[serde(rename = "run.instructions.append")]
-    /// Append instructions to an active run.
-    RunInstructionsAppend,
-    #[serde(rename = "run.round")]
-    /// Execute one run round.
-    RunRound,
     /// Presence update.
     SystemPresence,
     #[serde(rename = "tools.catalog")]
@@ -100,6 +89,18 @@ pub enum Method {
     /// Client → gateway → node: generate audio from a text prompt.
     #[serde(rename = "audio.generate")]
     AudioGenerate,
+    #[serde(rename = "run.start")]
+    /// Run start request.
+    RunStart,
+    #[serde(rename = "run.stop")]
+    /// Run stop request.
+    RunStop,
+    #[serde(rename = "run.instructions.append")]
+    /// Append instructions to an active run.
+    RunInstructionsAppend,
+    #[serde(rename = "run.round")]
+    /// Execute one run round.
+    RunRound,
 }
 
 /// Run lifecycle status.
@@ -163,7 +164,7 @@ pub struct RunStartParams {
     /// The model ID to use for inference. If omitted, any available LLM node is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
-    pub model_id: Option<String>,
+    pub model_id: Option<ModelId>,
     /// Optional reasoning controls for the run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
@@ -178,7 +179,7 @@ pub struct RunStartParams {
 #[serde(rename_all = "snake_case")]
 pub struct RunStopParams {
     /// The active run to stop.
-    pub run_id: String,
+    pub run_id: RunId,
 }
 
 /// Response payload for the `run.stop` method.
@@ -194,7 +195,7 @@ pub struct RunStopResponse {
 #[serde(rename_all = "snake_case")]
 pub struct RunInstructionsAppendParams {
     /// The active run that should observe the new context on its next round.
-    pub run_id: String,
+    pub run_id: RunId,
     /// Arbitrary structured instructions to append to the conversation.
     pub instructions: serde_json::Value,
 }
@@ -262,9 +263,9 @@ pub struct SendResponse {
 #[serde(rename_all = "snake_case")]
 pub struct RunStartResponse {
     /// Field value.
-    pub run_id: String,
+    pub run_id: RunId,
     /// Field value.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Field value.
     pub status: RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -277,11 +278,11 @@ pub struct RunStartResponse {
 #[serde(rename_all = "snake_case")]
 pub struct RunRoundRequest {
     /// Field value.
-    pub run_id: String,
+    pub run_id: RunId,
     /// Field value.
-    pub round_id: String,
+    pub round_id: RoundId,
     /// Field value.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Field value.
     pub messages: Vec<ConversationMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -295,7 +296,7 @@ pub struct RunRoundRequest {
     pub reasoning: ReasoningSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
-    pub model_id: Option<String>,
+    pub model_id: Option<ModelId>,
 }
 
 /// A single tool call returned from a node for a round.
@@ -397,6 +398,29 @@ pub struct ToolsExecuteResponse {
     pub error: Option<String>,
 }
 
+impl From<ToolResult> for ToolsExecuteResponse {
+    /// Create a `tools.execute` response from a generic tool execution result.
+    fn from(result: ToolResult) -> Self {
+        let content = match result.content {
+            ToolResultContent::Text(text) => text,
+            ToolResultContent::Json(value) => value.to_string(),
+        };
+
+        match result.status {
+            ToolResultStatus::Success => ToolsExecuteResponse {
+                success: true,
+                output: content,
+                error: None,
+            },
+            ToolResultStatus::Failure => ToolsExecuteResponse {
+                success: false,
+                output: String::new(),
+                error: Some(content),
+            },
+        }
+    }
+}
+
 // -- session.create --
 
 /// Parameters for the `session.create` method.
@@ -417,7 +441,7 @@ pub struct SessionCreateParams {
 #[serde(rename_all = "snake_case")]
 pub struct SessionCreateResponse {
     /// Field value.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// The prompt collection ID associated with this session, if one was provided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
@@ -435,7 +459,7 @@ pub struct SessionListParams {}
 #[serde(rename_all = "snake_case")]
 pub struct SessionEntry {
     /// Field value.
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
     pub name: Option<String>,
@@ -464,7 +488,7 @@ pub struct SessionListResponse {
 #[serde(rename_all = "snake_case")]
 pub struct SessionGetParams {
     /// Field value.
-    pub session_id: String,
+    pub session_id: SessionId,
 }
 
 /// Response payload for `session.get`.
@@ -472,7 +496,7 @@ pub struct SessionGetParams {
 #[serde(rename_all = "snake_case")]
 pub struct SessionGetResponse {
     /// Field value.
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Field value.
     pub name: Option<String>,
@@ -492,7 +516,7 @@ pub struct SessionGetResponse {
 #[serde(rename_all = "snake_case")]
 pub struct SessionClearParams {
     /// Field value.
-    pub session_id: String,
+    pub session_id: SessionId,
 }
 
 /// Response payload for `session.clear`.
@@ -584,7 +608,7 @@ pub struct CronDeleteResponse {
 #[serde(rename_all = "snake_case")]
 pub struct ModelLoadParams {
     /// Stable ID for the model to load.
-    pub model_id: String,
+    pub model_id: ModelId,
 }
 
 /// Response payload for `model.load`.
@@ -592,7 +616,7 @@ pub struct ModelLoadParams {
 #[serde(rename_all = "snake_case")]
 pub struct ModelLoadResponse {
     /// Stable ID for the model.
-    pub model_id: String,
+    pub model_id: ModelId,
     /// Indicates whether the model was successfully loaded.
     pub loaded: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -607,7 +631,7 @@ pub struct ModelLoadResponse {
 #[serde(rename_all = "snake_case")]
 pub struct ModelUnloadParams {
     /// Stable ID for the model to unload.
-    pub model_id: String,
+    pub model_id: ModelId,
 }
 
 /// Response payload for `model.unload`.

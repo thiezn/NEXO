@@ -4,7 +4,7 @@ use super::db_types::{
     ConversationEntryKind, message_role_to_db, parse_entry_kind, parse_message_role,
 };
 use nexo_core::{
-    ContentPart, ConversationMessage, MessageRole, MetadataMap, ToolCall, ToolCallId, ToolResult,
+    ContentPart, ConversationMessage, MessageRole, ToolCall, ToolCallId, ToolResult,
     ToolResultContent, ToolResultStatus,
 };
 use nexo_ws_schema::Frame;
@@ -146,11 +146,7 @@ fn conversation_message_from_row(
         _ => text_parts(content),
     };
 
-    Ok(ConversationMessage {
-        role,
-        parts,
-        metadata: MetadataMap::new(),
-    })
+    Ok(ConversationMessage { role, parts })
 }
 
 fn text_parts(content: String) -> Vec<ContentPart> {

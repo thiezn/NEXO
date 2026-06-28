@@ -407,12 +407,6 @@ mod tests {
 
     #[test]
     fn storage_id_uses_source_model_basename() {
-        let mut metadata = nexo_core::MetadataMap::new();
-        metadata.insert(
-            "source_model".to_string(),
-            Value::String("google/gemma-4-E4B-it".to_string()),
-        );
-
         let manifest = ModelManifest {
             descriptor: nexo_core::ModelDefinition {
                 id: "gemma-4-e4b-it-uqff-afq8".into(),

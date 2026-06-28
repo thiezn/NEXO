@@ -21,6 +21,9 @@ pub mod requests;
 /// Model selection primitives.
 pub mod selection;
 
+/// Inference session types.
+pub mod session;
+
 pub use errors::{InferenceErrorCode, InferenceFailure, Retryability};
 pub use finish::FinishReason;
 pub use request::{InferenceOperation, InferenceRequest};
@@ -36,6 +39,7 @@ pub use response::{
 };
 pub use sampling::{OutputConstraint, SamplingConfig, StreamingMode};
 pub use selection::ModelSelection;
+pub use session::{Session, Sessions};
 pub use stream::GenerateDelta;
 pub use stream::InferenceStream;
 pub use usage::{PerformanceMetrics, TokenUsage};

@@ -2,9 +2,8 @@ use super::{
     DetokenizationPayload, EmbedPayload, ImageGenerationPayload, MultiModalPayload,
     SpeechGenerationPayload, TokenizationPayload,
 };
-use crate::common::MetadataMap;
-use crate::ids::{ModelId, RequestId, RoundId, RunId, SessionId};
-use crate::{ModelDefinition, ModelSelection, Result};
+use crate::{Error, ModelDefinition, ModelSelection, Result};
+use crate::{ModelId, OperationId, RoundId, RunId, SessionId};
 use serde::{Deserialize, Serialize};
 
 /// A unified request struct for all supported inference operations.
@@ -13,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct InferenceRequest {
     /// The unique identifier for the inference request.
-    pub request_id: RequestId,
+    pub operation_id: OperationId,
 
     /// The session identifier for the request, used to correlate related requests.
     pub session_id: SessionId,
@@ -28,16 +27,13 @@ pub struct InferenceRequest {
     /// The model selection criteria for the request.
     pub model_selection: ModelSelection,
 
-    /// Additional metadata associated with the request.
-    pub metadata: MetadataMap,
-
     /// The specific inference operation being requested.
     #[serde(flatten)]
     pub operation: InferenceOperation,
 }
 
 impl InferenceRequest {
-    /// Returns the ModelId
+    /// Returns the ModelId based on the model selection criteria and available model definitions.
     ///
     /// # Arguments
     /// * `available_model_definitions` - A list of all available model definitions to consider for capability-based selection.
@@ -50,7 +46,9 @@ impl InferenceRequest {
                 {
                     Ok(model_id)
                 } else {
-                    todo!("Raise model not known error");
+                    Err(Error::ModelNotFound {
+                        model_id: model_id.clone(),
+                    })
                 }
             }
             ModelSelection::Capabilities(_capabilities) => {

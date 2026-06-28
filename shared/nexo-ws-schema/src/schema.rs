@@ -1,8 +1,6 @@
-use crate::connect::ConnectParams;
-use crate::error::ErrorPayload;
-use crate::events::EventKind;
+use crate::Error;
 use crate::frame::Frame;
-use crate::methods::Method;
+use nexo_core::{NodeProperties, UserProperties};
 
 /// Available schema sections for generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,10 +12,6 @@ pub enum SchemaSection {
     Frames,
     /// Generate connect handshake schema.
     Connect,
-    /// Generate method enum schema.
-    Methods,
-    /// Generate event kind schema.
-    Events,
     /// Generate wire error payload schema.
     Errors,
 }
@@ -33,25 +27,23 @@ pub fn generate_schema(section: SchemaSection) -> serde_json::Value {
     match section {
         SchemaSection::All => serde_json::json!({
             "frames": serde_json::to_value(schemars::schema_for!(Frame)).unwrap_or_default(),
-            "connect": serde_json::to_value(schemars::schema_for!(ConnectParams)).unwrap_or_default(),
-            "methods": serde_json::to_value(schemars::schema_for!(Method)).unwrap_or_default(),
-            "events": serde_json::to_value(schemars::schema_for!(EventKind)).unwrap_or_default(),
-            "errors": serde_json::to_value(schemars::schema_for!(ErrorPayload)).unwrap_or_default(),
+            "connect": {
+                "user": serde_json::to_value(schemars::schema_for!(UserProperties)).unwrap_or_default(),
+                "node": serde_json::to_value(schemars::schema_for!(NodeProperties)).unwrap_or_default()
+            },
+            "errors": serde_json::to_value(schemars::schema_for!(Error)).unwrap_or_default(),
         }),
         SchemaSection::Frames => {
             serde_json::to_value(schemars::schema_for!(Frame)).unwrap_or_default()
         }
         SchemaSection::Connect => {
-            serde_json::to_value(schemars::schema_for!(ConnectParams)).unwrap_or_default()
-        }
-        SchemaSection::Methods => {
-            serde_json::to_value(schemars::schema_for!(Method)).unwrap_or_default()
-        }
-        SchemaSection::Events => {
-            serde_json::to_value(schemars::schema_for!(EventKind)).unwrap_or_default()
+            serde_json::json!({
+                "user": serde_json::to_value(schemars::schema_for!(UserProperties)).unwrap_or_default(),
+                "node": serde_json::to_value(schemars::schema_for!(NodeProperties)).unwrap_or_default()
+            })
         }
         SchemaSection::Errors => {
-            serde_json::to_value(schemars::schema_for!(ErrorPayload)).unwrap_or_default()
+            serde_json::to_value(schemars::schema_for!(Error)).unwrap_or_default()
         }
     }
 }
@@ -68,8 +60,6 @@ mod tests {
         let obj = schema.as_object().unwrap();
         assert!(obj.contains_key("frames"));
         assert!(obj.contains_key("connect"));
-        assert!(obj.contains_key("methods"));
-        assert!(obj.contains_key("events"));
         assert!(obj.contains_key("errors"));
     }
 
@@ -78,8 +68,6 @@ mod tests {
         for section in [
             SchemaSection::Frames,
             SchemaSection::Connect,
-            SchemaSection::Methods,
-            SchemaSection::Events,
             SchemaSection::Errors,
         ] {
             let schema = generate_schema(section);
@@ -106,6 +94,5 @@ mod tests {
         let json_str = serde_json::to_string(&schema).unwrap();
         assert!(json_str.contains("Request") || json_str.contains("request"));
         assert!(json_str.contains("Response") || json_str.contains("response"));
-        assert!(json_str.contains("Event") || json_str.contains("event"));
     }
 }

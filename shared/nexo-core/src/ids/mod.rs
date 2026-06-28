@@ -1,10 +1,17 @@
 //! Strongly typed identifiers shared across crates.
 
+/// The stong type used for WebSocket Frame identifiers.
+pub mod frame_id;
 /// The strong type used for model identifiers.
 pub mod model_id;
+
 /// The strong type used for node identifiers.
 pub mod node_id;
-/// The strong type used for inference request identifiers.
+/// The strong type used for operation identifiers.
+pub mod operation_id;
+/// The strong type used for request identifiers.
+///
+/// TODO: Remove this in favor of OperationId.
 pub mod request_id;
 /// The strong type used for round identifiers.
 pub mod round_id;
@@ -15,8 +22,10 @@ pub mod session_id;
 /// The strong type used for tool call identifiers.
 pub mod tool_call_id;
 
+pub use frame_id::FrameId;
 pub use model_id::ModelId;
 pub use node_id::NodeId;
+pub use operation_id::OperationId;
 pub use request_id::RequestId;
 pub use round_id::RoundId;
 pub use run_id::RunId;

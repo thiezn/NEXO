@@ -2,7 +2,7 @@ use crate::{Error, Result};
 use futures_util::{StreamExt, stream};
 use nexo_core::{
     AudioFormat, GeneratedAudio, InferenceOperation, InferenceRequest, InferenceResponse,
-    InferenceStream, MediaSource, ModelId, ModelRuntimeState, RequestId, SpeechGenerationPayload,
+    InferenceStream, MediaSource, ModelId, ModelRuntimeState, OperationId, SpeechGenerationPayload,
     SpeechGenerationResponse,
 };
 use std::collections::BTreeMap;
@@ -78,7 +78,7 @@ impl AnyTtsRuntime {
         match model_id {
             ModelId::Kokoro82m => match request.operation {
                 InferenceOperation::GenerateSpeech(payload) => {
-                    self.infer_speech_generation(model_id.clone(), request.request_id, payload)
+                    self.infer_speech_generation(model_id.clone(), request.operation_id, payload)
                         .await
                 }
                 _ => Err(Error::UnsupportedRequest {
@@ -97,7 +97,7 @@ impl AnyTtsRuntime {
     async fn infer_speech_generation(
         &self,
         model_id: ModelId,
-        request_id: RequestId,
+        operation_id: OperationId,
         payload: SpeechGenerationPayload,
     ) -> Result<InferenceStream> {
         // Retrieve loaded model instance
@@ -131,7 +131,7 @@ impl AnyTtsRuntime {
                     };
 
                     Ok(InferenceResponse::Speech(SpeechGenerationResponse {
-                        request_id,
+                        operation_id,
                         model_id,
                         audio: generated_audio,
                     }))

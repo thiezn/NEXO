@@ -133,8 +133,8 @@ impl ToolRegistry {
         capabilities
     }
 
-    /// Returns the advertised capability labels and command names.
-    pub fn capabilities_and_commands(&self) -> (Vec<String>, Vec<String>) {
+    /// Returns the advertised capability labels and tool names.
+    pub fn capabilities_and_tool_names(&self) -> (Vec<String>, Vec<String>) {
         (self.capability_names(), self.tool_names())
     }
 
@@ -166,12 +166,14 @@ impl ToolRegistry {
     /// # Errors
     ///
     /// Returns any error produced by the concrete tool executor.
-    pub async fn try_execute(&self, call: ToolCall) -> Result<Option<ToolResult>> {
+    pub async fn try_execute(&self, call: ToolCall) -> Result<ToolResult> {
         let Some(tool) = self.tools.get(&call.name) else {
-            return Ok(None);
+            return Err(Error::ToolNotFound {
+                name: call.name.clone(),
+            });
         };
 
-        tool.execute(call).await.map(Some)
+        tool.execute(call).await
     }
 }
 

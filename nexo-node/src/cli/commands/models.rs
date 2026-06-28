@@ -1,5 +1,3 @@
-//! Reusable `models` CLI command.
-
 use std::process::ExitCode;
 
 use cli_helpers::{CommandContext, Runnable};

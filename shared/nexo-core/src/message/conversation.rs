@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::common::MetadataMap;
-
 use super::{ContentPart, MessageRole};
 
 /// A single message in a conversation.
@@ -12,9 +10,6 @@ pub struct ConversationMessage {
 
     /// The ordered content parts carried by the message.
     pub parts: Vec<ContentPart>,
-
-    /// Arbitrary metadata attached to the message.
-    pub metadata: MetadataMap,
 }
 
 /// The ordered message history submitted to a model.
@@ -22,7 +17,4 @@ pub struct ConversationMessage {
 pub struct Conversation {
     /// The ordered messages that make up the conversation.
     pub messages: Vec<ConversationMessage>,
-
-    /// Arbitrary metadata attached to the conversation.
-    pub metadata: MetadataMap,
 }

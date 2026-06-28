@@ -34,10 +34,10 @@ impl ModelCatalog {
     }
 
     /// Lists all downloaded model manifests.
-    pub fn list_downloaded_manifests(&self) -> Vec<&ModelManifest> {
+    pub fn list_downloaded_manifests(&self) -> Vec<ModelManifest> {
         self.all_manifests
             .values()
-            .filter_map(|manifest| manifest.is_downloaded().then_some(manifest))
+            .filter_map(|manifest| manifest.is_downloaded().then_some(manifest.clone()))
             .collect()
     }
 

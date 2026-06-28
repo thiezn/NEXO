@@ -13,6 +13,7 @@ serde_json = { workspace = true }
 futures-util = { workspace = true }
 http = { workspace = true }
 thiserror = { workspace = true }
+nexo-core = { workspace = true }
 
 [lints]
 workspace = true

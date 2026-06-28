@@ -1,5 +1,4 @@
-use nexo_node::config::NodeConfig;
-
+use nexo_node::{NexoEngine, NexoNodeConfig};
 /// Start the node runtime, auto-load configured models, and connect to the gateway.
 ///
 /// # Arguments
@@ -10,7 +9,7 @@ use nexo_node::config::NodeConfig;
 ///
 /// Returns an error if configuration loading, model startup, or the node runtime fails.
 pub async fn run(url: Option<String>) -> cli_helpers::Result {
-    let mut config = NodeConfig::load()?;
+    let mut config = NexoNodeConfig::load()?;
     if let Some(u) = url {
         config.gateway_url = u;
     }

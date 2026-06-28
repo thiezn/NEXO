@@ -1,3 +1,4 @@
+use crate::ModelId;
 use thiserror::Error as ThisError;
 
 /// The result type used by `nexo-core` contracts.
@@ -33,4 +34,12 @@ pub enum Error {
         /// The human-readable inference error message.
         message: String,
     },
+
+    /// The requested model was not found in the available model definitions.
+    #[error("model not found: {model_id}")]
+    ModelNotFound { model_id: ModelId },
+
+    /// The requested tool was not found in the available tool definitions.
+    #[error("tool not found: {name}")]
+    ToolNotFound { name: String },
 }

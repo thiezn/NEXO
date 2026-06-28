@@ -37,14 +37,6 @@ pub struct ConnectParams {
     pub device: Option<DeviceInfo>,
 }
 
-/// Tick/heartbeat policy sent in the hello-ok response.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub struct Policy {
-    /// Tick/heartbeat interval in milliseconds.
-    pub tick_interval_ms: u64,
-}
-
 /// Successful connect response payload.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct HelloOk {
@@ -53,8 +45,6 @@ pub struct HelloOk {
     pub payload_type: String,
     /// Negotiated protocol version.
     pub protocol: u32,
-    /// Server heartbeat/tick policy.
-    pub policy: Policy,
 }
 
 impl Default for HelloOk {
@@ -62,9 +52,6 @@ impl Default for HelloOk {
         Self {
             payload_type: "hello-ok".to_string(),
             protocol: crate::PROTOCOL_VERSION,
-            policy: Policy {
-                tick_interval_ms: 15000,
-            },
         }
     }
 }

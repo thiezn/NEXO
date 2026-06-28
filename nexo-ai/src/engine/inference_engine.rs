@@ -289,7 +289,7 @@ impl InferenceEngine {
     /// Management of the sessions, runs, and rounds is handled by the nexo-gateway agent loop. The InferenceEngine is only
     /// responsible for executing the inference based on the provided request.
     pub async fn run_inference(&self, request: InferenceRequest) -> Result<InferenceStream> {
-        info!(request_id = %request.request_id, session_id = ?request.session_id, run_id = ?request.run_id, round_id = ?request.round_id, "Received inference request");
+        info!(request_id = %request.operation_id, session_id = ?request.session_id, run_id = ?request.run_id, round_id = ?request.round_id, "Received inference request");
 
         // Route to the appropriate model runtime based on the payload's model selection criteria
         // and the currently loaded models.
@@ -305,10 +305,15 @@ impl InferenceEngine {
     }
 
     /// Returns a list of all model definitions known to the engine, based on the configured model manifests.
-    fn model_definitions(&self) -> Vec<&ModelDefinition> {
+    pub fn model_definitions(&self) -> Vec<&ModelDefinition> {
         self.models
             .values()
             .map(|handle| &handle.definition)
             .collect()
+    }
+
+    /// Returns a list of all model IDs known to the engine, based on the configured model manifests.
+    pub fn model_ids(&self) -> Vec<&ModelId> {
+        self.models.keys().collect()
     }
 }

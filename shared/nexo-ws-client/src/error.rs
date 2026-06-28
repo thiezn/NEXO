@@ -1,15 +1,15 @@
-use thiserror::Error;
+use thiserror::Error as ThisError;
 
 /// Errors returned by the websocket client helpers.
-#[derive(Debug, Error)]
-pub enum ClientError {
+#[derive(Debug, ThisError)]
+pub enum Error {
     /// Underlying websocket transport failure.
     #[error("WebSocket error: {0}")]
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
 
     /// Gateway protocol validation or negotiation failure.
     #[error("Protocol error: {0}")]
-    Protocol(#[from] nexo_ws_schema::WsError),
+    Protocol(#[from] nexo_ws_schema::Error),
 
     /// JSON serialization or deserialization failure.
     #[error("JSON error: {0}")]
@@ -29,4 +29,4 @@ pub enum ClientError {
 }
 
 /// Result alias for websocket client operations.
-pub type Result<T = ()> = std::result::Result<T, ClientError>;
+pub type Result<T = ()> = std::result::Result<T, Error>;

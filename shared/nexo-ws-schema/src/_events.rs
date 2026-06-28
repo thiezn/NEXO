@@ -5,14 +5,13 @@ use serde::{Deserialize, Serialize};
 
 /// Server-push event kinds.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum EventKind {
     /// Periodic heartbeat tick event.
     Tick,
     /// Run lifecycle update event.
     Run,
     /// Session lifecycle update event.
-    #[serde(rename = "session_closed")]
     SessionClosed,
     /// Message delivery event.
     Message,

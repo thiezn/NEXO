@@ -59,7 +59,7 @@ impl Platform {
             "ios" => Self::Ios,
             "linux" => Self::Linux,
             "windows" => Self::Windows,
-            "mortimmy" => Self::Mortimmy,
+            "mortimmy" => Self::Mortimmy, // TODO: This obviously doesn't work with consts::OS
             _ => Self::Macos,
         }
     }
