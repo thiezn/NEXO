@@ -10,16 +10,21 @@ pub type Sessions = Vec<Session>;
 pub struct Session {
     /// Field value.
     pub session_id: SessionId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+
     /// Field value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+
     /// Field value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_collection_id: Option<String>,
+
     /// Field value.
     pub created_at: String,
+
     /// Field value.
     pub last_active_at: String,
+
     /// Field value.
     pub message_count: u32,
 }

@@ -5,7 +5,6 @@ members = [
     "shared/nexo-ws-schema",
     "shared/nexo-ws-client",
     "shared/nexo-core",
-    "shared/nexo-model-mgmt",
     "nexo-gateway",
     "nexo-node",
     "nexo-client",

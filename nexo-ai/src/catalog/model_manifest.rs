@@ -1,6 +1,9 @@
 use super::model_file::ModelFile;
+use super::paths::{default_models_dir, is_relative_storage_path};
 use crate::Result;
 use nexo_core::{ModelDefinition, ModelFamily, ModelId};
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 
 /// A single logical AI Model used for inference
 #[derive(Clone)]
@@ -78,16 +81,28 @@ impl ModelManifest {
     }
 
     /// Returns whether this model manifest has been downloaded and verified locally.
+    ///
+    /// File verification runs in parallel across a Rayon thread-pool to speed up
+    /// SHA-256 validation for manifests with many or large files.
     pub fn is_downloaded(&self) -> bool {
-        self.files.iter().all(|file| file.is_downloaded())
+        let Ok(model_dir) = self.model_dir() else {
+            return false;
+        };
+
+        self.files
+            .par_iter()
+            .all(|file| file.is_downloaded(&model_dir))
     }
 
-    /// Downloads all files for this model manifest, returning an error if any file fails to download or verify.
-    pub fn download(&self) -> Result {
-        for file in &self.files {
-            file.download()?;
-        }
-        Ok(())
+    /// Returns whether this model manifest appears present locally using fast metadata checks.
+    ///
+    /// This does not compute SHA-256 for every file and is intended for quick status views.
+    pub fn is_present_locally(&self) -> bool {
+        let Ok(model_dir) = self.model_dir() else {
+            return false;
+        };
+
+        self.files.iter().all(|file| file.is_present(&model_dir))
     }
 
     /// Returns the unique identifier of the model defined by this manifest.
@@ -103,6 +118,11 @@ impl ModelManifest {
     /// Returns the model family of the associated Model.
     pub fn family(&self) -> ModelFamily {
         self.model_id().family()
+    }
+
+    /// Returns the capabilities of the associated Model.
+    pub fn capabilities(&self) -> &[nexo_core::ModelCapability] {
+        self.definition.capabilities()
     }
 
     /// Returns the estimated RAM size in gigabytes required to load this model.
@@ -121,5 +141,18 @@ impl ModelManifest {
     /// Returns the list of files associated with this model manifest.
     pub fn files(&self) -> &[ModelFile] {
         &self.files
+    }
+
+    /// Resolves the local storage directory for this model manifest.
+    pub(crate) fn model_dir(&self) -> Result<PathBuf> {
+        let storage_folder = self.storage_folder();
+        let storage_path = Path::new(&storage_folder);
+        if !is_relative_storage_path(storage_path) {
+            return Err(crate::Error::InvalidStoragePath {
+                path: storage_folder,
+            });
+        }
+
+        Ok(default_models_dir().join(storage_path))
     }
 }

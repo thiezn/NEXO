@@ -1,4 +1,3 @@
-use crate::Error;
 use nexo_core::{ModelId, OperationId, RoundId, RunId};
 use serde::{Deserialize, Serialize};
 

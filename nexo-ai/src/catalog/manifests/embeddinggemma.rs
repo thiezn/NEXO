@@ -11,18 +11,32 @@ pub static EMBEDDING_GEMMA_300M: LazyLock<ModelManifest> = LazyLock::new(|| {
         ModelId::EmbeddingGemma300m,
         1.0,
         vec![
-            ModelFile::new_with_suffix(
+            ModelFile::new(
                 ModelFileKind::Weights,
                 EMBEDDING_GEMMA_HF_REPO,
-                ".safetensors",
+                "model.safetensors",
                 300_000_000,
                 "placeholder-sha256",
             ),
-            ModelFile::new_with_suffix(
+            ModelFile::new(
                 ModelFileKind::Config,
                 EMBEDDING_GEMMA_HF_REPO,
-                ".json",
-                300_000_000,
+                "config.json",
+                50_000,
+                "placeholder-sha256",
+            ),
+            ModelFile::new(
+                ModelFileKind::Tokenizer,
+                EMBEDDING_GEMMA_HF_REPO,
+                "tokenizer.json",
+                50_000,
+                "placeholder-sha256",
+            ),
+            ModelFile::new(
+                ModelFileKind::TokenizerConfig,
+                EMBEDDING_GEMMA_HF_REPO,
+                "tokenizer_config.json",
+                50_000,
                 "placeholder-sha256",
             ),
         ],

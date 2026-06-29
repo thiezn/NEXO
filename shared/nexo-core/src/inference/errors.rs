@@ -1,6 +1,6 @@
+use crate::OperationId;
+use crate::{RoundId, RunId};
 use serde::{Deserialize, Serialize};
-
-use crate::ids::{RequestId, RoundId, RunId};
 
 /// Indicates whether a failed request may be retried safely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -39,8 +39,8 @@ pub enum InferenceErrorCode {
 /// A structured failure returned from an inference engine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InferenceFailure {
-    /// The request identifier associated with the failure, if one exists.
-    pub request_id: Option<RequestId>,
+    /// The operation identifier associated with the failure, if one exists.
+    pub operation_id: Option<OperationId>,
 
     /// The run identifier associated with the failure, if one exists.
     pub run_id: Option<RunId>,

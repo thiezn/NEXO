@@ -37,3 +37,22 @@ pub enum ModelCapability {
     /// The model can emit partial streamed responses.
     Streaming,
 }
+
+impl std::fmt::Display for ModelCapability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            ModelCapability::TextGeneration => "text_generation",
+            ModelCapability::ToolCalling => "tool_calling",
+            ModelCapability::Embeddings => "embeddings",
+            ModelCapability::ImageInput => "image_input",
+            ModelCapability::VideoInput => "video_input",
+            ModelCapability::AudioInput => "audio_input",
+            ModelCapability::ImageGeneration => "image_generation",
+            ModelCapability::SpeechGeneration => "speech_generation",
+            ModelCapability::StructuredOutput => "structured_output",
+            ModelCapability::Reasoning => "reasoning",
+            ModelCapability::Streaming => "streaming",
+        };
+        f.write_str(value)
+    }
+}

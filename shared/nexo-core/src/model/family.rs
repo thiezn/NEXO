@@ -23,3 +23,19 @@ pub enum ModelFamily {
     /// The family of models that are based on the Flux2 architecture.
     Flux2,
 }
+
+use std::fmt::{self, Display};
+
+impl Display for ModelFamily {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            ModelFamily::EmbeddingGemma => "EmbeddingGemma",
+            ModelFamily::Gemma4 => "Gemma4",
+            ModelFamily::Qwen35 => "Qwen35",
+            ModelFamily::Voxtral => "Voxtral",
+            ModelFamily::Kokoro => "Kokoro",
+            ModelFamily::Flux2 => "Flux2",
+        };
+        f.write_str(value)
+    }
+}

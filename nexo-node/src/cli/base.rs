@@ -1,6 +1,5 @@
-//! Clap-powered command definitions for the `nexo-node` binary.
-
-use crate::cli::commands::{init, models, start};
+use crate::cli::commands::{ModelsCommand, init, start};
+use nexo_node::Result;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -35,7 +34,7 @@ pub enum Command {
     },
 
     /// Manage downloaded local models.
-    Models(models::ModelsCommand),
+    Models(ModelsCommand),
 }
 
 /// Dispatch a parsed CLI command to its concrete handler.
@@ -48,10 +47,7 @@ pub enum Command {
 /// # Errors
 ///
 /// Returns any error produced by the selected command handler.
-pub async fn dispatch(
-    command: Command,
-    context: &mut CommandContext,
-) -> cli_helpers::Result<ExitCode> {
+pub async fn dispatch(command: Command, context: &mut CommandContext) -> Result<ExitCode> {
     match command {
         Command::Init => {
             init::run()?;
@@ -61,9 +57,6 @@ pub async fn dispatch(
             start::run(url).await?;
             Ok(ExitCode::SUCCESS)
         }
-        Command::Models(command) => command
-            .run_async(context)
-            .await
-            .map_err(|error| cli_helpers::Error::Other(error.to_string())),
+        Command::Models(command) => command.run(context).await,
     }
 }

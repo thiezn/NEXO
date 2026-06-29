@@ -10,6 +10,9 @@ pub mod engine;
 /// Crate-local error and result types.
 pub mod error;
 
-pub use catalog::{ModelCatalog, ModelManifest};
+pub use catalog::{
+	CatalogDownloadProgress, DownloadOptions, FileDownloadProgress, ModelCatalog, ModelFileKind,
+	ModelManifest, NoopDownloadProgress,
+};
 pub use engine::InferenceEngine;
 pub use error::{Error, Result};

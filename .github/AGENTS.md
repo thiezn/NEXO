@@ -12,8 +12,6 @@ collections, cron jobs, and git-backed notes.
   structs, wire casing, and schema generation.
 * `shared/nexo-ws-client`: reusable async WebSocket connection and handshake helpers
   for clients and nodes.
-* `shared/nexo-model-mgmt`: local model manifests, model storage paths, downloads,
-  and reusable `models` CLI commands.
 * `nexo-ai`: library-first local inference runtime; maps `nexo-core` requests and
   responses to `mistralrs-core` and loads local model configs.
 * `nexo-gateway`: Gateway daemon (`nexo` binary); owns WebSocket routing, SQLite

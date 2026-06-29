@@ -20,6 +20,8 @@ pub struct ToolCall {
 }
 
 /// A partial streamed update for a tool call under construction.
+///
+/// TODO: Figure out if inference runs actually sent partial tool calls?
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub struct ToolCallDelta {

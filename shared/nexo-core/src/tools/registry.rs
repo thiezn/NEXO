@@ -1,36 +1,21 @@
-use std::collections::HashMap;
-
 use super::Tool;
 use crate::error::{Error, Result};
-use crate::tools::{ToolCall, ToolDefinition, ToolExecutionConstraints, ToolResult};
+use crate::tools::{ToolCall, ToolDefinition, ToolResult};
+use async_trait::async_trait;
+use std::collections::BTreeMap;
 
-/// DynTool trait that will allow us to store heterogeneous tools
+/// RegisteredTool trait that will allow us to store heterogeneous tools
 /// in the registry while still being able to call their execute method.
 ///
-/// The reason this is needed as each Tool trail implements an associated type Args,
+/// The reason this is needed as each Tool trait implements an associated type Args,
 /// which prevents us from using a simple Box<dyn Tool>.
 ///
-/// This macro does introduce some complexity here, but it allows us to keep the
+/// This trait does introduce some duplication, but it allows us to keep the
 /// ergonomics of defining tools with the Tool trait. Since this code here
 /// is not meant to be used by end-users, we can afford to have some internal complexity
 /// in order to provide a better experience for tool authors.
-#[async_trait::async_trait]
-pub trait DynTool: Send + Sync {
-    /// Returns the name of the tool, which should be unique across the registry.
-    fn name(&self) -> &str;
-
-    /// Returns a human-readable description of the tool's functionality.
-    fn description(&self) -> &str;
-
-    /// Returns a JSON schema describing the tool's expected arguments.
-    fn parameters(&self) -> serde_json::Value;
-
-    /// Returns an optional version string for the tool's contract, which can be used for compatibility checks.
-    fn contract_version(&self) -> Option<&str>;
-
-    /// Returns the execution constraints for the tool, such as side effect level and parallelism.
-    fn execution_constraints(&self) -> ToolExecutionConstraints;
-
+#[async_trait]
+pub trait RegisteredTool: Send + Sync {
     /// Returns the full tool definition, which includes the name, description, parameters, contract version, and execution constraints.
     fn definition(&self) -> ToolDefinition;
 
@@ -38,37 +23,17 @@ pub trait DynTool: Send + Sync {
     async fn execute(&self, call: ToolCall) -> Result<ToolResult>;
 }
 
-#[async_trait::async_trait]
-impl<T> DynTool for T
+#[async_trait]
+impl<T> RegisteredTool for T
 where
     T: Tool + Send + Sync,
 {
-    fn name(&self) -> &str {
-        Tool::name(self)
-    }
-    fn description(&self) -> &str {
-        Tool::description(self)
-    }
-    fn parameters(&self) -> serde_json::Value {
-        Tool::parameters(self)
-    }
-    fn contract_version(&self) -> Option<&str> {
-        Tool::contract_version(self)
-    }
-    fn execution_constraints(&self) -> ToolExecutionConstraints {
-        Tool::execution_constraints(self)
-    }
-
+    /// Returns the full tool definition, which includes the name, description, parameters, contract version, and execution constraints.
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            parameters: self.parameters(),
-            contract_version: self.contract_version().map(|s| s.to_string()),
-            execution: self.execution_constraints(),
-        }
+        Tool::definition(self)
     }
 
+    /// Executes the tool with the given call, returning a ToolResult or an error if execution fails.
     async fn execute(&self, call: ToolCall) -> Result<ToolResult> {
         Tool::execute(self, call).await
     }
@@ -77,7 +42,7 @@ where
 /// Generic in-memory registry for tools defined with `nexo-core` contracts.
 #[derive(Default)]
 pub struct ToolRegistry {
-    tools: HashMap<String, Box<dyn DynTool>>,
+    tools: BTreeMap<String, Box<dyn RegisteredTool>>,
 }
 
 impl ToolRegistry {
@@ -110,10 +75,7 @@ impl ToolRegistry {
 
     /// Returns all registered tool definitions in deterministic name order.
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
-            .values()
-            .map(|tool| tool.definition().clone())
-            .collect()
+        self.tools.values().map(|tool| tool.definition()).collect()
     }
 
     /// Returns all registered tool names in deterministic order.

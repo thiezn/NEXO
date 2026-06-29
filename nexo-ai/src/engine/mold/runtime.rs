@@ -1,17 +1,12 @@
-use crate::{Error, Result};
-use futures_util::{StreamExt, stream};
+use crate::Result;
 use mold_ai_inference::Flux2Engine;
-use nexo_core::{
-    AudioFormat, GeneratedAudio, InferenceOperation, InferenceRequest, InferenceResponse,
-    InferenceStream, MediaSource, ModelId, RequestId, SpeechGenerationPayload,
-    SpeechGenerationResponse,
-};
+use nexo_core::{InferenceRequest, InferenceStream, ModelId};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// Model Runtime for the Mold inference engine.
 pub(crate) struct MoldRuntime {
-    models: BTreeMap<ModelId, Arc<Flux2Engine>>,
+    _models: BTreeMap<ModelId, Arc<Flux2Engine>>,
 }
 
 impl MoldRuntime {
@@ -21,7 +16,7 @@ impl MoldRuntime {
         // Our load and unload operations will then just call load() and unload()
         // on the relevant Flux2Engine instance.
         Self {
-            models: BTreeMap::new(),
+            _models: BTreeMap::new(),
         }
     }
 
@@ -41,19 +36,19 @@ impl MoldRuntime {
         //     None,
         // );
 
-        Ok(())
+        // Ok(())
     }
 
     /// Unload a model from the Mold runtime.
-    pub(crate) async fn unload_model(&self, model_id: &ModelId) -> Result {
+    pub(crate) async fn unload_model(&self, _model_id: &ModelId) -> Result {
         todo!("Implement model unloading for Mold runtime");
     }
 
     /// Submits an inference request to the specified model in the Mold runtime.
     pub(crate) async fn infer(
         &self,
-        model_id: &ModelId,
-        request: InferenceRequest,
+        _model_id: &ModelId,
+        _request: InferenceRequest,
     ) -> Result<InferenceStream> {
         todo!("Implement inference request submission for Mold runtime");
     }

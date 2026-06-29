@@ -37,9 +37,15 @@ pub enum Error {
 
     /// The requested model was not found in the available model definitions.
     #[error("model not found: {model_id}")]
-    ModelNotFound { model_id: ModelId },
+    ModelNotFound {
+        /// The model ID that was not found.
+        model_id: ModelId,
+    },
 
     /// The requested tool was not found in the available tool definitions.
     #[error("tool not found: {name}")]
-    ToolNotFound { name: String },
+    ToolNotFound {
+        /// The tool name that was not found.
+        name: String,
+    },
 }

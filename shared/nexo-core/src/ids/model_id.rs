@@ -1,10 +1,24 @@
 use crate::ModelFamily;
 use serde::{Deserialize, Serialize};
+use strum::ParseError;
 
 /// A stable identifier for an inference model.
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+    strum::AsRefStr,
+    strum::Display,
+    strum::EnumString,
 )]
+#[serde(into = "String", try_from = "String")]
 #[allow(missing_docs)]
 pub enum ModelId {
     // Gemma4E2bItQ5,
@@ -25,12 +39,14 @@ pub enum ModelId {
     // Gemma4E4bItUqffAfq3,
     // Gemma4E4bItUqffAfq4,
     // Gemma4E4bItUqffAfq6,
-    // Gemma4E4bItUqffAfq8,
+    #[strum(serialize = "gemma-4-e4b-it-uqff-afq8")]
+    Gemma4E4bItUqffAfq8,
     // Gemma4E4bItUqffQ2k,
     // Gemma4E4bItUqffQ3k,
     // Gemma4E4bItUqffQ4k,
     // Gemma4E4bItUqffQ5k,
     // Gemma4E4bItUqffQ6k,
+    #[strum(serialize = "gemma-4-e4b-it-uqff-q80")]
     Gemma4E4bItUqffQ80,
     // Gemma412bItUqffAfq2,
     // Gemma412bItUqffAfq3,
@@ -47,12 +63,14 @@ pub enum ModelId {
     // Gemma426bA4bItUqffAfq3,
     // Gemma426bA4bItUqffAfq4,
     // Gemma426bA4bItUqffAfq6,
-    // Gemma426bA4bItUqffAfq8,
+    #[strum(serialize = "gemma-4-26b-a4b-it-uqff-afq8")]
+    Gemma426bA4bItUqffAfq8,
     // Gemma426bA4bItUqffQ2k,
     // Gemma426bA4bItUqffQ3k,
     // Gemma426bA4bItUqffQ4k,
     // Gemma426bA4bItUqffQ5k,
     // Gemma426bA4bItUqffQ6k,
+    #[strum(serialize = "gemma-4-26b-a4b-it-uqff-q80")]
     Gemma426bA4bItUqffQ80,
     // Gemma431bItUqffAfq2,
     // Gemma431bItUqffAfq3,
@@ -88,11 +106,14 @@ pub enum ModelId {
     // Qwen35_35bA3bAppleMetalUqffQ6k,
     // Qwen35_35bA3bAppleMetalUqffQ80,
     // VoxtralMini3b2507AsrStt,
+    #[strum(serialize = "kokoro-82m")]
     Kokoro82m,
     // Flux2Dev,
     // Flux2Schnell,
     // Flux2Klein4b,
+    #[strum(serialize = "flux-2-klein-9b")]
     Flux2Klein9b,
+    #[strum(serialize = "embedding-gemma-300m")]
     EmbeddingGemma300m,
 }
 
@@ -118,7 +139,7 @@ impl ModelId {
             // | ModelId::Gemma4E4bItUqffAfq3
             // | ModelId::Gemma4E4bItUqffAfq4
             // | ModelId::Gemma4E4bItUqffAfq6
-            // | ModelId::Gemma4E4bItUqffAfq8
+            | ModelId::Gemma4E4bItUqffAfq8
             // | ModelId::Gemma4E4bItUqffQ2k
             // | ModelId::Gemma4E4bItUqffQ3k
             // | ModelId::Gemma4E4bItUqffQ4k
@@ -140,7 +161,7 @@ impl ModelId {
             // | ModelId::Gemma426bA4bItUqffAfq3
             // | ModelId::Gemma426bA4bItUqffAfq4
             // | ModelId::Gemma426bA4bItUqffAfq6
-            // | ModelId::Gemma426bA4bItUqffAfq8
+            | ModelId::Gemma426bA4bItUqffAfq8
             // | ModelId::Gemma426bA4bItUqffQ2k
             // | ModelId::Gemma426bA4bItUqffQ3k
             // | ModelId::Gemma426bA4bItUqffQ4k
@@ -191,27 +212,17 @@ impl ModelId {
     }
 }
 
-impl AsRef<str> for ModelId {
-    fn as_ref(&self) -> &str {
-        match self {
-            ModelId::EmbeddingGemma300m => "embedding-gemma-300m",
-            ModelId::Flux2Klein9b => "flux-2-klein-9b",
-            ModelId::Kokoro82m => "kokoro-82m",
-            ModelId::Gemma426bA4bItUqffQ80 => "gemma-4-26b-a4b-it-uqff-q80",
-            ModelId::Gemma4E4bItUqffQ80 => "gemma-4-e4b-it-uqff-q80",
-        }
-    }
-}
-
-impl std::fmt::Display for ModelId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_ref())
-    }
-}
-
 impl From<ModelId> for String {
     fn from(model_id: ModelId) -> Self {
-        model_id.as_ref().to_string()
+        model_id.to_string()
+    }
+}
+
+impl TryFrom<String> for ModelId {
+    type Error = ParseError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
     }
 }
 
@@ -224,5 +235,44 @@ impl PartialEq<str> for ModelId {
 impl PartialEq<ModelId> for str {
     fn eq(&self, other: &ModelId) -> bool {
         other == self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::ModelId;
+
+    #[test]
+    fn serializes_to_model_id_strings() {
+        assert_eq!(
+            serde_json::to_string(&ModelId::Gemma4E4bItUqffAfq8).unwrap(),
+            "\"gemma-4-e4b-it-uqff-afq8\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelId::Kokoro82m).unwrap(),
+            "\"kokoro-82m\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelId::Flux2Klein9b).unwrap(),
+            "\"flux-2-klein-9b\""
+        );
+    }
+
+    #[test]
+    fn deserializes_to_model_ids() {
+        assert_eq!(
+            serde_json::from_str::<ModelId>("\"gemma-4-e4b-it-uqff-afq8\"").unwrap(),
+            ModelId::Gemma4E4bItUqffAfq8
+        );
+        assert_eq!(
+            serde_json::from_str::<ModelId>("\"kokoro-82m\"").unwrap(),
+            ModelId::Kokoro82m
+        );
+        assert_eq!(
+            serde_json::from_str::<ModelId>("\"flux-2-klein-9b\"").unwrap(),
+            ModelId::Flux2Klein9b
+        );
     }
 }

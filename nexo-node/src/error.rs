@@ -1,5 +1,6 @@
 //! Error types for model management commands and helpers.
-
+use nexo_core::OperationId;
+use nexo_ws_schema::NodeToGatewayMessage;
 use thiserror::Error as ThisError;
 
 /// Result alias for model management operations.
@@ -25,7 +26,10 @@ pub enum Error {
     /// An error occurred during tool registration.
     #[error("Tool registration error")]
     ToolRegistration {
-        operation_id: nexo_core::OperationId,
+        /// The operation ID associated with the tool registration request.
+        operation_id: OperationId,
+
+        /// The human-readable error message describing the tool registration failure.
         error: String,
     },
 
@@ -55,5 +59,5 @@ pub enum Error {
 
     /// An error occured in the tokio library
     #[error(transparent)]
-    Tokio(#[from] tokio::sync::mpsc::error::SendError),
+    SendError(#[from] tokio::sync::mpsc::error::SendError<NodeToGatewayMessage>),
 }

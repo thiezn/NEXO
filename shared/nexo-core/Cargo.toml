@@ -11,7 +11,8 @@ schemars = { workspace = true, features = ["chrono04", "uuid1"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-uuid = { workspace = true, features = ["v7"] }
+uuid = { workspace = true, features = ["serde", "v7"] }
+strum = { workspace = true, features = ["derive"] }
 
 [lints]
 workspace = true

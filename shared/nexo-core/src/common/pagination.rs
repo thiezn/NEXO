@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A cursor-based pagination request used by list-oriented APIs.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PageRequest {
     /// The opaque cursor returned by a previous page response.
     pub cursor: Option<String>,
@@ -12,8 +11,7 @@ pub struct PageRequest {
 }
 
 /// Pagination metadata returned alongside a page of items.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PageInfo {
     /// The cursor to use for fetching the next page, if one exists.
     pub next_cursor: Option<String>,

@@ -94,7 +94,9 @@ impl ModelHandle {
         let (state_tx, state_rx) = watch::channel(ModelRuntimeState::Unloaded);
         let runtime = match definition.id() {
             ModelId::Gemma426bA4bItUqffQ80
+            | ModelId::Gemma426bA4bItUqffAfq8
             | ModelId::EmbeddingGemma300m
+            | ModelId::Gemma4E4bItUqffAfq8
             | ModelId::Gemma4E4bItUqffQ80 => ModelRuntime::MistralRs(MistralRsRuntime::new()),
             ModelId::Flux2Klein9b => ModelRuntime::Mold(MoldRuntime::new()),
             ModelId::Kokoro82m => ModelRuntime::AnyTts(AnyTtsRuntime::new()),

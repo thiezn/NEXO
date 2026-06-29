@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::common::Timestamp;
-use crate::ids::{ModelId, RequestId, RoundId, RunId};
+use crate::ids::{ModelId, OperationId, RoundId, RunId};
 use crate::inference::{InferenceResponse, TokenUsage};
 
 /// The current lifecycle state of a single round within a run.
@@ -42,8 +42,8 @@ pub struct RoundStatusUpdate {
     /// The unique round identifier.
     pub round_id: RoundId,
 
-    /// The inference request associated with the round, if one has been assigned.
-    pub request_id: Option<RequestId>,
+    /// The operation identifier associated with the round, if one has been assigned.
+    pub operation_id: Option<OperationId>,
 
     /// The new round status.
     pub status: RoundStatus,
@@ -78,8 +78,8 @@ pub struct RoundSummary {
     /// The unique round identifier.
     pub round_id: RoundId,
 
-    /// The inference request associated with the round, if one has been assigned.
-    pub request_id: Option<RequestId>,
+    /// The operation identifier associated with the round, if one has been assigned.
+    pub operation_id: Option<OperationId>,
 
     /// The current round status.
     pub status: RoundStatus,

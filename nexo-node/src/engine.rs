@@ -3,6 +3,7 @@ use crate::{Error, Result};
 use futures_util::StreamExt;
 use nexo_ai::InferenceEngine;
 use nexo_core::{ClientKind, InferenceRequest, ModelId, OperationId, ToolCall, ToolRegistry};
+use nexo_echo::EchoTool;
 use nexo_ws_client::NexoConnection;
 use nexo_ws_schema::GatewayToNodeMessage;
 use nexo_ws_schema::{
@@ -13,10 +14,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info, warn};
-
 /// Central coordinator for nexo-node, ties configuration,
 /// tool registry, websocket loop and inference engine together.
-pub(crate) struct NexoNode {
+pub struct NexoNode {
     /// The configuration for the node, including gateway URL, auth token, and node identity.
     config: NexoNodeConfig,
 
@@ -29,9 +29,12 @@ pub(crate) struct NexoNode {
 
 impl NexoNode {
     /// Initializes a new NexoNode with the given configuration and tool registry.
-    pub fn new(config: NexoNodeConfig, registry: ToolRegistry) -> Result<Self> {
+    pub fn new(config: NexoNodeConfig) -> Result<Self> {
         let catalog = nexo_ai::ModelCatalog::new();
         let local_available_manifests = catalog.list_downloaded_manifests();
+
+        let mut registry = ToolRegistry::new();
+        registry.register(EchoTool)?;
 
         let engine = Arc::new(InferenceEngine::new(local_available_manifests)?);
         let registry = Arc::new(registry);
@@ -112,13 +115,18 @@ impl NexoNode {
 
                     // Handle results of actions taken in response to gateway messages
                     Some(msg) = rx.recv() => {
+
                         if msg == NodeToGatewayMessage::Disconnect {
                             info!("Disconnecting from gateway...");
+                            let frame = Frame::new(msg)?;
+                            conn.send_frame(&frame).await?;
                             break;
                         }
 
                         let frame = Frame::new(msg)?;
                         conn.send_frame(&frame).await?;
+
+
                     }
             }
         }

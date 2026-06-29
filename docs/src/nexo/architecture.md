@@ -30,7 +30,7 @@ graph TD
     Gateway --> GitStorage[(Git-backed storage<br/>PROMPTS and NOTES)]
     Gateway --> GatewayTools[Gateway-native tools<br/>notes and io]
     Node --> NexoAi[nexo-ai<br/>mistralrs-core adapter]
-    NexoAi --> Models[(Local model storage<br/>nexo-model-mgmt)]
+    NexoAi --> Models[(Local model storage)]
 ```
 
 ## Gateway
