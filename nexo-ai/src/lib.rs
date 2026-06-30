@@ -11,8 +11,8 @@ pub mod engine;
 pub mod error;
 
 pub use catalog::{
-	CatalogDownloadProgress, DownloadOptions, FileDownloadProgress, ModelCatalog, ModelFileKind,
-	ModelManifest, NoopDownloadProgress,
+    CatalogDownloadProgress, DownloadOptions, FileDownloadProgress, ModelCatalog, ModelFileKind,
+    ModelManifest, NoopDownloadProgress,
 };
 pub use engine::InferenceEngine;
 pub use error::{Error, Result};

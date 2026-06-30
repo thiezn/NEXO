@@ -20,8 +20,11 @@ pub mod inference;
 pub mod message;
 /// Model descriptors, capabilities, and selection types.
 pub mod model;
-/// Higher-level run and round lifecycle types for orchestration.
-pub mod run;
+
+// /// Higher-level run and round lifecycle types for orchestration.
+// This is now handled in the StartInferenceRun sequences
+// pub mod run;
+
 /// Tool schemas, execution policies, calls, and results.
 pub mod tools;
 
@@ -32,27 +35,30 @@ pub use common::{PageInfo, PageRequest, Timestamp};
 pub use error::{Error, Result};
 pub use ids::{FrameId, ModelId, NodeId, OperationId, RoundId, RunId, SessionId, ToolCallId};
 pub use inference::{
-    AudioFormat, DetokenizationPayload, DetokenizationResponse, EmbedPayload, EmbeddingResponse,
-    EmbeddingVector, FinishReason, GenerateChunk, GenerateCompleted, GenerateDelta,
-    GenerateStarted, GeneratedAudio, GenerationPromptPolicy, ImageGenerationPayload,
-    ImageGenerationResponse, ImageGenerationSize, InferenceErrorCode, InferenceFailure,
-    InferenceOperation, InferenceRequest, InferenceResponse, InferenceStream, ModelSelection,
-    OutputConstraint, PerformanceMetrics, Retryability, SamplingConfig, Session, Sessions,
-    SpecialTokenPolicy, SpeechGenerationPayload, SpeechGenerationResponse, SpeechLanguage,
-    StreamingMode, TokenUsage, TokenizationPayload, TokenizationResponse,
+    ArtifactIndex, AudioFormat, DetokenizationDelta, DetokenizationPayload, DetokenizationResponse,
+    EmbedPayload, EmbedResponse, EmbeddingDelta, EmbeddingVector, FinishReason, GenerateDelta,
+    GeneratedAudio, GenerationPromptPolicy, ImageDelta, ImageGenerationPayload,
+    ImageGenerationResponse, ImageGenerationSize, InferenceCancelled, InferenceCompleted,
+    InferenceErrorCode, InferenceFailed, InferenceFailure, InferenceFinal, InferenceMeta,
+    InferenceOperation, InferenceOperationKind, InferenceOutput, InferenceProgress,
+    InferenceRequest, InferenceStarted, InferenceStream, InferenceUpdate, ModelSelection,
+    MultiModalDelta, MultiModalResponse, OutputConstraint, OutputOffsetBytes, PerformanceMetrics,
+    Retryability, SamplingConfig, Session, Sessions, SpecialTokenPolicy, SpeechDelta,
+    SpeechGenerationPayload, SpeechGenerationResponse, SpeechLanguage, StreamSeq, StreamingMode,
+    TokenUsage, TokenizationDelta, TokenizationPayload, TokenizationResponse,
 };
 pub use message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
     MessageRole, VideoInput,
 };
 pub use model::{
-    ModelCapability, ModelDefinition, ModelFamily, ModelRegistry, ModelRuntimeState,
-    ReasoningEffort, ReasoningSettings, RoleStrategy, ThinkingMode,
+    ModelCapability, ModelDefinition, ModelFamily, ModelRuntimeState, ReasoningEffort,
+    ReasoningSettings, RoleStrategy, ThinkingMode,
 };
-pub use run::{
-    RoundEvent, RoundStatus, RoundStatusUpdate, RoundSummary, RunEvent, RunStatus, RunStatusUpdate,
-    RunSummary,
-};
+// pub use run::{
+//     RoundEvent, RoundStatus, RoundStatusUpdate, RoundSummary, RunEvent, RunStatus, RunStatusUpdate,
+//     RunSummary,
+// };
 pub use system::{
     ClientKind, NexoNodeMetrics, NexoState, NodeProperties, Platform, UserProperties,
 };

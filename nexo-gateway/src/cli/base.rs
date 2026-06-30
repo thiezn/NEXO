@@ -1,22 +1,19 @@
+use crate::cli::commands::{init, schema, start};
 use clap::{Parser, Subcommand};
-use cli_helpers::LogLevel;
+use cli_helpers::CommandContext;
+use cli_helpers::clap::CommonArgs;
 use nexo_ws_schema::SchemaSection;
 
 /// Command-line interface for the gateway binary.
 #[derive(Parser)]
 #[command(name = "nexo", about = "NEXO Gateway - Neural Extension Operator")]
 pub struct Cli {
+    #[command(flatten)]
+    pub common: CommonArgs,
+
     /// The top-level command to execute.
     #[command(subcommand)]
     pub command: Command,
-
-    /// Global log verbosity for the current invocation.
-    #[arg(short, long, value_enum, default_value_t = LogLevel::Info, global = true)]
-    pub log_level: LogLevel,
-
-    /// Disable ANSI color output.
-    #[arg(long, global = true)]
-    pub no_color: bool,
 }
 
 /// Top-level commands supported by the gateway binary.
@@ -46,4 +43,31 @@ pub enum Command {
         #[arg(short, long)]
         output: Option<String>,
     },
+}
+
+/// Dispatch a parsed CLI command to its concrete handler.
+///
+/// # Arguments
+///
+/// * `command` - The parsed top-level CLI command.
+/// * `context` - Shared command I/O and output context.
+///
+/// # Errors
+///
+/// Returns any error produced by the selected command handler.
+pub async fn dispatch(command: Command, context: &mut CommandContext) -> Result<ExitCode> {
+    match command {
+        Command::Init => {
+            init::run()?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Start { host, port } => {
+            start::run(host, port).await?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Schema { section, output } => {
+            schema::run(section, output).await?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
 }

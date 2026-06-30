@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::Timestamp;
 use crate::ids::{ModelId, OperationId, RoundId, RunId};
-use crate::inference::{InferenceResponse, TokenUsage};
+use crate::inference::{InferenceUpdate, TokenUsage};
 
 /// The current lifecycle state of a single round within a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -65,8 +65,8 @@ pub enum RoundEvent {
     /// A lifecycle status update.
     Status(RoundStatusUpdate),
 
-    /// An inference response emitted for the round.
-    Response(InferenceResponse),
+    /// An inference update emitted for the round.
+    Inference(InferenceUpdate),
 }
 
 /// A compact summary of a completed or in-flight round.

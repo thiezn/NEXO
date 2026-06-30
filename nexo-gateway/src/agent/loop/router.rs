@@ -1,8 +1,6 @@
 use crate::server::state::{GatewayState, PeerId, SharedState};
 use nexo_core::{ModelCapability, ModelDefinition};
-use nexo_ws_schema::{
-    ConnectionRole, Frame, Method, ModelLoadParams, ModelLoadResponse, ModelUnloadParams,
-};
+use nexo_ws_schema::Frame;
 use tokio::sync::mpsc;
 
 use super::inference::InferenceOutcome;

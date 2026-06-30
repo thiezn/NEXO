@@ -1,6 +1,6 @@
 use crate::server::state::SharedState;
 use nexo_core::{ConversationMessage, ReasoningSettings, ToolCall, ToolChoice};
-use nexo_ws_schema::{Frame, Method, RunRoundRequest, RunRoundResponse, ToolEntry};
+use nexo_ws_schema::Frame;
 
 use super::router::Router;
 

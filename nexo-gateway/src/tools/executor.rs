@@ -2,7 +2,7 @@
 
 use crate::server::state::SharedState;
 use nexo_core::{ToolCall, ToolResult, ToolResultContent, ToolResultStatus};
-use nexo_ws_schema::{Frame, Method, ToolsExecuteParams, ToolsExecuteResponse};
+use nexo_ws_schema::Frame;
 
 /// Execute a tool call by preferring gateway-local tools before forwarding to a node.
 ///

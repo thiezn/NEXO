@@ -1,9 +1,9 @@
 use crate::{Error, Result};
 use futures_util::{StreamExt, stream};
 use nexo_core::{
-    AudioFormat, GeneratedAudio, InferenceOperation, InferenceRequest, InferenceResponse,
-    InferenceStream, MediaSource, ModelId, ModelRuntimeState, OperationId, SpeechGenerationPayload,
-    SpeechGenerationResponse,
+    AudioFormat, GeneratedAudio, InferenceFinal, InferenceMeta, InferenceOperation,
+    InferenceRequest, InferenceStream, InferenceUpdate, MediaSource, ModelId, ModelRuntimeState,
+    SpeechGenerationPayload, SpeechGenerationResponse,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -76,15 +76,17 @@ impl AnyTtsRuntime {
         }
 
         match model_id {
-            ModelId::Kokoro82m => match request.operation {
-                InferenceOperation::GenerateSpeech(payload) => {
-                    self.infer_speech_generation(model_id.clone(), request.operation_id, payload)
-                        .await
+            ModelId::Kokoro82m => {
+                let meta = InferenceMeta::from_request_and_model(&request, model_id.clone());
+                match request.operation {
+                    InferenceOperation::GenerateSpeech(payload) => {
+                        self.infer_speech_generation(meta, payload).await
+                    }
+                    _ => Err(Error::UnsupportedRequest {
+                        kind: "Kokoro82m only supports SpeechGeneration requests",
+                    }),
                 }
-                _ => Err(Error::UnsupportedRequest {
-                    kind: "Kokoro82m only supports SpeechGeneration requests",
-                }),
-            },
+            }
             _ => {
                 return Err(Error::UnsupportedFeature {
                     feature: format!("Model `{}` is not supported on AnyTts runtime", model_id),
@@ -96,49 +98,46 @@ impl AnyTtsRuntime {
     /// Performs speech generation inference using the specified model and request payload.
     async fn infer_speech_generation(
         &self,
-        model_id: ModelId,
-        operation_id: OperationId,
+        meta: InferenceMeta,
         payload: SpeechGenerationPayload,
     ) -> Result<InferenceStream> {
         // Retrieve loaded model instance
         let model = self
             .models
-            .get(&model_id)
+            .get(&meta.model_id)
             .ok_or_else(|| Error::ModelNotLoaded {
-                model_id: model_id.clone(),
+                model_id: meta.model_id.clone(),
                 current_state: ModelRuntimeState::Unloaded,
             })?
             .clone();
 
         // Perform speech inference on model in a blocking task
         let response = stream::once(async move {
-            let result = match tokio::task::spawn_blocking(move || match model_id {
-                ModelId::Kokoro82m => {
-                    let mut synth_request = any_tts::SynthesisRequest::new(payload.text)
-                        .with_language(payload.language);
+            let result = match tokio::task::spawn_blocking(move || {
+                let mut synth_request =
+                    any_tts::SynthesisRequest::new(payload.text).with_language(payload.language);
 
-                    if let Some(voice) = payload.voice {
-                        synth_request = synth_request.with_voice(voice);
-                    }
-
-                    let audio = model.synthesize(&synth_request)?;
-
-                    let generated_audio = GeneratedAudio {
-                        source: MediaSource::Bytes(audio.get_wav()),
-                        format: AudioFormat::Wav,
-                        sample_rate_hz: Some(audio.sample_rate),
-                        channel_count: Some(audio.channels),
-                    };
-
-                    Ok(InferenceResponse::Speech(SpeechGenerationResponse {
-                        operation_id,
-                        model_id,
-                        audio: generated_audio,
-                    }))
+                if let Some(voice) = payload.voice {
+                    synth_request = synth_request.with_voice(voice);
                 }
-                _ => Err(Error::UnsupportedFeature {
-                    feature: format!("Model `{}` is not supported on AnyTts runtime", model_id),
-                }),
+
+                let audio = model.synthesize(&synth_request)?;
+
+                let generated_audio = GeneratedAudio {
+                    source: MediaSource::Bytes(audio.get_wav()),
+                    format: AudioFormat::Wav,
+                    sample_rate_hz: Some(audio.sample_rate),
+                    channel_count: Some(audio.channels),
+                };
+
+                let speech = SpeechGenerationResponse {
+                    audio: generated_audio,
+                };
+
+                Ok(InferenceUpdate::completed(
+                    meta,
+                    InferenceFinal::GenerateSpeech(speech),
+                ))
             })
             .await
             {

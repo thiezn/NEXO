@@ -1,6 +1,6 @@
 use crate::memory::git::GitStorage;
 use nexo_core::{ModelDefinition, ToolRegistry};
-use nexo_ws_schema::{ConnectionRole, Frame, Scope, ToolDefinition, ToolEntry};
+use nexo_ws_schema::{Frame, ToolDefinition};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

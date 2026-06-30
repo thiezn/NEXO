@@ -56,10 +56,32 @@ impl InferenceRequest {
             }
         }
     }
+
+    /// Returns the kind of inference operation carried by this request.
+    pub fn operation_kind(&self) -> InferenceOperationKind {
+        self.operation.kind()
+    }
 }
 
 /// The specific inference operation being requested, with associated payload.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, strum::EnumDiscriminants,
+)]
+#[strum_discriminants(name(InferenceOperationKind))]
+#[strum_discriminants(vis(pub))]
+#[strum_discriminants(doc = "The category of inference operation being executed.")]
+#[strum_discriminants(derive(
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+    strum::AsRefStr,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr
+))]
+#[strum_discriminants(serde(rename_all = "snake_case"))]
+#[strum_discriminants(strum(serialize_all = "snake_case"))]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum InferenceOperation {
     /// Generate text or multimodal conversational output.
@@ -79,4 +101,11 @@ pub enum InferenceOperation {
 
     /// Convert tokens back into text.
     Detokenize(DetokenizationPayload),
+}
+
+impl InferenceOperation {
+    /// Returns the operation kind for this request payload.
+    pub fn kind(&self) -> InferenceOperationKind {
+        self.into()
+    }
 }

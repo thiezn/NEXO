@@ -7,7 +7,7 @@ use nexo_echo::EchoTool;
 use nexo_ws_client::NexoConnection;
 use nexo_ws_schema::GatewayToNodeMessage;
 use nexo_ws_schema::{
-    ExecuteToolEvent, Frame, InferenceEvent, LoadModelEvent, NexoEvent, NexoResponse,
+    ExecuteToolEvent, Frame, InferenceRunEvent, LoadModelEvent, NexoEvent, NexoResponse,
     NodeToGatewayMessage, UnloadModelEvent,
 };
 use std::sync::Arc;
@@ -108,7 +108,6 @@ impl NexoNode {
                             Err(e) => {
                                 error!("Websocket receive error: {e}");
                                 return Err(e.into());
-                                // break; // Exit loop on receive error to trigger reconnect. Maybe we should raise an error
                             }
                         }
                     }
@@ -125,8 +124,6 @@ impl NexoNode {
 
                         let frame = Frame::new(msg)?;
                         conn.send_frame(&frame).await?;
-
-
                     }
             }
         }
@@ -158,7 +155,7 @@ impl NexoNode {
         //   being processed and knows to expect follow up events.
         match payload {
             GatewayToNodeMessage::Disconnect(response) => {
-                response.result();
+                let _ = response.result();
             }
             GatewayToNodeMessage::LoadModel {
                 operation_id,
@@ -173,7 +170,7 @@ impl NexoNode {
                 .await?;
 
                 tokio::spawn(async move {
-                    load_model(operation_id, &engine, model_id, tx).await;
+                    let _ = load_model(operation_id, &engine, model_id, tx).await;
                 });
             }
             GatewayToNodeMessage::UnloadModel {
@@ -208,7 +205,7 @@ impl NexoNode {
                     start_inference_run(operation_id, &engine, request, tx).await
                 });
             }
-            GatewayToNodeMessage::Cancel(request) => {
+            GatewayToNodeMessage::Cancel(_) => {
                 todo!(
                     "Cancel request handling not implemented yet. I think I want to remove the generic cancel request in favor of specific ones. This will ensure the request can contain all required information to make the call instead of maintaining that state in the nexo node memory."
                 );
@@ -411,40 +408,28 @@ async fn start_inference_run(
     request: InferenceRequest,
     tx: mpsc::Sender<NodeToGatewayMessage>,
 ) -> Result {
-    tx.send(NodeToGatewayMessage::StartInferenceRunEvent(
-        NexoEvent::Correlated {
-            operation_id: operation_id.clone(),
-            event: InferenceEvent::RunStarted {
-                operation_id: operation_id.clone(),
-                run_id: request.run_id.clone(),
-            },
-        },
-    ))
-    .await?;
-
-    let mut stream = engine.run_inference(request.clone()).await?;
+    let model_id = request.model(engine.model_definitions())?.clone();
+    let failure_meta = nexo_core::InferenceMeta::from_request_and_model(&request, model_id);
+    let mut stream = engine.run_inference(request).await?;
 
     while let Some(item) = stream.next().await {
         match item {
-            Ok(_) => {
-                todo!("Implement proper chunking etc")
-                // tx.send(NodeToGatewayMessage::StartInferenceRunEvent(
-                //     NexoEvent::Correlated {
-                //         operation_id,
-                //         event: InferenceEvent::Chunk {
-                //             seq: 1,
-                //             output: response,
-                //         },
-                //     },
-                // ))
-                // .await?;
+            Ok(update) => {
+                tx.send(NodeToGatewayMessage::StartInferenceRunEvent(
+                    NexoEvent::Correlated {
+                        operation_id: operation_id.clone(),
+                        event: update.into(),
+                    },
+                ))
+                .await?;
             }
             Err(err) => {
                 error!(operation_id = %operation_id, error = ?err, "Inference run failed");
                 tx.send(NodeToGatewayMessage::StartInferenceRunEvent(
                     NexoEvent::Correlated {
                         operation_id,
-                        event: InferenceEvent::Failed {
+                        event: InferenceRunEvent::Failed {
+                            meta: failure_meta,
                             error: err.to_string(),
                         },
                     },

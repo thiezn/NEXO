@@ -6,7 +6,7 @@ use crate::config::GatewayConfig;
 ///
 /// Returns an error when configuration prompts fail, the config cannot be
 /// saved, or the database and storage directories cannot be created.
-pub async fn run_init() -> cli_helpers::Result {
+pub async fn run() -> cli_helpers::Result {
     tracing::info!("Initializing NEXO Gateway...");
 
     let host = cli_helpers::interactive::text_input("Bind host", Some("127.0.0.1"))?;

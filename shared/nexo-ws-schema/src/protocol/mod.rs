@@ -24,5 +24,5 @@ pub use user_to_gateway::UserToGatewayMessage;
 
 pub use messages::base::{NexoEvent, NexoResponse};
 pub use messages::control::CancelRequest;
-pub use messages::inference::{InferenceEvent, LoadModelEvent, UnloadModelEvent};
+pub use messages::inference::{InferenceRunEvent, LoadModelEvent, UnloadModelEvent};
 pub use messages::tools::ExecuteToolEvent;

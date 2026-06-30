@@ -5,10 +5,10 @@ use crate::error::Result;
 use crate::message::MessageRole;
 use crate::tools::ToolCallDelta;
 
-use super::response::InferenceResponse;
+use super::update::InferenceUpdate;
 
-/// A boxed response stream returned by an inference engine.
-pub type InferenceStream = BoxStream<'static, Result<InferenceResponse>>;
+/// A boxed update stream returned by an inference engine.
+pub type InferenceStream = BoxStream<'static, Result<InferenceUpdate>>;
 
 /// A streamed delta for an in-progress generation request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -1,5 +1,5 @@
 use super::{
-    ExecuteToolEvent, InferenceEvent, LoadModelEvent, NexoEvent, NexoResponse, UnloadModelEvent,
+    ExecuteToolEvent, InferenceRunEvent, LoadModelEvent, NexoEvent, NexoResponse, UnloadModelEvent,
 };
 use nexo_core::{NexoNodeMetrics, NodeProperties, ToolDefinition, ToolResult};
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ pub enum NodeToGatewayMessage {
     StartInferenceRun(NexoResponse),
 
     /// An event emitted for an inference request that was accepted for asynchronous processing.
-    StartInferenceRunEvent(NexoEvent<InferenceEvent>),
+    StartInferenceRunEvent(NexoEvent<InferenceRunEvent>),
 
     /// Register tools with the gateway, so that they can be used by other nodes and clients.
     RegisterTools(Vec<ToolDefinition>),
@@ -60,4 +60,7 @@ pub enum NodeToGatewayMessage {
     /// type that was cancelled, and have to have storage of all required information to be able to cancel
     /// the request. It might be better to explicitly codify the Cancel requests per request type.
     Cancel(NexoResponse),
+
+    /// An unknown failure occured during processing of a frame.
+    UnknownFailure(NexoResponse),
 }

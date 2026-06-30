@@ -1,4 +1,4 @@
-use super::{InferenceEvent, NexoEvent, NexoResponse};
+use super::{InferenceRunEvent, NexoEvent, NexoResponse};
 use nexo_core::{NexoState, Session, Sessions};
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
@@ -26,7 +26,7 @@ pub enum GatewayToUserMessage {
     StartInferenceRun(NexoResponse),
 
     /// An event emitted for an inference request that was accepted for asynchronous processing.
-    StartInferenceRunEvent(NexoEvent<InferenceEvent>),
+    StartInferenceRunEvent(NexoEvent<InferenceRunEvent>),
 
     /// Reply to a CancelRequest to indicate the cancel request. Depending on the action
     /// thats being cancelled, this could be a NexoResponse::Completed or NexoResponse::Accepted.

@@ -27,7 +27,7 @@ pub use nexo_core::model::ModelDefinition;
 pub use nexo_core::tools::{ToolCall, ToolDefinition};
 pub use nexo_core::{NexoNodeMetrics, ReasoningEffort, ReasoningSettings, ThinkingMode};
 pub use protocol::{
-    CancelRequest, ExecuteToolEvent, GatewayToNodeMessage, GatewayToUserMessage, InferenceEvent,
+    CancelRequest, ExecuteToolEvent, GatewayToNodeMessage, GatewayToUserMessage, InferenceRunEvent,
     LoadModelEvent, NexoEvent, NexoResponse, NodeToGatewayMessage, UnloadModelEvent,
     UserToGatewayMessage,
 };

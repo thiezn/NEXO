@@ -6,5 +6,3 @@ pub mod auth;
 pub mod handler;
 /// Shared state for connected peers, routing, and tool catalogs.
 pub mod state;
-/// Periodic event broadcasting for connected peers.
-pub mod ticker;

@@ -1,4 +1,3 @@
-use crate::message::MediaSource;
 use serde::{Deserialize, Serialize};
 
 /// A request to generate one or more images from text.
@@ -24,25 +23,6 @@ pub struct ImageGenerationPayload {
 
     /// The deterministic random seed, if requested.
     pub seed: Option<u64>,
-}
-
-/// A transport-safe generated image payload.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct GeneratedImage {
-    /// The zero-based order of the image within the response.
-    pub index: usize,
-
-    /// The generated image content.
-    pub source: MediaSource,
-
-    /// The optional media type of the generated image.
-    pub media_type: Option<String>,
-
-    /// The generated image width, in pixels, if known.
-    pub width: Option<u32>,
-
-    /// The generated image height, in pixels, if known.
-    pub height: Option<u32>,
 }
 
 /// The desired image size for an image generation request.
