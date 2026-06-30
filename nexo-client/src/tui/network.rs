@@ -1,4 +1,4 @@
-use nexo_core::{ClientKind, UserProperties};
+use nexo_core::{NexoClient, UserProperties};
 use nexo_ws_client::{NexoConnection, ReadHalf, WriteHalf};
 use nexo_ws_schema::Frame;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -25,7 +25,7 @@ pub async fn connect(
     UnboundedReceiver<NetworkEvent>,
 )> {
     let url = user.gateway_url().to_string();
-    let conn = NexoConnection::connect(&url, ClientKind::User(user.clone()))
+    let conn = NexoConnection::connect(&url, NexoClient::User(user.clone()))
         .await
         .map_err(|e| cli_helpers::Error::Other(format!("Connection failed: {e}")))?;
 

@@ -16,7 +16,9 @@ pub mod node;
 /// User client configuration and advertised properties.
 pub mod user;
 
-pub use client::{ClientInfo, ClientKind, DeviceInfo, Platform, ProtocolInfo, Scope};
+pub use client::{
+    ClientInfo, DeviceInfo, NexoClient, NexoClientKind, Platform, ProtocolInfo, Scope,
+};
 pub use gateway::GatewayProperties;
 pub use metrics::NexoNodeMetrics;
 pub use node::NodeProperties;

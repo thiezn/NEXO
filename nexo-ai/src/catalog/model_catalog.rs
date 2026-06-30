@@ -42,11 +42,21 @@ impl ModelCatalog {
     }
 
     /// Lists all downloaded model manifests.
-    pub fn list_downloaded_manifests(&self) -> Vec<ModelManifest> {
-        self.all_manifests
-            .values()
-            .filter_map(|manifest| manifest.is_downloaded().then_some(manifest.clone()))
-            .collect()
+    ///
+    /// NOTE: This is quite expensive, as it calculates the sha256 of each file of a model to
+    /// determine if it is present locally.
+    pub fn list_downloaded_manifests(&self, validate_sha256: bool) -> Vec<ModelManifest> {
+        if validate_sha256 {
+            self.all_manifests
+                .values()
+                .filter_map(|manifest| manifest.is_downloaded().then_some(manifest.clone()))
+                .collect()
+        } else {
+            self.all_manifests
+                .values()
+                .filter_map(|manifest| manifest.is_present_locally().then_some(manifest.clone()))
+                .collect()
+        }
     }
 
     /// Retrieves a model definition by its ID.

@@ -10,7 +10,7 @@ pub async fn run(section: SchemaSection, output: Option<String>) -> cli_helpers:
 
     match output {
         Some(path) => {
-            tokio::fs::write(path, &json).await?;
+            tokio::fs::write(&path, &json).await?;
             tracing::info!("Schema written to {path}");
         }
         None => println!("{json}"),

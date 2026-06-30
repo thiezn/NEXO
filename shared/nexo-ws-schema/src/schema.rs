@@ -1,6 +1,6 @@
 use crate::Error;
 use crate::frame::Frame;
-use nexo_core::{NodeProperties, UserProperties};
+use crate::protocol::ConnectRequest;
 
 /// Available schema sections for generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,20 +27,14 @@ pub fn generate_schema(section: SchemaSection) -> serde_json::Value {
     match section {
         SchemaSection::All => serde_json::json!({
             "frames": serde_json::to_value(schemars::schema_for!(Frame)).unwrap_or_default(),
-            "connect": {
-                "user": serde_json::to_value(schemars::schema_for!(UserProperties)).unwrap_or_default(),
-                "node": serde_json::to_value(schemars::schema_for!(NodeProperties)).unwrap_or_default()
-            },
+            "connect": serde_json::to_value(schemars::schema_for!(ConnectRequest)).unwrap_or_default(),
             "errors": serde_json::to_value(schemars::schema_for!(Error)).unwrap_or_default(),
         }),
         SchemaSection::Frames => {
             serde_json::to_value(schemars::schema_for!(Frame)).unwrap_or_default()
         }
         SchemaSection::Connect => {
-            serde_json::json!({
-                "user": serde_json::to_value(schemars::schema_for!(UserProperties)).unwrap_or_default(),
-                "node": serde_json::to_value(schemars::schema_for!(NodeProperties)).unwrap_or_default()
-            })
+            serde_json::to_value(schemars::schema_for!(ConnectRequest)).unwrap_or_default()
         }
         SchemaSection::Errors => {
             serde_json::to_value(schemars::schema_for!(Error)).unwrap_or_default()
@@ -92,7 +86,7 @@ mod tests {
     fn frames_schema_contains_request_response_event() {
         let schema = generate_schema(SchemaSection::Frames);
         let json_str = serde_json::to_string(&schema).unwrap();
-        assert!(json_str.contains("Request") || json_str.contains("request"));
-        assert!(json_str.contains("Response") || json_str.contains("response"));
+        assert!(json_str.contains("id"));
+        assert!(json_str.contains("payload"));
     }
 }

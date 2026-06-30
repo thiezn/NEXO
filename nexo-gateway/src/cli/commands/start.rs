@@ -1,5 +1,7 @@
+use crate::{NexoGateway, Result};
+
 /// Command handler for the `start` command of the `nexo-gateway` CLI.
-pub async fn run(host: Option<String>, port: Option<u16>) -> cli_helpers::Result {
+pub async fn run(host: Option<String>, port: Option<u16>) -> Result {
     let path = super::gateway_config_path();
     let mut config = if path.exists() {
         let config: nexo_core::GatewayProperties = cli_helpers::config::load(&path)?;
@@ -18,5 +20,5 @@ pub async fn run(host: Option<String>, port: Option<u16>) -> cli_helpers::Result
     if let Some(p) = port {
         config = config.into_builder().port(p).build();
     }
-    runtime::run(&config).await
+    NexoGateway::new(config).run().await
 }

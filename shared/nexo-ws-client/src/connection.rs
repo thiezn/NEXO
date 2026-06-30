@@ -1,9 +1,10 @@
 use crate::error::{Error, Result};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
-use nexo_core::ClientKind;
+use nexo_core::{NexoClient, NexoClientKind};
 use nexo_ws_schema::{
-    Frame, GatewayToNodeMessage, GatewayToUserMessage, NodeToGatewayMessage, UserToGatewayMessage,
+    ConnectRequest, Frame, GatewayToNodeMessage, GatewayToUserMessage, NodeToGatewayMessage,
+    UserToGatewayMessage,
 };
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -27,11 +28,11 @@ pub struct ReadHalf {
 
 impl NexoConnection {
     /// Connect to a gateway at the given URL with the auth header.
-    pub async fn connect(url: &str, client_kind: ClientKind) -> Result<Self> {
+    pub async fn connect(url: &str, client: NexoClient) -> Result<Self> {
         // Build a WebSocket request with the given URL and auth token.
         let request = http::Request::builder()
             .uri(url)
-            .header(nexo_ws_schema::AUTH_HEADER, client_kind.auth_token())
+            .header(nexo_ws_schema::AUTH_HEADER, client.auth_token())
             .header("Host", host_from_url(url))
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
@@ -47,10 +48,11 @@ impl NexoConnection {
         debug!("WebSocket connection established to {url}");
 
         // Perform the handshake with the gateway, sending the connect message
-        match client_kind {
-            ClientKind::User(properties) => {
+        match client.kind() {
+            NexoClientKind::User => {
                 debug!("Performing User handshake");
-                let register_frame = Frame::new(UserToGatewayMessage::Connect(properties))?;
+                let register_frame =
+                    Frame::new(UserToGatewayMessage::Connect(ConnectRequest::new(client)))?;
                 send_frame_impl(&mut ws, &register_frame).await?;
 
                 loop {
@@ -76,9 +78,10 @@ impl NexoConnection {
                     };
                 }
             }
-            ClientKind::Node(properties) => {
+            NexoClientKind::Node => {
                 debug!("Performing Node handshake");
-                let register_frame = Frame::new(NodeToGatewayMessage::Connect(properties))?;
+                let register_frame =
+                    Frame::new(NodeToGatewayMessage::Connect(ConnectRequest::new(client)))?;
                 send_frame_impl(&mut ws, &register_frame).await?;
 
                 loop {

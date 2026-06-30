@@ -54,7 +54,7 @@ pub enum Error {
         current_state: ModelRuntimeState,
     },
 
-    // The requested model is already running an inference request and cannot accept concurrent requests.
+    /// The requested model is already running an inference request and cannot accept concurrent requests.
     #[error("model `{model_id}` is already running an inference request")]
     ModelBusy {
         /// The busy model identifier.

@@ -14,7 +14,7 @@ impl NoteStorage for GitStorage {
 
     fn read_note(&self, filename: &str) -> anyhow::Result<Note> {
         let content = self.read_file(&format!("NOTES/{filename}"))?;
-        Ok(Note::from_string(content)?)
+        Note::from_string(content)
     }
 
     fn list_note_filenames(&self) -> anyhow::Result<Vec<String>> {

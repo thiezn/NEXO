@@ -1,5 +1,5 @@
-use super::CancelRequest;
-use nexo_core::{InferenceRequest, OperationId, SessionId, UserProperties};
+use super::{CancelRequest, ConnectRequest, DisconnectRequest};
+use nexo_core::{InferenceRequest, OperationId, SessionId};
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 
@@ -7,13 +7,10 @@ use strum::IntoStaticStr;
 #[derive(Debug, IntoStaticStr, Serialize, Deserialize)]
 pub enum UserToGatewayMessage {
     /// Connect to the gateway and establish a session.
-    ///
-    /// TODO: ConnectParams should split into generic connect details and user specific params.
-    /// Same for Node connect
-    Connect(UserProperties),
+    Connect(ConnectRequest),
 
     /// Disconnect from the gateway and close the session gracefully.
-    Disconnect,
+    Disconnect(DisconnectRequest),
 
     /// Request the current state of the Nexo system, including the available models,
     /// nodes, and other relevant information.

@@ -2,7 +2,7 @@ use crate::Result;
 use futures_util::StreamExt;
 use nexo_ai::InferenceEngine;
 use nexo_core::{
-    ClientKind, InferenceRequest, ModelId, NodeProperties, OperationId, ToolCall, ToolRegistry,
+    InferenceRequest, ModelId, NexoClient, NodeProperties, OperationId, ToolCall, ToolRegistry,
 };
 use nexo_ws_client::NexoConnection;
 use nexo_ws_schema::{
@@ -45,7 +45,7 @@ impl NexoNode {
         let url = self.config.gateway_url();
         info!(url = url, "Connecting to gateway...");
 
-        let conn = NexoConnection::connect(url, ClientKind::Node(self.config.clone())).await?;
+        let conn = NexoConnection::connect(url, NexoClient::Node(self.config.clone())).await?;
 
         info!("Node setup complete, entering main loop");
         Ok(conn)
@@ -76,7 +76,7 @@ impl NexoNode {
                     // Handle results of actions taken in response to gateway messages
                     Some(msg) = rx.recv() => {
 
-                        if msg == NodeToGatewayMessage::Disconnect {
+                        if matches!(msg, NodeToGatewayMessage::Disconnect(_)) {
                             info!("Disconnecting from gateway...");
                             let frame = Frame::new(msg)?;
                             conn.send_frame(&frame).await?;

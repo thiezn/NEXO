@@ -44,14 +44,14 @@ async fn run_migrations(pool: &SqlitePool) -> cli_helpers::Result {
 pub async fn upsert_device(
     pool: &SqlitePool,
     device_id: &str,
-    role: nexo_ws_schema::ConnectionRole,
+    role: nexo_core::NexoClientKind,
 ) -> cli_helpers::Result {
     sqlx::query(
         "INSERT INTO devices (id, role) VALUES (?, ?)
          ON CONFLICT(id) DO UPDATE SET role = excluded.role, last_seen = datetime('now')",
     )
     .bind(device_id)
-    .bind(role.as_str())
+    .bind(role.to_string())
     .execute(pool)
     .await
     .map_err(|e| cli_helpers::Error::Other(format!("Failed to upsert device: {e}")))?;
@@ -76,7 +76,7 @@ pub async fn upsert_user(pool: &SqlitePool, user_id: &str, device_id: &str) -> c
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use nexo_ws_schema::ConnectionRole;
+    use nexo_core::NexoClientKind;
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -106,7 +106,7 @@ mod tests {
     async fn upsert_device_inserts_and_updates(pool: SqlitePool) {
         run_migrations(&pool).await.unwrap();
 
-        upsert_device(&pool, "dev-1", ConnectionRole::Node)
+        upsert_device(&pool, "dev-1", NexoClientKind::Node)
             .await
             .unwrap();
 
@@ -117,7 +117,7 @@ mod tests {
         assert_eq!(role, "node");
 
         // Update role
-        upsert_device(&pool, "dev-1", ConnectionRole::User)
+        upsert_device(&pool, "dev-1", NexoClientKind::User)
             .await
             .unwrap();
         let (role,): (String,) = sqlx::query_as("SELECT role FROM devices WHERE id = 'dev-1'")
@@ -131,7 +131,7 @@ mod tests {
     async fn upsert_user_inserts_and_updates(pool: SqlitePool) {
         run_migrations(&pool).await.unwrap();
 
-        upsert_device(&pool, "dev-1", ConnectionRole::User)
+        upsert_device(&pool, "dev-1", NexoClientKind::User)
             .await
             .unwrap();
         upsert_user(&pool, "user-1", "dev-1").await.unwrap();

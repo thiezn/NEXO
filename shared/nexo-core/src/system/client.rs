@@ -7,9 +7,25 @@ use super::{NodeProperties, UserProperties};
 /// Default Nexo protocol version used by local constructors.
 pub const DEFAULT_PROTOCOL_VERSION: u32 = 1;
 
-/// Properties of a Nexo Web Socket client (client or node).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub enum ClientKind {
+/// Domain-level Nexo WebSocket client identity and advertised properties.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, strum::EnumDiscriminants)]
+#[strum_discriminants(name(NexoClientKind))]
+#[strum_discriminants(vis(pub))]
+#[strum_discriminants(doc = "The domain-level kind of Nexo WebSocket client.")]
+#[strum_discriminants(derive(
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    strum::AsRefStr,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr
+))]
+#[strum_discriminants(serde(rename_all = "snake_case"))]
+#[strum_discriminants(strum(serialize_all = "snake_case"))]
+#[serde(tag = "kind", content = "properties", rename_all = "snake_case")]
+pub enum NexoClient {
     /// Properties of a Nexo Web Socket client User.
     User(UserProperties),
 
@@ -17,12 +33,61 @@ pub enum ClientKind {
     Node(NodeProperties),
 }
 
-impl ClientKind {
+impl NexoClient {
+    /// Return the domain-level kind for this client.
+    ///
+    /// # Arguments
+    ///
+    /// This function takes no arguments.
+    pub fn kind(&self) -> NexoClientKind {
+        self.into()
+    }
+
     /// Return the shared gateway authentication token for this connection.
+    ///
+    /// # Arguments
+    ///
+    /// This function takes no arguments.
     pub fn auth_token(&self) -> &str {
         match self {
             Self::User(properties) => properties.auth_token(),
             Self::Node(properties) => properties.auth_token(),
+        }
+    }
+
+    /// Return the advertised protocol negotiation metadata.
+    ///
+    /// # Arguments
+    ///
+    /// This function takes no arguments.
+    pub fn protocol(&self) -> &ProtocolInfo {
+        match self {
+            Self::User(properties) => properties.protocol(),
+            Self::Node(properties) => properties.protocol(),
+        }
+    }
+
+    /// Return the stable client identity metadata.
+    ///
+    /// # Arguments
+    ///
+    /// This function takes no arguments.
+    pub fn client(&self) -> &ClientInfo {
+        match self {
+            Self::User(properties) => properties.client(),
+            Self::Node(properties) => properties.client(),
+        }
+    }
+
+    /// Return the stable device identity metadata.
+    ///
+    /// # Arguments
+    ///
+    /// This function takes no arguments.
+    pub fn device(&self) -> &DeviceInfo {
+        match self {
+            Self::User(properties) => properties.device(),
+            Self::Node(properties) => properties.device(),
         }
     }
 }

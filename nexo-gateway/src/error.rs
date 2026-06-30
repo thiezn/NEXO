@@ -17,4 +17,20 @@ pub enum Error {
     /// Error occures in nexo_core
     #[error(transparent)]
     NexoCore(#[from] nexo_core::Error),
+
+    /// Error occured while accepting or handling a TCP connection.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    /// Error occured while handling a WebSocket connection.
+    #[error(transparent)]
+    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+
+    /// Error occured while parsing or serializing JSON.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+
+    /// Received a frame that is invalid for the current peer connection state.
+    #[error("invalid peer state: {0}")]
+    InvalidPeerState(String),
 }

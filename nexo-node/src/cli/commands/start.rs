@@ -3,6 +3,7 @@ use nexo_core::{ClientInfo, DeviceInfo, NodeProperties, ToolRegistry};
 use nexo_echo::EchoTool;
 use nexo_node::{NexoNode, Result};
 use std::sync::Arc;
+use tracing::info;
 
 use super::{node_config_path, save_node_properties};
 
@@ -33,11 +34,13 @@ pub async fn run(url: Option<String>) -> Result {
         config = config.into_builder().gateway_url(u).build();
     }
 
+    info!("Loaded node configuration from {}", path.display());
     let mut registry = ToolRegistry::new();
     registry.register(EchoTool)?;
+    info!("Registered {} tool(s)", registry.len());
 
     let catalog = ModelCatalog::new();
-    let local_available_manifests = catalog.list_downloaded_manifests();
+    let local_available_manifests = catalog.list_downloaded_manifests(false);
     let engine = InferenceEngine::new(local_available_manifests)?;
 
     config = config
@@ -46,7 +49,7 @@ pub async fn run(url: Option<String>) -> Result {
         .models(engine.model_ids().into_iter().cloned().collect())
         .build();
 
-    tracing::info!(
+    info!(
         "Starting nexo-node '{}' v{}",
         config.client().id,
         config.client().version

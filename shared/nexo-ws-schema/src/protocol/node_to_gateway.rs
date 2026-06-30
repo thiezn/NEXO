@@ -1,7 +1,8 @@
 use super::{
-    ExecuteToolEvent, InferenceRunEvent, LoadModelEvent, NexoEvent, NexoResponse, UnloadModelEvent,
+    ConnectRequest, DisconnectRequest, ExecuteToolEvent, InferenceRunEvent, LoadModelEvent,
+    NexoEvent, NexoResponse, UnloadModelEvent,
 };
-use nexo_core::{NexoNodeMetrics, NodeProperties, ToolResult};
+use nexo_core::{NexoNodeMetrics, ToolResult};
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 
@@ -9,13 +10,10 @@ use strum::IntoStaticStr;
 #[derive(Debug, IntoStaticStr, Serialize, Deserialize, PartialEq)]
 pub enum NodeToGatewayMessage {
     /// Connect to the gateway and establish a session.
-    ///
-    /// TODO: ConnectParams should split into generic connect details and client specific params.
-    /// Same for Node connect
-    Connect(NodeProperties),
+    Connect(ConnectRequest),
 
     /// Disconnect from the gateway and close the session gracefully.
-    Disconnect,
+    Disconnect(DisconnectRequest),
 
     /// Current metrics of the Node, including cpu/gpu and memory usage.
     ///

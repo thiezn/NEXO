@@ -5,6 +5,9 @@
 //! - `memory` for persistent storage helpers used by the gateway.
 //! - `server` for connection handling, routing, and shared runtime state.
 
+/// CLI parsing and command dispatch for the nexo gateway binary.
+pub mod cli;
+
 /// Persistent storage helpers for gateway memory features.
 pub mod memory;
 

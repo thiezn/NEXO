@@ -23,6 +23,7 @@ pub use node_to_gateway::NodeToGatewayMessage;
 pub use user_to_gateway::UserToGatewayMessage;
 
 pub use messages::base::{NexoEvent, NexoResponse};
+pub use messages::connect::{ConnectRequest, DisconnectRequest};
 pub use messages::control::CancelRequest;
 pub use messages::inference::{InferenceRunEvent, LoadModelEvent, UnloadModelEvent};
 pub use messages::tools::ExecuteToolEvent;

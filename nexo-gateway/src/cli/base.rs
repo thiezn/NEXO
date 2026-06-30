@@ -3,11 +3,13 @@ use clap::{Parser, Subcommand};
 use cli_helpers::CommandContext;
 use cli_helpers::clap::CommonArgs;
 use nexo_ws_schema::SchemaSection;
+use std::process::ExitCode;
 
 /// Command-line interface for the gateway binary.
 #[derive(Parser)]
 #[command(name = "nexo", about = "NEXO Gateway - Neural Extension Operator")]
 pub struct Cli {
+    /// Common CLI flags for tracing and output behavior.
     #[command(flatten)]
     pub common: CommonArgs,
 
@@ -55,14 +57,20 @@ pub enum Command {
 /// # Errors
 ///
 /// Returns any error produced by the selected command handler.
-pub async fn dispatch(command: Command, context: &mut CommandContext) -> Result<ExitCode> {
+pub async fn dispatch(
+    command: Command,
+    context: &mut CommandContext,
+) -> cli_helpers::Result<ExitCode> {
+    let _ = context;
     match command {
         Command::Init => {
             init::run().await?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Start { host, port } => {
-            start::run(host, port).await?;
+            start::run(host, port)
+                .await
+                .map_err(|error| cli_helpers::Error::Other(error.to_string()))?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Schema { section, output } => {
