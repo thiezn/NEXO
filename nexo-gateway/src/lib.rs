@@ -5,14 +5,13 @@
 //! - `memory` for persistent storage helpers used by the gateway.
 //! - `server` for connection handling, routing, and shared runtime state.
 
-/// Agent runtime, session state, queueing, and tool orchestration.
-pub mod agent;
 /// Persistent storage helpers for gateway memory features.
 pub mod memory;
-/// WebSocket server, routing, and shared gateway state.
-pub mod server;
-/// Test helpers shared with workspace integration tests.
-#[doc(hidden)]
-pub mod testing;
-/// Tool registration and execution helpers shared across gateway subsystems.
-pub mod tools;
+
+/// The main gateway agent, responsible for scheduling and executing tool calls.
+pub mod engine;
+pub use engine::NexoGateway;
+
+/// Error types and result handling for the nexo gateway.
+pub mod error;
+pub use error::{Error, Result};

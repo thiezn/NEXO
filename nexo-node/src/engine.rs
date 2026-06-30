@@ -5,10 +5,9 @@ use nexo_core::{
     ClientKind, InferenceRequest, ModelId, NodeProperties, OperationId, ToolCall, ToolRegistry,
 };
 use nexo_ws_client::NexoConnection;
-use nexo_ws_schema::GatewayToNodeMessage;
 use nexo_ws_schema::{
-    ExecuteToolEvent, Frame, InferenceRunEvent, LoadModelEvent, NexoEvent, NexoResponse,
-    NodeToGatewayMessage, UnloadModelEvent,
+    ExecuteToolEvent, Frame, GatewayToNodeMessage, InferenceRunEvent, LoadModelEvent, NexoEvent,
+    NexoResponse, NodeToGatewayMessage, UnloadModelEvent,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
