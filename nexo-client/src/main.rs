@@ -1,21 +1,17 @@
 mod audio;
 mod cli;
-mod config;
 mod tui;
 mod vision;
 
 use clap::Parser;
 use cli::base::Cli;
+use std::process::ExitCode;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> cli_helpers::Result<ExitCode> {
     let cli = Cli::parse();
-    if let Err(error) = cli_helpers::init_tracing(cli.log_level, cli.no_color) {
-        eprintln!("Failed to initialize tracing: {error}");
-    }
+    cli.common.init_tracing()?;
 
-    if let Err(e) = cli::commands::dispatch(cli.command).await {
-        tracing::error!("{e}");
-        std::process::exit(1);
-    }
+    let mut context = cli.common.command_context()?;
+    cli::base::dispatch(cli.command, &mut context).await
 }

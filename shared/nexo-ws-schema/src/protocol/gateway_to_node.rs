@@ -49,9 +49,6 @@ pub enum GatewayToNodeMessage {
     /// A request to cancel a previously submitted operation.
     Cancel(CancelRequest),
 
-    /// A response to a tool registrations request
-    RegisterTools(NexoResponse),
-
     /// A request to execute a tool on the Node with the specified parameters.
     ///
     /// Note that, although a Node actually runs inference operations which determine

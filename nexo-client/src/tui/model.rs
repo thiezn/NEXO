@@ -2,7 +2,8 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use nexo_ws_schema::{HelloOk, RunStatus};
+use nexo_core::UserProperties;
+use nexo_ws_schema::RunStatus;
 use ratatui::layout::Rect;
 
 use super::completion;
@@ -19,7 +20,7 @@ pub enum ActivityButton {
 
 #[derive(Debug, Clone, Default)]
 pub struct StartOptions {
-    pub url_override: Option<String>,
+    pub user: UserProperties,
     pub initial_session_id: Option<String>,
     pub initial_session_name: Option<String>,
     pub initial_model_id: Option<String>,
@@ -148,7 +149,7 @@ pub struct ActiveStream {
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
     pub gateway_url: String,
-    pub hello: HelloOk,
+    pub protocol: u32,
 }
 
 #[derive(Debug)]
@@ -169,6 +170,7 @@ pub struct Model {
     pub pending_requests: HashMap<String, PendingRequest>,
     pub active_stream: Option<ActiveStream>,
     pub workspace_root: PathBuf,
+    pub user: UserProperties,
     pub current_session_id: Option<String>,
     pub default_session_name: Option<String>,
     pub default_model_id: Option<String>,
@@ -195,7 +197,7 @@ impl Model {
             summary: SummaryStatus {
                 connected: true,
                 gateway_url: connection.gateway_url.clone(),
-                protocol: Some(connection.hello.protocol),
+                protocol: Some(connection.protocol),
                 connected_nodes: None,
                 connected_clients: None,
                 capabilities: Vec::new(),
@@ -204,6 +206,7 @@ impl Model {
             pending_requests: HashMap::new(),
             active_stream: None,
             workspace_root,
+            user: options.user,
             current_session_id: options.initial_session_id.clone(),
             default_session_name: options.initial_session_name.clone(),
             default_model_id: options.initial_model_id,
@@ -221,7 +224,7 @@ impl Model {
             "Connected",
             format!(
                 "Connected to {} with protocol v{}",
-                connection.gateway_url, connection.hello.protocol
+                connection.gateway_url, connection.protocol
             ),
         );
         if let Some(session_id) = &model.current_session_id {
@@ -408,7 +411,7 @@ impl Model {
     pub fn set_connected(&mut self, connection: ConnectionInfo) {
         self.summary.connected = true;
         self.summary.gateway_url = connection.gateway_url.clone();
-        self.summary.protocol = Some(connection.hello.protocol);
+        self.summary.protocol = Some(connection.protocol);
         self.summary.last_error = None;
         self.last_status_request_at = None;
         self.last_reconnect_attempt_at = None;
@@ -418,7 +421,7 @@ impl Model {
             "Reconnected",
             format!(
                 "Connected to {} with protocol v{}",
-                connection.gateway_url, connection.hello.protocol
+                connection.gateway_url, connection.protocol
             ),
         );
     }
@@ -599,7 +602,7 @@ mod tests {
         Model::new(
             ConnectionInfo {
                 gateway_url: "ws://127.0.0.1:6969".into(),
-                hello: HelloOk::default(),
+                protocol: 1,
             },
             StartOptions::default(),
             std::env::current_dir().unwrap(),

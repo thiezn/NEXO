@@ -1,5 +1,5 @@
-use crate::config::ClientConfig;
-use nexo_ws_client::{NexoConnection, ReadHalf, WriteHalf, perform_handshake};
+use nexo_core::{ClientKind, UserProperties};
+use nexo_ws_client::{NexoConnection, ReadHalf, WriteHalf};
 use nexo_ws_schema::Frame;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
@@ -18,30 +18,16 @@ pub enum NetworkEvent {
 }
 
 pub async fn connect(
-    url_override: Option<&str>,
+    user: &UserProperties,
 ) -> cli_helpers::Result<(
     ConnectionInfo,
     UnboundedSender<NetworkCommand>,
     UnboundedReceiver<NetworkEvent>,
 )> {
-    let config = ClientConfig::load()?;
-    let url = url_override
-        .map(str::to_owned)
-        .unwrap_or_else(|| config.gateway_url.clone());
-
-    let mut conn = NexoConnection::connect(&url, &config.auth_token)
+    let url = user.gateway_url().to_string();
+    let conn = NexoConnection::connect(&url, ClientKind::User(user.clone()))
         .await
         .map_err(|e| cli_helpers::Error::Other(format!("Connection failed: {e}")))?;
-
-    let params = nexo_ws_client::default_user_connect_params(
-        &config.client_id,
-        &config.client_version,
-        config.platform,
-        &config.device_id,
-    );
-    let hello = perform_handshake(&mut conn, params)
-        .await
-        .map_err(|e| cli_helpers::Error::Other(format!("Handshake failed: {e}")))?;
 
     let (writer, reader) = conn.into_split();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -53,7 +39,7 @@ pub async fn connect(
     Ok((
         ConnectionInfo {
             gateway_url: url,
-            hello,
+            protocol: user.protocol().max_protocol,
         },
         command_tx,
         event_rx,
@@ -85,14 +71,8 @@ async fn writer_loop(
 async fn reader_loop(mut reader: ReadHalf, event_tx: UnboundedSender<NetworkEvent>) {
     loop {
         match reader.recv_frame().await {
-            Ok(Some(frame)) => {
+            Ok(frame) => {
                 let _ = event_tx.send(NetworkEvent::Frame(frame));
-            }
-            Ok(None) => {
-                let _ = event_tx.send(NetworkEvent::Disconnected(
-                    "Connection closed by server".to_string(),
-                ));
-                break;
             }
             Err(error) => {
                 let _ = event_tx.send(NetworkEvent::Disconnected(format!(

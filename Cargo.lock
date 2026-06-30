@@ -4985,6 +4985,7 @@ dependencies = [
  "dirs 6.0.0",
  "hound",
  "image",
+ "nexo-core",
  "nexo-ws-client",
  "nexo-ws-schema",
  "ratatui",

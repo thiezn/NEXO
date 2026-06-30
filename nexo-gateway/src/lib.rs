@@ -2,14 +2,11 @@
 //!
 //! The crate centers on four main areas:
 //! - `agent` for session state, scheduling, and tool execution loops.
-//! - `config` for gateway configuration loading and defaults.
 //! - `memory` for persistent storage helpers used by the gateway.
 //! - `server` for connection handling, routing, and shared runtime state.
 
 /// Agent runtime, session state, queueing, and tool orchestration.
 pub mod agent;
-/// Configuration loading and gateway defaults.
-pub mod config;
 /// Persistent storage helpers for gateway memory features.
 pub mod memory;
 /// WebSocket server, routing, and shared gateway state.

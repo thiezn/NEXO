@@ -1,10 +1,9 @@
 //! Application bootstrap that wires storage, background tasks, and the WebSocket server.
 
 use crate::agent::RunHandle;
-use crate::config::GatewayConfig;
 use crate::memory::git::GitStorage;
 use crate::server::state::{GatewayState, SharedState};
-use nexo_core::ToolRegistry;
+use nexo_core::{GatewayProperties, ToolRegistry};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
@@ -13,17 +12,21 @@ use tracing::{debug, info, warn};
 const CRON_NOTES_SUMMARY: &str = "notes-summary";
 
 /// Start the gateway runtime using the supplied configuration.
-pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
+pub async fn run(config: &GatewayProperties) -> cli_helpers::Result {
     info!(
         "Gateway config: host={}, port={}, tick_interval={}ms, db={}, storage={}",
-        config.host, config.port, config.tick_interval_ms, config.db_path, config.storage_root,
+        config.host(),
+        config.port(),
+        config.tick_interval_ms(),
+        config.db_path(),
+        config.storage_root(),
     );
 
-    let db_path = cli_helpers::resolve_path_str(&config.db_path)?;
+    let db_path = cli_helpers::resolve_path_str(config.db_path())?;
     let db = crate::memory::persistent::connect(&db_path).await?;
     info!("Database connected: {}", db_path.display());
 
-    let storage_root = cli_helpers::resolve_path_str(&config.storage_root)?;
+    let storage_root = cli_helpers::resolve_path_str(config.storage_root())?;
     info!("Storage root: {}", storage_root.display());
 
     let git_storage = open_git_storage(config).await;
@@ -51,7 +54,7 @@ pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
 
     info!("NEXO Gateway listening on ws://{addr}");
 
-    let auth_token: Arc<str> = config.auth_token.as_str().into();
+    let auth_token: Arc<str> = config.auth_token().into();
 
     loop {
         let (stream, peer_addr) = listener
@@ -99,8 +102,8 @@ pub async fn run(config: &GatewayConfig) -> cli_helpers::Result {
 }
 
 /// Open the optional git-backed storage used by gateway-local tools and prefill data.
-async fn open_git_storage(config: &GatewayConfig) -> Option<Arc<GitStorage>> {
-    match cli_helpers::resolve_path_str(&config.nexo_storage_path) {
+async fn open_git_storage(config: &GatewayProperties) -> Option<Arc<GitStorage>> {
+    match cli_helpers::resolve_path_str(config.nexo_storage_path()) {
         Ok(path) => match GitStorage::open(&path) {
             Ok(storage) => {
                 let storage = Arc::new(storage);
@@ -119,7 +122,7 @@ async fn open_git_storage(config: &GatewayConfig) -> Option<Arc<GitStorage>> {
             Err(error) => {
                 warn!(
                     "Could not open nexo-storage at {}: {error}",
-                    config.nexo_storage_path
+                    config.nexo_storage_path()
                 );
                 None
             }
@@ -171,7 +174,7 @@ fn seed_default_cron_jobs(db: &sqlx::SqlitePool) {
 
 /// Spawn the long-lived background tasks that support the running gateway.
 fn spawn_background_tasks(
-    config: &GatewayConfig,
+    config: &GatewayProperties,
     db: &sqlx::SqlitePool,
     event_tx: &tokio::sync::broadcast::Sender<nexo_ws_schema::Frame>,
     run_handle: &RunHandle,
@@ -184,7 +187,7 @@ fn spawn_background_tasks(
     });
 
     let tick_tx = event_tx.clone();
-    let tick_interval = config.tick_interval_ms;
+    let tick_interval = config.tick_interval_ms();
     tokio::spawn(async move {
         crate::server::ticker::run_ticker(tick_tx, tick_interval).await;
     });

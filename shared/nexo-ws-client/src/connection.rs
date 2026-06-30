@@ -27,11 +27,11 @@ pub struct ReadHalf {
 
 impl NexoConnection {
     /// Connect to a gateway at the given URL with the auth header.
-    pub async fn connect(url: &str, auth_token: &str, client_kind: ClientKind) -> Result<Self> {
+    pub async fn connect(url: &str, client_kind: ClientKind) -> Result<Self> {
         // Build a WebSocket request with the given URL and auth token.
         let request = http::Request::builder()
             .uri(url)
-            .header(nexo_ws_schema::AUTH_HEADER, auth_token)
+            .header(nexo_ws_schema::AUTH_HEADER, client_kind.auth_token())
             .header("Host", host_from_url(url))
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")

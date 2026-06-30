@@ -8,6 +8,7 @@ name = "nexo-client"
 path = "src/main.rs"
 
 [dependencies]
+nexo-core = { workspace = true }
 nexo-ws-schema = { workspace = true, features = ["clap"] }
 nexo-ws-client = { workspace = true }
 cli-helpers = { workspace = true, features = [

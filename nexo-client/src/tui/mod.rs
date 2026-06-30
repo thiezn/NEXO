@@ -20,8 +20,7 @@ use update::Effect;
 pub async fn run_start(options: StartOptions) -> cli_helpers::Result {
     let workspace_root = std::env::current_dir()?;
 
-    let (connection, mut network_tx, mut network_rx) =
-        network::connect(options.url_override.as_deref()).await?;
+    let (connection, mut network_tx, mut network_rx) = network::connect(&options.user).await?;
 
     terminal::install_panic_hook();
     let mut terminal = terminal::TerminalHandle::new()?;
@@ -76,10 +75,10 @@ async fn reconnect_if_needed(
         return;
     }
 
-    let gateway_url = model.summary.gateway_url.clone();
+    let user = model.user.clone();
     model.mark_reconnect_attempt();
 
-    match network::connect(Some(&gateway_url)).await {
+    match network::connect(&user).await {
         Ok((connection, next_tx, next_rx)) => {
             *network_tx = next_tx;
             *network_rx = next_rx;

@@ -58,7 +58,7 @@ pub enum Command {
 pub async fn dispatch(command: Command, context: &mut CommandContext) -> Result<ExitCode> {
     match command {
         Command::Init => {
-            init::run()?;
+            init::run().await?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Start { host, port } => {

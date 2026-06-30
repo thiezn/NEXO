@@ -1,6 +1,10 @@
 use clap::{Parser, Subcommand};
-use cli_helpers::LogLevel;
+use cli_helpers::CommandContext;
+use cli_helpers::clap::CommonArgs;
 use nexo_ws_schema::SchemaSection;
+use std::process::ExitCode;
+
+use crate::cli::commands::{schema, start};
 
 #[derive(Parser)]
 #[command(
@@ -8,14 +12,11 @@ use nexo_ws_schema::SchemaSection;
     about = "NEXO Client - Connect to a NEXO Gateway"
 )]
 pub struct Cli {
+    #[command(flatten)]
+    pub common: CommonArgs,
+
     #[command(subcommand)]
     pub command: Command,
-
-    #[arg(short, long, value_enum, default_value_t = LogLevel::Info, global = true)]
-    pub log_level: LogLevel,
-
-    #[arg(long, global = true)]
-    pub no_color: bool,
 }
 
 #[derive(Subcommand)]
@@ -49,4 +50,32 @@ pub enum Command {
         #[arg(short, long)]
         output: Option<String>,
     },
+}
+
+/// Dispatch a parsed CLI command to its concrete handler.
+pub async fn dispatch(
+    command: Command,
+    _context: &mut CommandContext,
+) -> cli_helpers::Result<ExitCode> {
+    match command {
+        Command::Start {
+            url,
+            session,
+            name,
+            model,
+        } => {
+            start::run_start(start::StartCommand {
+                url_override: url,
+                session_id: session,
+                session_name: name,
+                model_id: model,
+            })
+            .await?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Schema { section, output } => {
+            schema::run_schema(section, output.as_deref())?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
 }

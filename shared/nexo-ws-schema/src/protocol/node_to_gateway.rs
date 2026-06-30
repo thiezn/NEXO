@@ -1,7 +1,7 @@
 use super::{
     ExecuteToolEvent, InferenceRunEvent, LoadModelEvent, NexoEvent, NexoResponse, UnloadModelEvent,
 };
-use nexo_core::{NexoNodeMetrics, NodeProperties, ToolDefinition, ToolResult};
+use nexo_core::{NexoNodeMetrics, NodeProperties, ToolResult};
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 
@@ -42,9 +42,6 @@ pub enum NodeToGatewayMessage {
 
     /// An event emitted for an inference request that was accepted for asynchronous processing.
     StartInferenceRunEvent(NexoEvent<InferenceRunEvent>),
-
-    /// Register tools with the gateway, so that they can be used by other nodes and clients.
-    RegisterTools(Vec<ToolDefinition>),
 
     /// Response to an ExecuteTool request, can be either a synchronous (Completed) or asynchronous (accepted)
     /// response depending on the tool and the parameters.

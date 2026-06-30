@@ -1,9 +1,9 @@
-use crate::NexoNodeConfig;
-use crate::{Error, Result};
+use crate::Result;
 use futures_util::StreamExt;
 use nexo_ai::InferenceEngine;
-use nexo_core::{ClientKind, InferenceRequest, ModelId, OperationId, ToolCall, ToolRegistry};
-use nexo_echo::EchoTool;
+use nexo_core::{
+    ClientKind, InferenceRequest, ModelId, NodeProperties, OperationId, ToolCall, ToolRegistry,
+};
 use nexo_ws_client::NexoConnection;
 use nexo_ws_schema::GatewayToNodeMessage;
 use nexo_ws_schema::{
@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 /// tool registry, websocket loop and inference engine together.
 pub struct NexoNode {
     /// The configuration for the node, including gateway URL, auth token, and node identity.
-    config: NexoNodeConfig,
+    config: NodeProperties,
 
     /// The registry of tools available on this node.
     registry: Arc<ToolRegistry>,
@@ -28,63 +28,25 @@ pub struct NexoNode {
 }
 
 impl NexoNode {
-    /// Initializes a new NexoNode with the given configuration and tool registry.
-    pub fn new(config: NexoNodeConfig) -> Result<Self> {
-        let catalog = nexo_ai::ModelCatalog::new();
-        let local_available_manifests = catalog.list_downloaded_manifests();
-
-        let mut registry = ToolRegistry::new();
-        registry.register(EchoTool)?;
-
-        let engine = Arc::new(InferenceEngine::new(local_available_manifests)?);
-        let registry = Arc::new(registry);
-
-        Ok(Self {
+    /// Initializes a new NexoNode from prepared properties and runtime dependencies.
+    pub fn new(
+        config: NodeProperties,
+        registry: Arc<ToolRegistry>,
+        engine: Arc<InferenceEngine>,
+    ) -> Self {
+        Self {
             config,
             registry,
             engine,
-        })
+        }
     }
 
     /// Connect to the nexo-gateway.
     async fn connect(&self) -> Result<NexoConnection> {
-        let url = &self.config.gateway_url;
+        let url = self.config.gateway_url();
         info!(url = url, "Connecting to gateway...");
 
-        // TODO: Probably we should remove NexoNodeConfig and only have ClientKind, OR better, NodeProperties stored in self.config?
-        let client_kind = ClientKind::new_node(
-            &self.config.node_id,
-            &self.config.node_version,
-            self.config.platform,
-            &self.config.device_id,
-            self.registry.capability_names(),
-            self.registry.tool_names(),
-            self.engine
-                .model_ids()
-                .into_iter()
-                .map(|id| id.clone())
-                .collect(),
-        );
-
-        let mut conn = NexoConnection::connect(url, &self.config.auth_token, client_kind).await?;
-
-        // TODO: Do we actually need to run the tools register? Why not roll this all up
-        // in the connect handshake? Also, the capabilities names and command_names
-        // are probably not the right abstraction. I want to be able to pass ToolDefinition
-        // in my connect call, and the gateway, user and nodes should understand
-        // what commands and capabilities map to what tools.
-        //
-        // The register_tools function could still be useful if we expect to be able to
-        // update existing tools without reconnecting?
-        if self.registry.len() > 0 {
-            info!(
-                tool_count = self.registry.len(),
-                "Registering tools with gateway..."
-            );
-            register_tools(&mut conn, &self.registry).await?;
-        } else {
-            info!("No tools to register with gateway");
-        }
+        let conn = NexoConnection::connect(url, ClientKind::Node(self.config.clone())).await?;
 
         info!("Node setup complete, entering main loop");
         Ok(conn)
@@ -226,7 +188,7 @@ impl NexoNode {
                     async move { execute_tool(operation_id, &registry, tool_call, tx).await },
                 );
             }
-            GatewayToNodeMessage::RegisterTools(_) | GatewayToNodeMessage::Connect(_) => {
+            GatewayToNodeMessage::Connect(_) => {
                 let name: &'static str = (&payload).into();
                 warn!(
                     name = name,
@@ -236,59 +198,6 @@ impl NexoNode {
         };
 
         Ok(())
-    }
-}
-
-/// Register all local tools with the gateway after the websocket handshake completes.
-///
-/// # Arguments
-///
-/// * `conn` - The active websocket connection to the gateway.
-/// * `registry` - The local tool registry containing the tools to register.
-async fn register_tools(conn: &mut NexoConnection, registry: &ToolRegistry) -> Result {
-    let tools = registry.definitions();
-
-    let register_frame = Frame::new(NodeToGatewayMessage::RegisterTools(tools.clone()))?;
-
-    conn.send_frame(&register_frame).await?;
-
-    loop {
-        let frame = conn.recv_frame().await?;
-
-        let (frame_id, payload) = frame.into_parts::<GatewayToNodeMessage>()?;
-        info!(frame_id = ?frame_id, "Received frame");
-
-        match payload {
-            GatewayToNodeMessage::RegisterTools(response) => match response {
-                NexoResponse::Accepted { operation_id } => {
-                    error!(
-                        operation_id = ?operation_id,
-                        "Tool registration generated accepted response, expecting a synchronous completed response"
-                    );
-                    return Err(Error::ToolRegistration {
-                        operation_id,
-                        error: "Tool registration generated accepted response, expecting a synchronous completed response".into(),
-                    });
-                }
-                NexoResponse::Completed { operation_id, .. } => {
-                    info!(operation_id = ?operation_id, "Tool registration completed");
-                    return Ok(());
-                }
-                NexoResponse::Failed {
-                    operation_id,
-                    error,
-                } => {
-                    error!(operation_id = ?operation_id, error = ?error, "Tool registration failed");
-                    return Err(Error::ToolRegistration {
-                        operation_id,
-                        error: error.to_string(),
-                    });
-                }
-            },
-            other => {
-                warn!(message = ?other, "Unexpected frame during registration")
-            }
-        }
     }
 }
 
