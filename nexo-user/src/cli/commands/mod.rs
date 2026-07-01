@@ -8,7 +8,7 @@ pub(crate) fn user_config_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".nexo")
-        .join("nexo-client.toml")
+        .join("nexo-user.toml")
 }
 
 pub(crate) fn save_user_properties(properties: &UserProperties) -> cli_helpers::Result {

@@ -1,6 +1,7 @@
 use nexo_ws_schema::SchemaSection;
 
-pub fn run_schema(section: SchemaSection, output: Option<&str>) -> cli_helpers::Result {
+/// Run the `schema` command, which outputs the JSON schema for a given section.
+pub fn run(section: SchemaSection, output: Option<&str>) -> cli_helpers::Result {
     let json = nexo_ws_schema::schema_json(section);
 
     match output {

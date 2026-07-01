@@ -1,13 +1,15 @@
 [package]
-name = "nexo-client"
+name = "nexo-user"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "nexo-client"
+name = "nexo-user"
 path = "src/main.rs"
 
 [dependencies]
+thiserror = { workspace = true }
+futures-util = { workspace = true }
 nexo-core = { workspace = true }
 nexo-ws-schema = { workspace = true, features = ["clap"] }
 nexo-ws-client = { workspace = true }

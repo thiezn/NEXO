@@ -7,7 +7,7 @@ members = [
     "shared/nexo-core",
     "nexo-gateway",
     "nexo-node",
-    "nexo-client",
+    "nexo-user",
     "nexo-tools/nexo-notes",
     "nexo-tools/nexo-io",
     "nexo-ai",

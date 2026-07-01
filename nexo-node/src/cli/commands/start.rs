@@ -57,7 +57,5 @@ pub async fn run(url: Option<String>) -> Result {
 
     let engine = NexoNode::new(config, Arc::new(registry), Arc::new(engine));
 
-    engine.run().await?;
-
-    Ok(())
+    engine.run().await
 }

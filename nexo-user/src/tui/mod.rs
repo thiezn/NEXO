@@ -17,7 +17,7 @@ use model::{Model, RunningState};
 use network::{NetworkCommand, NetworkEvent};
 use update::Effect;
 
-pub async fn run_start(options: StartOptions) -> cli_helpers::Result {
+pub async fn run(options: StartOptions) -> cli_helpers::Result {
     let workspace_root = std::env::current_dir()?;
 
     let (connection, mut network_tx, mut network_rx) = network::connect(&options.user).await?;

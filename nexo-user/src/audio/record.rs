@@ -72,7 +72,7 @@ pub fn record_microphone(config: &RecordConfig) -> anyhow::Result<AudioBuffer> {
     let err_flag_cb = Arc::clone(&err_flag);
 
     let stream = device.build_input_stream(
-        &stream_config,
+        stream_config,
         move |data: &[f32], _: &cpal::InputCallbackInfo| {
             if stop_reader.load(Ordering::Relaxed) {
                 return;

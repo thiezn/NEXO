@@ -619,7 +619,7 @@ mod tests {
     #[test]
     fn expands_run_file_references() {
         let temp_root =
-            std::env::temp_dir().join(format!("nexo-client-command-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("nexo-user-command-test-{}", std::process::id()));
         fs::create_dir_all(&temp_root).unwrap();
         let file_path = temp_root.join("sample.txt");
         fs::write(&file_path, "hello world").unwrap();
@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn parses_image_analyze_with_media_type() {
         let temp_root =
-            std::env::temp_dir().join(format!("nexo-client-image-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("nexo-user-image-test-{}", std::process::id()));
         fs::create_dir_all(&temp_root).unwrap();
         let image_path = temp_root.join("sample.png");
 
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn parses_audio_analyze_from_file() {
         let temp_root =
-            std::env::temp_dir().join(format!("nexo-client-audio-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("nexo-user-audio-test-{}", std::process::id()));
         fs::create_dir_all(&temp_root).unwrap();
         let audio_path = temp_root.join("sample.wav");
 
