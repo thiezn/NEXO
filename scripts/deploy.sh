@@ -6,7 +6,7 @@ cd "$ROOT_DIR" || { echo "❌ Failed to cd into ${ROOT_DIR}"; exit 1; }
 
 ALL_TARGETS=(
 	"nexo-gateway"
-	"nexo-client"
+	"nexo-user"
 	"game-extractor"
 	"epub-extractor"
 	"nexo-node"

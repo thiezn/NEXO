@@ -1,4 +1,5 @@
 //! Error types for model management commands and helpers.
+use crate::{TuiAction, TuiEvent};
 use nexo_ws_schema::UserToGatewayMessage;
 use thiserror::Error as ThisError;
 
@@ -36,4 +37,12 @@ pub enum Error {
     /// An error occured in the tokio library
     #[error(transparent)]
     SendError(#[from] tokio::sync::mpsc::error::SendError<UserToGatewayMessage>),
+
+    /// An error occured while sending a TUI event through the runtime channel.
+    #[error(transparent)]
+    TuiEventSendError(#[from] tokio::sync::mpsc::error::SendError<TuiEvent>),
+
+    /// An error occured while sending a TUI action through the runtime channel.
+    #[error(transparent)]
+    TuiActionSendError(#[from] tokio::sync::mpsc::error::SendError<TuiAction>),
 }

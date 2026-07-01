@@ -17,7 +17,7 @@ collections, cron jobs, and git-backed notes.
   state, sessions, runs, rounds, cron, prompt collections, tool routing, and
   gateway-native tools.
 * `nexo-node`: execution node binary; connects to the Gateway, registers local tools and models, and executes inference and tool calls from the Gateway.
-* `nexo-client`: terminal/user client binary for the nexo Gateway; provides a TUI for running inference and tools.
+* `nexo-user`: terminal/user client binary for the nexo Gateway; provides a TUI for running inference and tools.
 * `nexo-tools/nexo-echo`: simple `echo.run` tool using `nexo-core` contracts.
 * `nexo-tools/nexo-notes`: gateway-native note tools backed by git storage.
 * `nexo-tools/nexo-io`: gateway-native filesystem, shell, web-fetch, and text transformation tools.

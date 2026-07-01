@@ -5144,6 +5144,7 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "strum 0.27.2",
  "symphonia",
  "thiserror 2.0.18",
  "tokio",

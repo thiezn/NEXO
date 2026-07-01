@@ -23,18 +23,6 @@ pub enum Command {
         /// Gateway URL (e.g. ws://127.0.0.1:6969)
         #[arg(long)]
         url: Option<String>,
-
-        /// Resume an existing session by ID
-        #[arg(long)]
-        session: Option<String>,
-
-        /// Session name (used when creating a new session)
-        #[arg(long)]
-        name: Option<String>,
-
-        /// Model ID to use for inference
-        #[arg(long)]
-        model: Option<String>,
     },
 
     /// Generate JSON schemas for the WebSocket protocol
@@ -52,19 +40,8 @@ pub enum Command {
 /// Dispatch a parsed CLI command to its concrete handler.
 pub async fn dispatch(command: Command, _context: &mut CommandContext) -> Result<ExitCode> {
     match command {
-        Command::Start {
-            url,
-            session,
-            name,
-            model,
-        } => {
-            start::run(start::StartCommand {
-                url: url,
-                session_id: session,
-                session_name: name,
-                model_id: model,
-            })
-            .await?;
+        Command::Start { url } => {
+            start::run(start::StartCommand { url: url }).await?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Schema { section, output } => {

@@ -7,15 +7,6 @@ use tracing::info;
 pub struct StartCommand {
     /// Optional gateway URL override for this launch.
     pub url: Option<String>,
-
-    /// Optional session ID to connect to on startup.
-    pub session_id: Option<String>,
-
-    /// Optional session name to create on startup if no session ID is provided.
-    pub session_name: Option<String>,
-
-    /// Optional model ID to select on startup.
-    pub model_id: Option<String>,
 }
 
 /// Run the `start` command, which launches the interactive NEXO terminal UI.
