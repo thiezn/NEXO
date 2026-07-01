@@ -21,7 +21,7 @@ impl MoldRuntime {
     }
 
     /// Loads a model into the Mold runtime.
-    pub(crate) async fn load_model(&self, model_id: &ModelId) -> Result {
+    pub(crate) async fn load_model(&self, _model_id: &ModelId) -> Result {
         todo!("Implement model loading for Mold runtime");
 
         // A Flux2Engine instance is bound for a specific model.

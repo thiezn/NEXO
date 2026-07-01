@@ -62,6 +62,7 @@ struct ModelHandle {
     definition: ModelDefinition,
 
     /// A channel for receiving ModelRuntimeState commands, such as load, unload, and run inference.
+    #[expect(dead_code)]
     state_rx: watch::Receiver<ModelRuntimeState>,
 
     /// A channel for sending commands to the model's runtime task, such as load, unload, and run inference.
@@ -90,14 +91,17 @@ struct InnerModelHandle {
 
 impl ModelHandle {
     /// Initializes a new ModelHandle for the given model definition, setting up the necessary channels and runtime task.
-    pub fn new(definition: ModelDefinition) -> Result<Self> {
+    pub fn new(manifest: ModelManifest) -> Result<Self> {
+        let definition = manifest.definition().clone();
         let (state_tx, state_rx) = watch::channel(ModelRuntimeState::Unloaded);
         let runtime = match definition.id() {
             ModelId::Gemma426bA4bItUqffQ80
             | ModelId::Gemma426bA4bItUqffAfq8
             | ModelId::EmbeddingGemma300m
             | ModelId::Gemma4E4bItUqffAfq8
-            | ModelId::Gemma4E4bItUqffQ80 => ModelRuntime::MistralRs(MistralRsRuntime::new()),
+            | ModelId::Gemma4E4bItUqffQ80 => {
+                ModelRuntime::MistralRs(MistralRsRuntime::new(manifest.clone()))
+            }
             ModelId::Flux2Klein9b => ModelRuntime::Mold(MoldRuntime::new()),
             ModelId::Kokoro82m => ModelRuntime::AnyTts(AnyTtsRuntime::new()),
         };
@@ -242,9 +246,8 @@ impl InferenceEngine {
         let models = manifests
             .into_iter()
             .map(|m| {
-                let definition = m.definition().clone();
                 let model_id = m.model_id().clone();
-                let handle = ModelHandle::new(definition)?;
+                let handle = ModelHandle::new(m)?;
                 Ok((model_id, Arc::new(handle)))
             })
             .collect::<Result<BTreeMap<_, _>>>()?;

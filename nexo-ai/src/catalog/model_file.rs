@@ -266,6 +266,8 @@ pub enum ModelFileKind {
     GenerationConfig,
     /// Chat template file.
     ChatTemplate,
+    /// JSON chat template file consumed as an explicit Jinja template.
+    ChatTemplateJson,
     /// Multimodal processor configuration.
     ProcessorConfig,
     /// Multimodal preprocessor configuration.

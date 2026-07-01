@@ -1,4 +1,4 @@
-use super::model_file::ModelFile;
+use super::model_file::{ModelFile, ModelFileKind};
 use super::paths::{default_models_dir, is_relative_storage_path};
 use crate::Result;
 use nexo_core::{ModelDefinition, ModelFamily, ModelId};
@@ -141,6 +141,39 @@ impl ModelManifest {
     /// Returns the list of files associated with this model manifest.
     pub fn files(&self) -> &[ModelFile] {
         &self.files
+    }
+
+    /// Resolves the first local file path matching any of the provided semantic kinds.
+    ///
+    /// # Arguments
+    ///
+    /// * `kinds` - Ordered semantic kinds to search for in the manifest file list.
+    pub(crate) fn first_local_file_by_kind(
+        &self,
+        kinds: &[ModelFileKind],
+    ) -> Result<Option<PathBuf>> {
+        let model_dir = self.model_dir()?;
+
+        self.files
+            .iter()
+            .find(|file| kinds.contains(&file.kind()))
+            .map(|file| file.local_path(&model_dir))
+            .transpose()
+    }
+
+    /// Resolves all local file paths matching any of the provided semantic kinds.
+    ///
+    /// # Arguments
+    ///
+    /// * `kinds` - Semantic kinds to collect from the manifest file list.
+    pub(crate) fn local_files_by_kind(&self, kinds: &[ModelFileKind]) -> Result<Vec<PathBuf>> {
+        let model_dir = self.model_dir()?;
+
+        self.files
+            .iter()
+            .filter(|file| kinds.contains(&file.kind()))
+            .map(|file| file.local_path(&model_dir))
+            .collect()
     }
 
     /// Resolves the local storage directory for this model manifest.
