@@ -1,7 +1,7 @@
 use crate::{ModelCapability, ModelId, ToolDefinition};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::{ClientInfo, DeviceInfo, ProtocolInfo};
 
@@ -124,6 +124,18 @@ impl NodeProperties {
     /// Model IDs available on disk for this node.
     pub fn models(&self) -> &[ModelId] {
         &self.models
+    }
+
+    /// Return a set of ModelIds that are required to be loaded at startup,
+    /// based on the startup capabilities and default models.
+    pub fn startup_models(&self) -> HashSet<ModelId> {
+        let mut startup_models = HashSet::new();
+        for capability in &self.startup_capabilities {
+            if let Some(model_id) = self.default_models.get(capability) {
+                startup_models.insert(model_id.clone());
+            }
+        }
+        startup_models
     }
 }
 

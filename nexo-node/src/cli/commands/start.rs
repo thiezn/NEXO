@@ -3,7 +3,8 @@ use nexo_core::{ClientInfo, DeviceInfo, NodeProperties, ToolRegistry};
 use nexo_echo::EchoTool;
 use nexo_node::{NexoNode, Result};
 use std::sync::Arc;
-use tracing::info;
+use tokio::time::{Duration, sleep};
+use tracing::{info, warn};
 
 use super::{node_config_path, save_node_properties};
 
@@ -55,7 +56,15 @@ pub async fn run(url: Option<String>) -> Result {
         config.client().version
     );
 
-    let engine = NexoNode::new(config, Arc::new(registry), Arc::new(engine));
+    let engine = NexoNode::new(config, Arc::new(registry), Arc::new(engine)).await?;
 
-    engine.run().await
+    loop {
+        match engine.run().await {
+            Ok(()) => return Ok(()),
+            Err(_) => {
+                warn!("retrying in 10 seconds...");
+                sleep(Duration::from_secs(10)).await;
+            }
+        }
+    }
 }

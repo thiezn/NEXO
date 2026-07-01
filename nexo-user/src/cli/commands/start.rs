@@ -1,7 +1,8 @@
 use super::{save_user_properties, user_config_path};
 use nexo_core::{ClientInfo, DeviceInfo, UserProperties};
 use nexo_user::{NexoUser, Result};
-use tracing::info;
+use tokio::time::{Duration, sleep};
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, Default)]
 pub struct StartCommand {
@@ -36,13 +37,13 @@ pub async fn run(command: StartCommand) -> Result {
 
     let engine = NexoUser::new(properties);
 
-    engine.run().await
-
-    // tui::run(tui::StartOptions {
-    //     user: properties,
-    //     initial_session_id: command.session_id,
-    //     initial_session_name: command.session_name,
-    //     initial_model_id: command.model_id,
-    // })
-    // .await
+    loop {
+        match engine.run().await {
+            Ok(()) => return Ok(()),
+            Err(_) => {
+                warn!("retrying in 10 seconds...");
+                sleep(Duration::from_secs(10)).await;
+            }
+        }
+    }
 }

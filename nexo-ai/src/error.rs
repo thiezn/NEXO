@@ -101,7 +101,10 @@ pub enum Error {
 
     /// The current model runtime is not implemented for the requested model.
     #[error("runtime not implemented for '{model_id}'")]
-    RuntimeNotImplemented { model_id: ModelId },
+    RuntimeNotImplemented {
+        /// The model identifier for which the runtime is not implemented.
+        model_id: ModelId,
+    },
 
     /// A runtime interaction failed before a request stream was accepted.
     #[error("runtime error: {message}")]

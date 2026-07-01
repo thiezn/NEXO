@@ -29,71 +29,35 @@ pub enum ModelId {
     // Gemma4E2bItUqffAfq4,
     // Gemma4E2bItUqffAfq6,
     // Gemma4E2bItUqffAfq8,
-    // Gemma4E2bItUqffQ2k,
-    // Gemma4E2bItUqffQ3k,
-    // Gemma4E2bItUqffQ4k,
-    // Gemma4E2bItUqffQ5k,
-    // Gemma4E2bItUqffQ6k,
-    // Gemma4E2bItUqffQ80,
     // Gemma4E4bItUqffAfq2,
     // Gemma4E4bItUqffAfq3,
     // Gemma4E4bItUqffAfq4,
-    // Gemma4E4bItUqffAfq6,
+    #[strum(serialize = "gemma-4-e4b-it-uqff-afq6")]
+    Gemma4E4bItUqffAfq6,
     #[strum(serialize = "gemma-4-e4b-it-uqff-afq8")]
     Gemma4E4bItUqffAfq8,
-    // Gemma4E4bItUqffQ2k,
-    // Gemma4E4bItUqffQ3k,
-    // Gemma4E4bItUqffQ4k,
-    // Gemma4E4bItUqffQ5k,
-    // Gemma4E4bItUqffQ6k,
-    #[strum(serialize = "gemma-4-e4b-it-uqff-q80")]
-    Gemma4E4bItUqffQ80,
     // Gemma412bItUqffAfq2,
     // Gemma412bItUqffAfq3,
     // Gemma412bItUqffAfq4,
     // Gemma412bItUqffAfq6,
     // Gemma412bItUqffAfq8,
-    // Gemma412bItUqffQ2k,
-    // Gemma412bItUqffQ3k,
-    // Gemma412bItUqffQ4k,
-    // Gemma412bItUqffQ5k,
-    // Gemma412bItUqffQ6k,
-    // Gemma412bItUqffQ80,
     // Gemma426bA4bItUqffAfq2,
     // Gemma426bA4bItUqffAfq3,
     // Gemma426bA4bItUqffAfq4,
-    // Gemma426bA4bItUqffAfq6,
+    #[strum(serialize = "gemma-4-26b-a4b-it-uqff-afq6")]
+    Gemma426bA4bItUqffAfq6,
     #[strum(serialize = "gemma-4-26b-a4b-it-uqff-afq8")]
     Gemma426bA4bItUqffAfq8,
-    // Gemma426bA4bItUqffQ2k,
-    // Gemma426bA4bItUqffQ3k,
-    // Gemma426bA4bItUqffQ4k,
-    // Gemma426bA4bItUqffQ5k,
-    // Gemma426bA4bItUqffQ6k,
-    #[strum(serialize = "gemma-4-26b-a4b-it-uqff-q80")]
-    Gemma426bA4bItUqffQ80,
     // Gemma431bItUqffAfq2,
     // Gemma431bItUqffAfq3,
     // Gemma431bItUqffAfq4,
     // Gemma431bItUqffAfq6,
     // Gemma431bItUqffAfq8,
-    // Gemma431bItUqffQ2k,
-    // Gemma431bItUqffQ3k,
-    // Gemma431bItUqffQ4k,
-    // Gemma431bItUqffQ5k,
-    // Gemma431bItUqffQ6k,
-    // Gemma431bItUqffQ80,
     // Qwen35_27bAppleMetalUqffAfq2,
     // Qwen35_27bAppleMetalUqffAfq3,
     // Qwen35_27bAppleMetalUqffAfq4,
     // Qwen35_27bAppleMetalUqffAfq6,
     // Qwen35_27bAppleMetalUqffAfq8,
-    // Qwen35_27bAppleMetalUqffQ2k,
-    // Qwen35_27bAppleMetalUqffQ3k,
-    // Qwen35_27bAppleMetalUqffQ4k,
-    // Qwen35_27bAppleMetalUqffQ5k,
-    // Qwen35_27bAppleMetalUqffQ6k,
-    // Qwen35_27bAppleMetalUqffQ80,
     // Qwen35_35bA3bAppleMetalUqffAfq2,
     // Qwen35_35bA3bAppleMetalUqffAfq3,
     // Qwen35_35bA3bAppleMetalUqffAfq4,
@@ -129,77 +93,42 @@ impl ModelId {
             // | ModelId::Gemma4E2bItUqffAfq4
             // | ModelId::Gemma4E2bItUqffAfq6
             // | ModelId::Gemma4E2bItUqffAfq8
-            // | ModelId::Gemma4E2bItUqffQ2k
-            // | ModelId::Gemma4E2bItUqffQ3k
-            // | ModelId::Gemma4E2bItUqffQ4k
-            // | ModelId::Gemma4E2bItUqffQ5k
-            // | ModelId::Gemma4E2bItUqffQ6k
-            // | ModelId::Gemma4E2bItUqffQ80
             // | ModelId::Gemma4E4bItUqffAfq2
             // | ModelId::Gemma4E4bItUqffAfq3
             // | ModelId::Gemma4E4bItUqffAfq4
-            // | ModelId::Gemma4E4bItUqffAfq6
+            | ModelId::Gemma4E4bItUqffAfq6
             | ModelId::Gemma4E4bItUqffAfq8
-            // | ModelId::Gemma4E4bItUqffQ2k
-            // | ModelId::Gemma4E4bItUqffQ3k
-            // | ModelId::Gemma4E4bItUqffQ4k
-            // | ModelId::Gemma4E4bItUqffQ5k
-            // | ModelId::Gemma4E4bItUqffQ6k
-            | ModelId::Gemma4E4bItUqffQ80
             // | ModelId::Gemma412bItUqffAfq2
             // | ModelId::Gemma412bItUqffAfq3
             // | ModelId::Gemma412bItUqffAfq4
             // | ModelId::Gemma412bItUqffAfq6
             // | ModelId::Gemma412bItUqffAfq8
-            // | ModelId::Gemma412bItUqffQ2k
-            // | ModelId::Gemma412bItUqffQ3k
-            // | ModelId::Gemma412bItUqffQ4k
-            // | ModelId::Gemma412bItUqffQ5k
-            // | ModelId::Gemma412bItUqffQ6k
-            // | ModelId::Gemma412bItUqffQ80
             // | ModelId::Gemma426bA4bItUqffAfq2
             // | ModelId::Gemma426bA4bItUqffAfq3
             // | ModelId::Gemma426bA4bItUqffAfq4
-            // | ModelId::Gemma426bA4bItUqffAfq6
-            | ModelId::Gemma426bA4bItUqffAfq8
+            | ModelId::Gemma426bA4bItUqffAfq6
+            | ModelId::Gemma426bA4bItUqffAfq8=> ModelFamily::Gemma4,
             // | ModelId::Gemma426bA4bItUqffQ2k
             // | ModelId::Gemma426bA4bItUqffQ3k
             // | ModelId::Gemma426bA4bItUqffQ4k
             // | ModelId::Gemma426bA4bItUqffQ5k
             // | ModelId::Gemma426bA4bItUqffQ6k
-            | ModelId::Gemma426bA4bItUqffQ80 => ModelFamily::Gemma4,
             // | ModelId::Gemma431bItUqffAfq2
             // | ModelId::Gemma431bItUqffAfq3
             // | ModelId::Gemma431bItUqffAfq4
             // | ModelId::Gemma431bItUqffAfq6
             // | ModelId::Gemma431bItUqffAfq8
-            // | ModelId::Gemma431bItUqffQ2k
-            // | ModelId::Gemma431bItUqffQ3k
-            // | ModelId::Gemma431bItUqffQ4k
-            // | ModelId::Gemma431bItUqffQ5k
-            // | ModelId::Gemma431bItUqffQ6k
             // | ModelId::Gemma431bItUqffQ80 => ModelFamily::Gemma4,
             // ModelId::Qwen35_27bAppleMetalUqffAfq2
             // | ModelId::Qwen35_27bAppleMetalUqffAfq3
             // | ModelId::Qwen35_27bAppleMetalUqffAfq4
             // | ModelId::Qwen35_27bAppleMetalUqffAfq6
             // | ModelId::Qwen35_27bAppleMetalUqffAfq8
-            // | ModelId::Qwen35_27bAppleMetalUqffQ2k
-            // | ModelId::Qwen35_27bAppleMetalUqffQ3k
-            // | ModelId::Qwen35_27bAppleMetalUqffQ4k
-            // | ModelId::Qwen35_27bAppleMetalUqffQ5k
-            // | ModelId::Qwen35_27bAppleMetalUqffQ6k
-            // | ModelId::Qwen35_27bAppleMetalUqffQ80
             // | ModelId::Qwen35_35bA3bAppleMetalUqffAfq2
             // | ModelId::Qwen35_35bA3bAppleMetalUqffAfq3
             // | ModelId::Qwen35_35bA3bAppleMetalUqffAfq4
             // | ModelId::Qwen35_35bA3bAppleMetalUqffAfq6
             // | ModelId::Qwen35_35bA3bAppleMetalUqffAfq8
-            // | ModelId::Qwen35_35bA3bAppleMetalUqffQ2k
-            // | ModelId::Qwen35_35bA3bAppleMetalUqffQ3k
-            // | ModelId::Qwen35_35bA3bAppleMetalUqffQ4k
-            // | ModelId::Qwen35_35bA3bAppleMetalUqffQ5k
-            // | ModelId::Qwen35_35bA3bAppleMetalUqffQ6k
             // | ModelId::Qwen35_35bA3bAppleMetalUqffQ80 => ModelFamily::Qwen35,
             // ModelId::VoxtralMini3b2507AsrStt => ModelFamily::Voxtral,
             ModelId::Kokoro82m => ModelFamily::Kokoro,

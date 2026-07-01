@@ -1,6 +1,6 @@
 use crate::Result;
 use futures_util::{SinkExt, StreamExt};
-use nexo_core::{GatewayProperties, NexoClient, NexoClientKind, OperationId};
+use nexo_core::{GatewayProperties, NexoClient, NexoClientKind};
 use nexo_ws_schema::{
     ConnectRequest, Frame, GatewayToNodeMessage, GatewayToUserMessage, NexoResponse,
     NodeToGatewayMessage, UserToGatewayMessage,
@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, info};
+use tracing::info;
 use uuid::Uuid;
 
 /// Unique live peer key derived from stable client and device identifiers.
@@ -247,10 +247,10 @@ impl NexoGateway {
 
         Ok(match kind {
             NexoClientKind::User => GatewayFrameOutcome::Reply(Frame::new(
-                GatewayToUserMessage::Connect(completed_response(request.operation_id)),
+                GatewayToUserMessage::Connect(NexoResponse::completed(request.operation_id)),
             )?),
             NexoClientKind::Node => GatewayFrameOutcome::Reply(Frame::new(
-                GatewayToNodeMessage::Connect(completed_response(request.operation_id)),
+                GatewayToNodeMessage::Connect(NexoResponse::completed(request.operation_id)),
             )?),
         })
     }
@@ -273,12 +273,12 @@ impl NexoGateway {
             UserToGatewayMessage::Disconnect(request) => {
                 self.disconnect_peer(state)?;
                 Ok(GatewayFrameOutcome::CloseAfterReply(Frame::new(
-                    GatewayToUserMessage::Disconnect(completed_response(request.operation_id)),
+                    GatewayToUserMessage::Disconnect(NexoResponse::completed(request.operation_id)),
                 )?))
             }
             other => {
                 let name: &'static str = (&other).into();
-                debug!(message = name, "User message parsed for later routing");
+                info!(message = name, "User message parsed for later routing");
                 Ok(GatewayFrameOutcome::NoReply)
             }
         }
@@ -302,12 +302,12 @@ impl NexoGateway {
             NodeToGatewayMessage::Disconnect(request) => {
                 self.disconnect_peer(state)?;
                 Ok(GatewayFrameOutcome::CloseAfterReply(Frame::new(
-                    GatewayToNodeMessage::Disconnect(completed_response(request.operation_id)),
+                    GatewayToNodeMessage::Disconnect(NexoResponse::completed(request.operation_id)),
                 )?))
             }
             other => {
                 let name: &'static str = (&other).into();
-                debug!(message = name, "Node message parsed for later routing");
+                info!(message = name, "Node message parsed for later routing");
                 Ok(GatewayFrameOutcome::NoReply)
             }
         }
@@ -402,18 +402,6 @@ impl NexoGateway {
     }
 }
 
-/// Build a successful response for an operation.
-///
-/// # Arguments
-///
-/// * `operation_id` - Operation identifier from the request being completed.
-fn completed_response(operation_id: OperationId) -> NexoResponse {
-    NexoResponse::Completed {
-        operation_id,
-        result: (),
-    }
-}
-
 /// Check whether a WebSocket handshake carries the expected gateway auth header.
 ///
 /// # Arguments
@@ -445,7 +433,9 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use nexo_core::{ClientInfo, DeviceInfo, GatewayProperties, NodeProperties, UserProperties};
+    use nexo_core::{
+        ClientInfo, DeviceInfo, GatewayProperties, NodeProperties, OperationId, UserProperties,
+    };
     use nexo_ws_client::NexoConnection;
     use nexo_ws_schema::{DisconnectRequest, NexoResponse};
 

@@ -59,6 +59,23 @@ impl ModelDefinition {
     ///
     pub fn new(model_id: ModelId) -> Self {
         match model_id {
+            ModelId::Gemma4E4bItUqffAfq6 => Self {
+                id: model_id,
+                display_name: "Gemma 4 E4B IT UQFF AFQ6".to_string(),
+                capabilities: vec![
+                    ModelCapability::TextGeneration,
+                    ModelCapability::ToolCalling,
+                    ModelCapability::AudioInput,
+                    ModelCapability::ImageInput,
+                    ModelCapability::VideoInput,
+                    ModelCapability::Reasoning,
+                    ModelCapability::StructuredOutput,
+                    ModelCapability::Streaming,
+                ],
+                role_strategy: RoleStrategy::Default,
+                context_window_tokens: Some(32768),
+                max_output_tokens: Some(8192),
+            },
             ModelId::Gemma4E4bItUqffAfq8 => Self {
                 id: model_id,
                 display_name: "Gemma 4 E4B IT UQFF AFQ8".to_string(),
@@ -76,42 +93,25 @@ impl ModelDefinition {
                 context_window_tokens: Some(32768),
                 max_output_tokens: Some(8192),
             },
+            ModelId::Gemma426bA4bItUqffAfq6 => Self {
+                id: model_id,
+                display_name: "Gemma 4 26B A4B IT UQFF AFQ6".to_string(),
+                capabilities: vec![
+                    ModelCapability::TextGeneration,
+                    ModelCapability::ToolCalling,
+                    ModelCapability::ImageInput,
+                    ModelCapability::VideoInput,
+                    ModelCapability::Reasoning,
+                    ModelCapability::StructuredOutput,
+                    ModelCapability::Streaming,
+                ],
+                role_strategy: RoleStrategy::Default,
+                context_window_tokens: Some(32768),
+                max_output_tokens: Some(8192),
+            },
             ModelId::Gemma426bA4bItUqffAfq8 => Self {
                 id: model_id,
                 display_name: "Gemma 4 26B A4B IT UQFF AFQ8".to_string(),
-                capabilities: vec![
-                    ModelCapability::TextGeneration,
-                    ModelCapability::ToolCalling,
-                    ModelCapability::ImageInput,
-                    ModelCapability::VideoInput,
-                    ModelCapability::Reasoning,
-                    ModelCapability::StructuredOutput,
-                    ModelCapability::Streaming,
-                ],
-                role_strategy: RoleStrategy::Default,
-                context_window_tokens: Some(32768),
-                max_output_tokens: Some(8192),
-            },
-            ModelId::Gemma4E4bItUqffQ80 => Self {
-                id: model_id,
-                display_name: "Gemma 4 E4B IT Q8.0".to_string(),
-                capabilities: vec![
-                    ModelCapability::TextGeneration,
-                    ModelCapability::ToolCalling,
-                    ModelCapability::AudioInput,
-                    ModelCapability::ImageInput,
-                    ModelCapability::VideoInput,
-                    ModelCapability::Reasoning,
-                    ModelCapability::StructuredOutput,
-                    ModelCapability::Streaming,
-                ],
-                role_strategy: RoleStrategy::Default,
-                context_window_tokens: Some(32768),
-                max_output_tokens: Some(8192),
-            },
-            ModelId::Gemma426bA4bItUqffQ80 => Self {
-                id: model_id,
-                display_name: "Gemma 4 26B A4B IT Q8.0".to_string(),
                 capabilities: vec![
                     ModelCapability::TextGeneration,
                     ModelCapability::ToolCalling,

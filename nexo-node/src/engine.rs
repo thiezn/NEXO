@@ -28,16 +28,22 @@ pub struct NexoNode {
 
 impl NexoNode {
     /// Initializes a new NexoNode from prepared properties and runtime dependencies.
-    pub fn new(
+    pub async fn new(
         config: NodeProperties,
         registry: Arc<ToolRegistry>,
         engine: Arc<InferenceEngine>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        for model in config.startup_models() {
+            // Load each startup model into the inference engine
+            info!(model_id = %model, "Loading startup model");
+            engine.load_model(&model).await?;
+        }
+
+        Ok(Self {
             config,
             registry,
             engine,
-        }
+        })
     }
 
     /// Connect to the nexo-gateway.

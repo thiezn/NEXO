@@ -95,11 +95,11 @@ impl ModelHandle {
         let definition = manifest.definition().clone();
         let (state_tx, state_rx) = watch::channel(ModelRuntimeState::Unloaded);
         let runtime = match definition.id() {
-            ModelId::Gemma426bA4bItUqffQ80
+            ModelId::Gemma4E4bItUqffAfq6
             | ModelId::Gemma426bA4bItUqffAfq8
             | ModelId::EmbeddingGemma300m
-            | ModelId::Gemma4E4bItUqffAfq8
-            | ModelId::Gemma4E4bItUqffQ80 => {
+            | ModelId::Gemma426bA4bItUqffAfq6
+            | ModelId::Gemma4E4bItUqffAfq8 => {
                 ModelRuntime::MistralRs(MistralRsRuntime::new(manifest.clone()))
             }
             ModelId::Flux2Klein9b => ModelRuntime::Mold(MoldRuntime::new()),
@@ -262,6 +262,8 @@ impl InferenceEngine {
     /// This allows us to avoid a lot of complexity around managing multiple
     /// runtime implementations for the same model.
     pub async fn load_model(&self, model_id: &ModelId) -> Result {
+        info!(model_ids = ?self.model_ids(), model_id = %model_id, "Loading model");
+
         if let Some(handle) = self.models.get(model_id) {
             handle.load().await
         } else {
@@ -303,8 +305,9 @@ impl InferenceEngine {
         if let Some(handle) = self.models.get(&model_id) {
             handle.infer(request).await
         } else {
-            Err(Error::UnknownModel {
+            Err(Error::ModelNotLoaded {
                 model_id: model_id.clone(),
+                current_state: ModelRuntimeState::Unloaded,
             })
         }
     }

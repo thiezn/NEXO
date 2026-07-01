@@ -75,6 +75,19 @@ impl NexoResponse<(), Error> {
         }
     }
 
+    /// Helper function to create a Completed response without any result data.
+    pub fn completed(operation_id: OperationId) -> Self {
+        NexoResponse::Completed {
+            operation_id,
+            result: (),
+        }
+    }
+
+    /// Helper function to create an Accepted response.
+    pub fn accepted(operation_id: OperationId) -> Self {
+        NexoResponse::Accepted { operation_id }
+    }
+
     /// Helper function to check if the response is a Completed response.
     ///
     /// Useful for cases when we want to ensure the remote side completed the response
@@ -142,4 +155,19 @@ pub enum NexoEvent<T> {
         /// The event data
         event: T,
     },
+}
+
+impl NexoEvent<()> {
+    /// Helper function to create a Correlated event without any event data.
+    pub fn correlated(operation_id: OperationId) -> Self {
+        NexoEvent::Correlated {
+            operation_id,
+            event: (),
+        }
+    }
+
+    /// Helper function to create an Unsolicited event.
+    pub fn unsolicited() -> Self {
+        NexoEvent::Unsolicited { event: () }
+    }
 }
