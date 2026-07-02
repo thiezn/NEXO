@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tracing::warn;
 
 /// A single file to download from Hugging Face.
 #[derive(Debug, Clone)]
@@ -85,7 +86,7 @@ impl ModelFile {
         }
     }
 
-    /// Checks whether this model file has already been downloaded and verified locally.
+    /// Checks whether this model file has already been downloaded and inspected locally.
     ///
     /// # Arguments
     ///
@@ -99,7 +100,7 @@ impl ModelFile {
             return false;
         }
 
-        self.verify_local_file(&local_path).is_ok()
+        self.inspect_local_file(&local_path).is_ok()
     }
 
     /// Checks whether this model file is present locally using a fast metadata check.
@@ -216,12 +217,24 @@ impl ModelFile {
         Ok(model_dir.join(relative_path))
     }
 
-    /// Verifies the SHA-256 digest of a local file against the configured manifest digest.
+    /// Verifies a local file against the configured manifest metadata.
     ///
     /// # Arguments
     ///
     /// * `path` - The local file path to verify.
     pub(crate) fn verify_local_file(&self, path: &Path) -> Result {
+        let inspection = self.inspect_local_file(path)?;
+        self.warn_if_manifest_mismatch(path, &inspection);
+
+        Ok(())
+    }
+
+    /// Inspects a local file and computes the concrete metadata needed for validation.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The local file path to inspect.
+    fn inspect_local_file(&self, path: &Path) -> Result<LocalFileInspection> {
         if !has_valid_sha256(self.sha256) {
             return Err(Error::InvalidConfiguredSha256 {
                 repo: self.hf_repo.to_string(),
@@ -230,19 +243,40 @@ impl ModelFile {
             });
         }
 
-        let actual = compute_sha256(path)?;
-        if actual != self.sha256 {
-            return Err(Error::Sha256Mismatch {
-                expected: self.sha256.to_string(),
-                actual,
-                repo: self.hf_repo.to_string(),
-                remote_path: self.remote_path.to_string(),
-                local_path: path.to_path_buf(),
-            });
+        Ok(LocalFileInspection {
+            actual_size: std::fs::metadata(path)?.len(),
+            actual_sha256: compute_sha256(path)?,
+        })
+    }
+
+    /// Logs advisory warnings when the local file differs from manifest metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The inspected local file path.
+    /// * `inspection` - The concrete metadata computed from the local file.
+    fn warn_if_manifest_mismatch(&self, path: &Path, inspection: &LocalFileInspection) {
+        if inspection.actual_size == self.size_bytes && inspection.actual_sha256 == self.sha256 {
+            return;
         }
 
-        Ok(())
+        warn!(
+            repo = self.hf_repo,
+            remote_path = self.remote_path,
+            local_path = %path.display(),
+            expected_size_bytes = self.size_bytes,
+            actual_size_bytes = inspection.actual_size,
+            expected_sha256 = self.sha256,
+            actual_sha256 = inspection.actual_sha256,
+            "downloaded file differs from manifest metadata; update the manifest with the actual values"
+        );
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalFileInspection {
+    actual_size: u64,
+    actual_sha256: String,
 }
 
 /// Component types for files that make up a model artifact.
@@ -329,7 +363,8 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelFile, ModelFileKind};
+    use super::{LocalFileInspection, ModelFile, ModelFileKind, compute_sha256, has_valid_sha256};
+    use crate::Error;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -383,6 +418,81 @@ mod tests {
     }
 
     #[test]
+    fn mismatched_file_is_still_downloaded() {
+        let dir = temp_dir("mismatch");
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let file_path = dir.join("weights.bin");
+        fs::write(&file_path, b"hello world").expect("write test file");
+
+        let file = ModelFile::new(
+            ModelFileKind::Weights,
+            "repo",
+            "weights.bin",
+            99,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        );
+
+        assert!(file.is_downloaded(&dir));
+        file.verify_local_file(&file_path)
+            .expect("mismatched metadata should only warn");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn inspect_local_file_reports_actual_values() {
+        let dir = temp_dir("inspect");
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let file_path = dir.join("weights.bin");
+        fs::write(&file_path, b"hello world").expect("write test file");
+        let file = ModelFile::new(
+            ModelFileKind::Weights,
+            "repo",
+            "weights.bin",
+            99,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        );
+
+        let inspection = file
+            .inspect_local_file(&file_path)
+            .expect("inspect local file");
+
+        assert_eq!(
+            inspection,
+            LocalFileInspection {
+                actual_size: 11,
+                actual_sha256: compute_sha256(&file_path).expect("compute sha256"),
+            }
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_local_file_rejects_invalid_configured_sha256() {
+        let dir = temp_dir("invalid-sha");
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let file_path = dir.join("weights.bin");
+        fs::write(&file_path, b"hello world").expect("write test file");
+
+        let file = ModelFile::new(
+            ModelFileKind::Weights,
+            "repo",
+            "weights.bin",
+            11,
+            "placeholder_sha256",
+        );
+
+        let error = file
+            .verify_local_file(&file_path)
+            .expect_err("invalid manifest sha should fail");
+
+        assert!(matches!(error, Error::InvalidConfiguredSha256 { .. }));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn subfolder_files_use_remote_basename_locally() {
         let dir = temp_dir("sub-folder");
         let voices_dir = dir.join("voices");
@@ -402,5 +512,13 @@ mod tests {
         assert!(file.is_downloaded(&dir));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn valid_sha256_requires_64_hex_chars() {
+        assert!(has_valid_sha256(
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        ));
+        assert!(!has_valid_sha256("abc"));
     }
 }

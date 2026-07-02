@@ -119,7 +119,7 @@ pub static GEMMA_4_E4B_IT_UQFF_AFQ8: LazyLock<ModelManifest> = LazyLock::new(|| 
                 GEMMA_4_E4B_IT_UQFF_REPO,
                 "afq8-0.uqff",
                 4_279_637_812,
-                "d13c1cac7d313e354367478202fffe1ee0a9c1f9fc16e0037b501b79d7a01f49",
+                "08a767b9b084101ada9a4f723f6a5e4b42e5f57e923988150e83097072fd3fb7",
             ),
         ],
         "gemma-4-e4b-it",

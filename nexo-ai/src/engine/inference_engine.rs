@@ -103,7 +103,7 @@ impl ModelHandle {
                 ModelRuntime::MistralRs(MistralRsRuntime::new(manifest.clone()))
             }
             ModelId::Flux2Klein9b => ModelRuntime::Mold(MoldRuntime::new()),
-            ModelId::Kokoro82m => ModelRuntime::AnyTts(AnyTtsRuntime::new()),
+            ModelId::Kokoro82m => ModelRuntime::AnyTts(AnyTtsRuntime::new(manifest.clone())),
         };
 
         Ok(Self {

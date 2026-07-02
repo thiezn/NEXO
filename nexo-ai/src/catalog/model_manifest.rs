@@ -80,10 +80,10 @@ impl ModelManifest {
             .unwrap_or_else(|| self.definition.id().clone().to_string())
     }
 
-    /// Returns whether this model manifest has been downloaded and verified locally.
+    /// Returns whether this model manifest has been downloaded and inspected locally.
     ///
-    /// File verification runs in parallel across a Rayon thread-pool to speed up
-    /// SHA-256 validation for manifests with many or large files.
+    /// File inspection runs in parallel across a Rayon thread-pool to compute
+    /// concrete local metadata for manifests with many or large files.
     pub fn is_downloaded(&self) -> bool {
         let Ok(model_dir) = self.model_dir() else {
             return false;

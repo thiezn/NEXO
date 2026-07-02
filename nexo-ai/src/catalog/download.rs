@@ -1,6 +1,7 @@
 use crate::{Error, Result};
 use hf_hub::api::tokio::{Api, ApiBuilder, ApiError, Progress};
 use hf_hub::{Cache, Repo, RepoType};
+use std::env;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::debug;
@@ -21,6 +22,9 @@ pub struct DownloadOptions {
 
     /// Remove the staged HF cache file after it has been copied into place.
     pub cleanup_cache_on_success: bool,
+
+    /// Optional proxy server ip:port to use for all Hugging Face API requests. If not set, the system default proxy will be used.
+    pub proxy: Option<String>,
 }
 
 impl Default for DownloadOptions {
@@ -30,6 +34,7 @@ impl Default for DownloadOptions {
             force: false,
             max_concurrent_files: DEFAULT_MAX_CONCURRENT_FILES,
             cleanup_cache_on_success: true,
+            proxy: Some("192.168.2.1:6789".to_string()),
         }
     }
 }
@@ -48,6 +53,13 @@ impl CatalogDownloader {
     ///
     /// * `options` - Download settings controlling concurrency, force mode, and cache cleanup.
     pub(crate) fn new(options: DownloadOptions) -> Result<Self> {
+        // Set the proxy before building the async HF client. The tokio API uses reqwest under
+        // the hood, which respects the ALL_PROXY environment variable.
+        if let Some(proxy) = &options.proxy {
+            unsafe {
+                env::set_var("ALL_PROXY", format!("socks5://{}", proxy));
+            }
+        }
         let mut builder = ApiBuilder::from_env().with_cache_dir(hf_cache_dir());
         if let Some(token) = resolve_hf_token() {
             builder = builder.with_token(Some(token));

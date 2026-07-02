@@ -234,24 +234,29 @@ impl NexoGateway {
         request: ConnectRequest,
     ) -> Result<GatewayFrameOutcome> {
         let peer_key = PeerKey::from_client(&request.client);
+
         let kind = request.client.kind();
-        let client_id = request.client.client().id;
-        let device_id = request.client.device().id;
         self.peers
             .lock()
             .map_err(|_| crate::Error::InvalidPeerState("peer state lock poisoned".into()))?
-            .insert(peer_key, request.client);
+            .insert(peer_key, request.client.clone());
+
         *state = GatewayConnectionState::Connected { peer_key, kind };
 
-        info!(kind = %kind, client_id = %client_id, device_id = %device_id, "Peer connected");
+        Ok(match request.client {
+            NexoClient::Node(properties) => {
+                info!(client_id = %properties.client().id, device_id = %properties.device().id, tools = ?properties.tools(), "Node peer connected");
 
-        Ok(match kind {
-            NexoClientKind::User => GatewayFrameOutcome::Reply(Frame::new(
-                GatewayToUserMessage::Connect(NexoResponse::completed(request.operation_id)),
-            )?),
-            NexoClientKind::Node => GatewayFrameOutcome::Reply(Frame::new(
-                GatewayToNodeMessage::Connect(NexoResponse::completed(request.operation_id)),
-            )?),
+                GatewayFrameOutcome::Reply(Frame::new(GatewayToUserMessage::Connect(
+                    NexoResponse::completed(request.operation_id),
+                ))?)
+            }
+            NexoClient::User(properties) => {
+                info!(client_id = %properties.client().id, device_id = %properties.device().id, "User peer connected");
+                GatewayFrameOutcome::Reply(Frame::new(GatewayToNodeMessage::Connect(
+                    NexoResponse::completed(request.operation_id),
+                ))?)
+            }
         })
     }
 

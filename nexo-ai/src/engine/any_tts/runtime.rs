@@ -1,3 +1,4 @@
+use crate::catalog::ModelManifest;
 use crate::{Error, Result};
 use futures_util::{StreamExt, stream};
 use nexo_core::{
@@ -5,26 +6,30 @@ use nexo_core::{
     InferenceRequest, InferenceStream, InferenceUpdate, MediaSource, ModelId, ModelRuntimeState,
     SpeechGenerationPayload, SpeechGenerationResponse,
 };
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::warn;
 
 /// Model Runtime for the AnyTTS inference engine.
 pub(crate) struct AnyTtsRuntime {
-    models: BTreeMap<ModelId, Arc<dyn any_tts::TtsModel>>,
+    /// The manifest that defines the model being loaded into this runtime instance.
+    manifest: ModelManifest,
+
+    /// The live AnyTTS model once loaded.
+    model: Option<Arc<dyn any_tts::TtsModel>>,
 }
 
 impl AnyTtsRuntime {
-    /// Creates a new AnyTtsRuntime with no pre-loaded models.
-    pub(crate) fn new() -> Self {
+    /// Creates a new unloaded AnyTTS runtime for the provided model manifest.
+    pub(crate) fn new(manifest: ModelManifest) -> Self {
         Self {
-            models: BTreeMap::new(),
+            manifest,
+            model: None,
         }
     }
 
     /// Loads a model into the AnyTTS runtime.
     pub(crate) async fn load_model(&mut self, model_id: &ModelId) -> Result {
-        if self.models.contains_key(model_id) {
+        if self.model.is_some() {
             warn!(
                 model_id = %model_id,
                 "Model is already loaded in AnyTTS runtime"
@@ -32,14 +37,25 @@ impl AnyTtsRuntime {
             return Ok(());
         }
 
+        if self.manifest.model_id() != model_id {
+            return Err(Error::UnsupportedFeature {
+                feature: format!(
+                    "AnyTTS runtime for `{}` cannot load model `{}`",
+                    self.manifest.model_id(),
+                    model_id,
+                ),
+            });
+        }
+
         match model_id {
             ModelId::Kokoro82m => {
+                let model_dir = self.manifest.model_dir()?;
                 let config = any_tts::TtsConfig::new(any_tts::ModelType::Kokoro)
-                    .with_model_path("TODO")
+                    .with_model_path(model_dir.to_string_lossy().into_owned())
                     .with_preferred_runtime();
 
                 let model = any_tts::load_model(config)?;
-                self.models.insert(model_id.clone(), Arc::from(model));
+                self.model = Some(Arc::from(model));
             }
             _ => {
                 return Err(Error::UnsupportedFeature {
@@ -53,13 +69,11 @@ impl AnyTtsRuntime {
 
     /// Unload a model from the AnyTTS runtime.
     pub(crate) async fn unload_model(&mut self, model_id: &ModelId) -> Result {
-        match self.models.remove(model_id) {
-            Some(_) => Ok(()),
-            None => {
-                warn!(model_id = %model_id, "Model is not loaded in AnyTTS runtime");
-                Ok(())
-            }
+        if self.model.take().is_none() {
+            warn!(model_id = %model_id, "Model is not loaded in AnyTTS runtime");
         }
+
+        Ok(())
     }
 
     /// Submits an inference request to the specified model in the AnyTTS runtime.
@@ -68,10 +82,20 @@ impl AnyTtsRuntime {
         model_id: &ModelId,
         request: InferenceRequest,
     ) -> Result<InferenceStream> {
-        if !self.models.contains_key(model_id) {
+        if self.model.is_none() {
             return Err(Error::ModelNotLoaded {
                 model_id: model_id.clone(),
                 current_state: ModelRuntimeState::Unloaded,
+            });
+        }
+
+        if self.manifest.model_id() != model_id {
+            return Err(Error::UnsupportedFeature {
+                feature: format!(
+                    "AnyTTS runtime for `{}` cannot run inference on model `{}`",
+                    self.manifest.model_id(),
+                    model_id,
+                ),
             });
         }
 
@@ -103,8 +127,8 @@ impl AnyTtsRuntime {
     ) -> Result<InferenceStream> {
         // Retrieve loaded model instance
         let model = self
-            .models
-            .get(&meta.model_id)
+            .model
+            .as_ref()
             .ok_or_else(|| Error::ModelNotLoaded {
                 model_id: meta.model_id.clone(),
                 current_state: ModelRuntimeState::Unloaded,

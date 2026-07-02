@@ -19,6 +19,9 @@ cargo update
 
 # This needs ```cargo install cargo-edit``` first
 echo "Bumping all dependencies to their latest versions..."
+# NOTE, cargo upgrade doesn't respect ~/.cargo/config.toml proxy
+HTTP_PROXY="socks5h://192.168.2.1:6789" 
+HTTPS_PROXY="socks5h://192.168.2.1:6789"
 cargo upgrade --recursive --verbose
 
 # echo "Disable unused features in dependencies... (DISABLED FOR NOW, IT TAKES A LOT OF TIME AND SPACE)"

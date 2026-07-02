@@ -163,23 +163,6 @@ pub enum Error {
         sha256: String,
     },
 
-    /// A file's computed SHA-256 did not match the configured digest.
-    #[error(
-        "SHA-256 mismatch for {remote_path} from {repo}: expected {expected}, got {actual} at {local_path}"
-    )]
-    Sha256Mismatch {
-        /// The configured expected digest.
-        expected: String,
-        /// The actual computed digest.
-        actual: String,
-        /// The source repository containing the file.
-        repo: String,
-        /// The repository-relative file path.
-        remote_path: String,
-        /// The local destination path.
-        local_path: PathBuf,
-    },
-
     /// A pattern selector did not match any remote files.
     #[error("no files in {repo} matched selector {selector}")]
     NoFilesMatched {

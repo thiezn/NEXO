@@ -39,7 +39,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 tracing = { workspace = true }
 hf-hub = { version = "0", default-features = false, features = [
     "tokio",
-    "ureq",
     "rustls-tls",
 ] }
 
