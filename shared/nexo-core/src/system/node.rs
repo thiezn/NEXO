@@ -18,6 +18,10 @@ pub struct NodeProperties {
     /// Delay between reconnect attempts after a gateway disconnect.
     reconnect_interval_ms: u64,
 
+    /// Optional proxy URL used by local model download commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    proxy: Option<String>,
+
     /// Capabilities that should be covered by loaded models at startup.
     #[serde(default)]
     startup_capabilities: Vec<ModelCapability>,
@@ -67,6 +71,7 @@ impl NodeProperties {
             gateway_url: self.gateway_url,
             auth_token: self.auth_token,
             reconnect_interval_ms: self.reconnect_interval_ms,
+            proxy: self.proxy,
             startup_capabilities: self.startup_capabilities,
             default_models: self.default_models,
             client: self.client,
@@ -89,6 +94,11 @@ impl NodeProperties {
     /// Delay between reconnect attempts after a gateway disconnect.
     pub fn reconnect_interval_ms(&self) -> u64 {
         self.reconnect_interval_ms
+    }
+
+    /// Optional proxy URL used by local model download commands.
+    pub fn proxy(&self) -> Option<&str> {
+        self.proxy.as_deref()
     }
 
     /// Capabilities that should be covered by loaded models at startup.
@@ -151,6 +161,7 @@ pub struct NodePropertiesBuilder {
     gateway_url: String,
     auth_token: String,
     reconnect_interval_ms: u64,
+    proxy: Option<String>,
     startup_capabilities: Vec<ModelCapability>,
     default_models: HashMap<ModelCapability, ModelId>,
     client: ClientInfo,
@@ -166,6 +177,7 @@ impl NodePropertiesBuilder {
             gateway_url: "ws://127.0.0.1:6969".to_string(),
             auth_token: auth_token.into(),
             reconnect_interval_ms: 5000,
+            proxy: None,
             startup_capabilities: vec![
                 ModelCapability::TextGeneration,
                 ModelCapability::ToolCalling,
@@ -187,6 +199,12 @@ impl NodePropertiesBuilder {
     /// Set the reconnect interval in milliseconds.
     pub fn reconnect_interval_ms(mut self, reconnect_interval_ms: u64) -> Self {
         self.reconnect_interval_ms = reconnect_interval_ms;
+        self
+    }
+
+    /// Set the optional proxy URL used by local model download commands.
+    pub fn proxy(mut self, proxy: Option<impl Into<String>>) -> Self {
+        self.proxy = proxy.map(Into::into);
         self
     }
 
@@ -221,6 +239,7 @@ impl NodePropertiesBuilder {
             gateway_url: self.gateway_url,
             auth_token: self.auth_token,
             reconnect_interval_ms: self.reconnect_interval_ms,
+            proxy: self.proxy,
             startup_capabilities: self.startup_capabilities,
             default_models: self.default_models,
             protocol,

@@ -57,7 +57,7 @@ impl CatalogDownloader {
         // the hood, which respects the ALL_PROXY environment variable.
         if let Some(proxy) = &options.proxy {
             unsafe {
-                env::set_var("ALL_PROXY", format!("socks5://{}", proxy));
+                env::set_var("ALL_PROXY", proxy.to_string());
             }
         }
         let mut builder = ApiBuilder::from_env().with_cache_dir(hf_cache_dir());

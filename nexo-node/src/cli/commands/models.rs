@@ -5,9 +5,12 @@ use nexo_ai::{
     CatalogDownloadProgress, DownloadOptions, FileDownloadProgress, ModelCatalog, ModelFileKind,
 };
 use nexo_core::ModelId;
+use nexo_core::NodeProperties;
 use nexo_node::Result;
 use std::process::ExitCode;
 use std::sync::Arc;
+
+use super::node_config_path;
 
 /// Reusable local model management command with `list` and `pull` actions.
 #[derive(clap::Args, Debug, Clone)]
@@ -31,6 +34,7 @@ impl ModelsCommand {
                 force,
                 max_concurrent_files,
                 keep_cache,
+                proxy,
             } => {
                 let mut options = DownloadOptions::default();
                 options.force = force;
@@ -38,6 +42,7 @@ impl ModelsCommand {
                     options.max_concurrent_files = max_concurrent_files;
                 }
                 options.cleanup_cache_on_success = !keep_cache;
+                options.proxy = resolve_pull_proxy(proxy)?;
 
                 run_pull_command(context, model_ids, options).await
             }
@@ -64,10 +69,28 @@ pub enum ModelsAction {
         #[arg(long)]
         keep_cache: bool,
 
+        /// Optional proxy URL (e.g. socks5://127.0.0.1:6789). Overrides nexo-node.toml when set.
+        #[arg(long, value_name = "URL")]
+        proxy: Option<String>,
+
         /// Model IDs, category names, or `all`.
         #[arg(value_name = "MODEL", required = true, num_args = 1..)]
         model_ids: Vec<ModelId>,
     },
+}
+
+fn resolve_pull_proxy(cli_proxy: Option<String>) -> Result<Option<String>> {
+    if cli_proxy.is_some() {
+        return Ok(cli_proxy);
+    }
+
+    let path = node_config_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let config: NodeProperties = cli_helpers::config::load(&path)?;
+    Ok(config.proxy().map(ToOwned::to_owned))
 }
 
 /// Run the `models list` subcommand and print the results to the console.
