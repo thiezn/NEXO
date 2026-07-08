@@ -1,5 +1,5 @@
 use super::agent::{NexoAgentInput, NexoAgentOutput};
-use crate::{NexoAgent, Result};
+use crate::{Error, NexoAgent, Result};
 use futures_util::{SinkExt, StreamExt};
 use nexo_core::system::node::NodeState;
 use nexo_core::{GatewayProperties, NexoClient, NexoClientKind, Node, PeerId, User};
@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const AGENT_CHANNEL_CAPACITY: usize = 256;
 const PEER_CHANNEL_CAPACITY: usize = 64;
@@ -39,7 +39,7 @@ enum GatewayConnectionState {
 
 /// Result of handling one inbound gateway frame.
 #[derive(Debug, Clone, PartialEq)]
-enum GatewayFrameOutcome {
+enum GatewayFrameOutput {
     /// Send a reply frame and keep the connection open.
     Reply(Frame),
 
@@ -52,6 +52,11 @@ enum GatewayFrameOutcome {
 
 /// Small private helper to be able to extract the NexoClientKind during initial
 /// connect, before the connection state is bound to a peer key.
+///
+/// It mirrors the GatewayToNode/User message enum, but only contains the Connect variant, allowing
+/// us to have generic handling of the connect request without needing to know the type of client.
+///
+/// TODO: We could probably fix this better my splitting out the Connect messages into separate enum?
 #[derive(Debug, serde::Deserialize)]
 enum GatewayConnectMessage {
     Connect(ConnectRequest),
@@ -122,12 +127,14 @@ impl NexoGateway {
     /// This will consume NexoGateway and run the main accept loop,
     /// spawning a new task for each accepted WebSocket connection.
     pub async fn run(mut self) -> Result {
-        let agent_input_rx = self.agent_input_rx.take().ok_or_else(|| {
-            crate::Error::InvalidPeerState("agent input receiver already taken".into())
-        })?;
-        let agent_output_rx = self.agent_output_rx.take().ok_or_else(|| {
-            crate::Error::InvalidPeerState("agent output receiver already taken".into())
-        })?;
+        let agent_input_rx = self
+            .agent_input_rx
+            .take()
+            .ok_or_else(|| Error::InvalidPeerState("agent input receiver already taken".into()))?;
+        let agent_output_rx = self
+            .agent_output_rx
+            .take()
+            .ok_or_else(|| Error::InvalidPeerState("agent output receiver already taken".into()))?;
 
         let mut agent_task = NexoAgent::new().start(agent_input_rx, self.agent_output_tx.clone());
         let mut dispatcher_task = self.start_agent_output_dispatcher(agent_output_rx);
@@ -139,6 +146,7 @@ impl NexoGateway {
         loop {
             tokio::select! {
                 accept_result = listener.accept() => {
+                    debug!(accept_result = ?accept_result, "TCP connection accepted");
                     let (stream, peer_addr) = accept_result?;
                     let gateway = self.clone();
                     let auth_token = self.config.auth_token().to_owned();
@@ -185,20 +193,22 @@ impl NexoGateway {
         &self,
         state: &mut GatewayConnectionState,
         frame: Frame,
-    ) -> Result<GatewayFrameOutcome> {
+    ) -> Result<GatewayFrameOutput> {
         match state {
             GatewayConnectionState::AwaitingConnect => self.handle_awaiting_connect(state, frame),
             GatewayConnectionState::Connected { kind, .. } => match kind {
                 NexoClientKind::User => {
+                    debug!(frame = ?frame, "User frame received");
                     let (_, message) = frame.into_parts::<UserToGatewayMessage>()?;
                     self.handle_user_message(state, message).await
                 }
                 NexoClientKind::Node => {
+                    debug!(frame = ?frame, "Node frame received");
                     let (_, message) = frame.into_parts::<NodeToGatewayMessage>()?;
                     self.handle_node_message(state, message)
                 }
             },
-            GatewayConnectionState::Disconnected => Err(crate::Error::InvalidPeerState(
+            GatewayConnectionState::Disconnected => Err(Error::InvalidPeerState(
                 "frame received after protocol disconnect".into(),
             )),
         }
@@ -226,10 +236,10 @@ impl NexoGateway {
         &self,
         state: &mut GatewayConnectionState,
         frame: Frame,
-    ) -> Result<GatewayFrameOutcome> {
+    ) -> Result<GatewayFrameOutput> {
         match frame.into_parts::<GatewayConnectMessage>() {
             Ok((_, GatewayConnectMessage::Connect(request))) => self.connect_peer(state, request),
-            Err(_) => Err(crate::Error::InvalidPeerState(
+            Err(_) => Err(Error::InvalidPeerState(
                 "first gateway frame must be a connect request".into(),
             )),
         }
@@ -245,13 +255,13 @@ impl NexoGateway {
         &self,
         state: &mut GatewayConnectionState,
         request: ConnectRequest,
-    ) -> Result<GatewayFrameOutcome> {
+    ) -> Result<GatewayFrameOutput> {
         let peer_id = PeerId::from_client(&request.client);
 
         let kind = request.client.kind();
         self.peers
             .lock()
-            .map_err(|_| crate::Error::InvalidPeerState("peer state lock poisoned".into()))?
+            .map_err(|_| Error::InvalidPeerState("peer state lock poisoned".into()))?
             .insert(peer_id, request.client.clone());
 
         *state = GatewayConnectionState::Connected { peer_id, kind };
@@ -273,13 +283,13 @@ impl NexoGateway {
             NexoClient::Node(properties) => {
                 info!(client_id = %properties.client().id, device_id = %properties.device().id, tools = ?properties.tools(), "Node peer connected");
 
-                GatewayFrameOutcome::Reply(Frame::new(GatewayToNodeMessage::Connect(
+                GatewayFrameOutput::Reply(Frame::new(GatewayToNodeMessage::Connect(
                     NexoResponse::completed(request.operation_id),
                 ))?)
             }
             NexoClient::User(properties) => {
                 info!(client_id = %properties.client().id, device_id = %properties.device().id, "User peer connected");
-                GatewayFrameOutcome::Reply(Frame::new(GatewayToUserMessage::Connect(
+                GatewayFrameOutput::Reply(Frame::new(GatewayToUserMessage::Connect(
                     NexoResponse::completed(request.operation_id),
                 ))?)
             }
@@ -296,14 +306,14 @@ impl NexoGateway {
         &self,
         state: &mut GatewayConnectionState,
         message: UserToGatewayMessage,
-    ) -> Result<GatewayFrameOutcome> {
+    ) -> Result<GatewayFrameOutput> {
         match message {
-            UserToGatewayMessage::Connect(_) => Err(crate::Error::InvalidPeerState(
+            UserToGatewayMessage::Connect(_) => Err(Error::InvalidPeerState(
                 "connect received after peer was already connected".into(),
             )),
             UserToGatewayMessage::Disconnect(request) => {
                 self.disconnect_peer(state)?;
-                Ok(GatewayFrameOutcome::CloseAfterReply(Frame::new(
+                Ok(GatewayFrameOutput::CloseAfterReply(Frame::new(
                     GatewayToUserMessage::Disconnect(NexoResponse::completed(request.operation_id)),
                 )?))
             }
@@ -314,11 +324,11 @@ impl NexoGateway {
                 {
                     warn!(error = %error, "Failed to forward StartInferenceRun to agent");
                 }
-                Ok(GatewayFrameOutcome::NoReply)
+                Ok(GatewayFrameOutput::NoReply)
             }
             UserToGatewayMessage::GetState => {
                 let GatewayConnectionState::Connected { peer_id, .. } = state else {
-                    return Err(crate::Error::InvalidPeerState(
+                    return Err(Error::InvalidPeerState(
                         "get_state received before peer was connected".into(),
                     ));
                 };
@@ -329,12 +339,12 @@ impl NexoGateway {
                     operation_id,
                 })?;
 
-                Ok(GatewayFrameOutcome::NoReply)
+                Ok(GatewayFrameOutput::NoReply)
             }
             other => {
-                let name: &'static str = (&other).into();
-                info!(message = name, "User message parsed for later routing");
-                Ok(GatewayFrameOutcome::NoReply)
+                // let name: &'static str = (&other).into();
+                info!(message = ?other, "User message parsed for later routing");
+                Ok(GatewayFrameOutput::NoReply)
             }
         }
     }
@@ -349,21 +359,20 @@ impl NexoGateway {
         &self,
         state: &mut GatewayConnectionState,
         message: NodeToGatewayMessage,
-    ) -> Result<GatewayFrameOutcome> {
+    ) -> Result<GatewayFrameOutput> {
         match message {
-            NodeToGatewayMessage::Connect(_) => Err(crate::Error::InvalidPeerState(
+            NodeToGatewayMessage::Connect(_) => Err(Error::InvalidPeerState(
                 "connect received after peer was already connected".into(),
             )),
             NodeToGatewayMessage::Disconnect(request) => {
                 self.disconnect_peer(state)?;
-                Ok(GatewayFrameOutcome::CloseAfterReply(Frame::new(
+                Ok(GatewayFrameOutput::CloseAfterReply(Frame::new(
                     GatewayToNodeMessage::Disconnect(NexoResponse::completed(request.operation_id)),
                 )?))
             }
             other => {
-                let name: &'static str = (&other).into();
-                info!(message = name, "Node message parsed for later routing");
-                Ok(GatewayFrameOutcome::NoReply)
+                info!(message = ?other, "Node message parsed for later routing");
+                Ok(GatewayFrameOutput::NoReply)
             }
         }
     }
@@ -387,9 +396,7 @@ impl NexoGateway {
                 if let Some(tx) = self
                     .peer_frame_txs
                     .lock()
-                    .map_err(|_| {
-                        crate::Error::InvalidPeerState("peer sender lock poisoned".into())
-                    })?
+                    .map_err(|_| Error::InvalidPeerState("peer sender lock poisoned".into()))?
                     .get(&requester)
                     .cloned()
                 {
@@ -406,7 +413,7 @@ impl NexoGateway {
     /// Remove a connected peer from live gateway state.
     fn disconnect_peer(&self, state: &mut GatewayConnectionState) -> Result {
         let GatewayConnectionState::Connected { peer_id, kind } = state else {
-            return Err(crate::Error::InvalidPeerState(
+            return Err(Error::InvalidPeerState(
                 "disconnect received before peer was connected".into(),
             ));
         };
@@ -414,7 +421,7 @@ impl NexoGateway {
         if self
             .peers
             .lock()
-            .map_err(|_| crate::Error::InvalidPeerState("peer state lock poisoned".into()))?
+            .map_err(|_| Error::InvalidPeerState("peer state lock poisoned".into()))?
             .remove(peer_id)
             .is_some()
         {
@@ -448,7 +455,7 @@ impl NexoGateway {
                     let Some(message) = maybe_message else {
                         break;
                     };
-
+                    debug!(message = ?message, "WebSocket message received");
                     let frame = match message {
                         Ok(Message::Text(text)) => match serde_json::from_str::<Frame>(&text) {
                             Ok(frame) => frame,
@@ -466,7 +473,8 @@ impl NexoGateway {
                     };
 
                     match self.handle_frame(&mut state, frame).await {
-                        Ok(GatewayFrameOutcome::Reply(frame)) => {
+                        Ok(GatewayFrameOutput::Reply(frame)) => {
+                            debug!(frame = ?frame, "Sending gateway reply");
                             if let GatewayConnectionState::Connected { peer_id, .. } = state {
                                 self.register_peer_sender(peer_id, &peer_tx);
                             }
@@ -476,14 +484,15 @@ impl NexoGateway {
                                 break;
                             }
                         }
-                        Ok(GatewayFrameOutcome::CloseAfterReply(frame)) => {
+                        Ok(GatewayFrameOutput::CloseAfterReply(frame)) => {
+                            debug!(frame = ?frame, "Sending gateway disconnect reply");
                             if let Err(error) = send_frame(&mut ws_stream, &frame).await {
                                 tracing::warn!(error = ?error, "Failed to send gateway disconnect reply");
                             }
                             let _ = ws_stream.close(None).await;
                             return;
                         }
-                        Ok(GatewayFrameOutcome::NoReply) => {}
+                        Ok(GatewayFrameOutput::NoReply) => {}
                         Err(error) => {
                             tracing::warn!(error = ?error, "Gateway frame handling failed");
                             break;
@@ -610,7 +619,7 @@ mod tests {
 
         let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
-        let GatewayFrameOutcome::Reply(reply) = outcome else {
+        let GatewayFrameOutput::Reply(reply) = outcome else {
             panic!("expected connect reply")
         };
         assert_eq!(
@@ -633,7 +642,7 @@ mod tests {
 
         let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
-        let GatewayFrameOutcome::Reply(reply) = outcome else {
+        let GatewayFrameOutput::Reply(reply) = outcome else {
             panic!("expected connect reply")
         };
         let (_, message) = reply.into_parts::<GatewayToNodeMessage>().unwrap();
@@ -659,7 +668,7 @@ mod tests {
 
         let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
-        assert!(matches!(outcome, GatewayFrameOutcome::Reply(_)));
+        assert!(matches!(outcome, GatewayFrameOutput::Reply(_)));
         let GatewayConnectionState::Connected { kind, .. } = state else {
             panic!("expected connected state")
         };
@@ -722,7 +731,7 @@ mod tests {
 
         let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
-        let GatewayFrameOutcome::CloseAfterReply(reply) = outcome else {
+        let GatewayFrameOutput::CloseAfterReply(reply) = outcome else {
             panic!("expected close-after-reply")
         };
         let (_, message) = reply.into_parts::<GatewayToUserMessage>().unwrap();
@@ -744,7 +753,7 @@ mod tests {
 
         let error = gateway.handle_frame(&mut state, frame).await.unwrap_err();
 
-        assert!(matches!(error, crate::Error::InvalidPeerState(_)));
+        assert!(matches!(error, Error::InvalidPeerState(_)));
         assert_eq!(state, GatewayConnectionState::AwaitingConnect);
     }
 

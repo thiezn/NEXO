@@ -1,6 +1,6 @@
 use super::CancelRequest;
 use crate::NexoResponse;
-use nexo_core::{InferenceRequest, ModelId, NexoState, OperationId, ToolCall};
+use nexo_core::{InferenceRequest, ModelId, OperationId, ToolCall};
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 

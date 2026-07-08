@@ -59,6 +59,9 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use crate::UserToGatewayMessage;
+    use crate::{GatewayToUserMessage, NexoResponse};
+    use nexo_core::{ClientInfo, DeviceInfo, NexoState, User, UserProperties};
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     struct TestPayload {
@@ -82,5 +85,56 @@ mod tests {
                 value: "hello".into()
             }
         );
+    }
+
+    #[test]
+    fn into_parts_round_trips_user_get_state_message() {
+        let frame = Frame::new(UserToGatewayMessage::GetState).unwrap();
+        let expected_id = frame.id();
+
+        let (frame_id, payload): (FrameId, UserToGatewayMessage) = frame.into_parts().unwrap();
+
+        assert_eq!(frame_id, expected_id);
+        assert!(matches!(payload, UserToGatewayMessage::GetState));
+    }
+
+    #[test]
+    fn websocket_json_round_trips_user_get_state_message() {
+        let outbound = Frame::new(UserToGatewayMessage::GetState).unwrap();
+        let expected_id = outbound.id();
+
+        let json = serde_json::to_string(&outbound).unwrap();
+        let inbound: Frame = serde_json::from_str(&json).unwrap();
+        let (frame_id, payload): (FrameId, UserToGatewayMessage) = inbound.into_parts().unwrap();
+
+        assert_eq!(frame_id, expected_id);
+        assert!(matches!(payload, UserToGatewayMessage::GetState));
+    }
+
+    #[test]
+    fn websocket_json_round_trips_non_empty_get_state_response() {
+        let mut state = NexoState::new();
+        let user = User::from_properties(&UserProperties::new(
+            ClientInfo::new("schema-test-user"),
+            DeviceInfo::default(),
+            "token",
+        ));
+        state.add_user(user).unwrap();
+
+        let outbound = Frame::new(GatewayToUserMessage::GetState(NexoResponse::Completed {
+            operation_id: nexo_core::OperationId::new(),
+            result: state,
+        }))
+        .unwrap();
+
+        let json = serde_json::to_string(&outbound).unwrap();
+        let inbound: Frame = serde_json::from_str(&json).unwrap();
+        let (_, payload): (FrameId, GatewayToUserMessage) = inbound.into_parts().unwrap();
+
+        let GatewayToUserMessage::GetState(NexoResponse::Completed { result, .. }) = payload else {
+            panic!("expected get_state response")
+        };
+        assert_eq!(result.user_count(), 1);
+        assert_eq!(result.node_count(), 0);
     }
 }
