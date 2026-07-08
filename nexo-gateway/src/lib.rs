@@ -18,3 +18,7 @@ pub use engine::NexoGateway;
 /// Error types and result handling for the nexo gateway.
 pub mod error;
 pub use error::{Error, Result};
+
+/// The main Nexo Agent. This is the heart of the NEXO system running the loop
+pub mod agent;
+use agent::NexoAgent;

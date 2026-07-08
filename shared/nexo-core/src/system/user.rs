@@ -1,8 +1,57 @@
+use super::{ClientInfo, DeviceInfo, ProtocolInfo, Scope};
+use crate::PeerId;
 use crate::ToolDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
-use super::{ClientInfo, DeviceInfo, ProtocolInfo, Scope};
+/// A single active User in the NexoGateway
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
+pub struct User {
+    /// Unique identifier for this user, derived from stable client and device identifiers.
+    id: PeerId,
+
+    /// Tool definitions exposed by this node.
+    #[serde(default)]
+    tools: HashSet<ToolDefinition>,
+
+    /// Connected at
+    connected_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl User {
+    /// Initialize a new user with the given peer ID and tools.
+    pub fn new(id: PeerId, tools: HashSet<ToolDefinition>) -> Self {
+        let connected_at = chrono::Utc::now();
+        Self {
+            id,
+            tools,
+            connected_at,
+        }
+    }
+
+    /// Build a user from the given user properties.
+    pub fn from_properties(properties: &UserProperties) -> Self {
+        let id = PeerId::new(properties.client().id, properties.device().id);
+        let tools = properties.tools().iter().cloned().collect();
+        Self::new(id, tools)
+    }
+
+    /// Get the unique identifier for this user.
+    pub fn id(&self) -> PeerId {
+        self.id
+    }
+
+    /// Get the set of tool definitions exposed by this user.
+    pub fn tools(&self) -> &HashSet<ToolDefinition> {
+        &self.tools
+    }
+
+    /// Get the timestamp when this user connected.
+    pub fn connected_at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.connected_at
+    }
+}
 
 /// Persisted configuration and handshake identity for a user-facing client.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]

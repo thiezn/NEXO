@@ -4,10 +4,10 @@ use crate::message::MediaSource;
 use crate::tools::ToolCallDelta;
 use crate::{AudioFormat, FinishReason, MessageRole, ModelId, OperationId, RoundId, RunId};
 
-use super::final_output::InferenceFinal;
+use super::InferenceOperationKind;
 use super::meta::InferenceMeta;
 use super::ordering::{ArtifactIndex, OutputOffsetBytes, StreamSeq};
-use super::request::InferenceOperationKind;
+use super::output::InferenceOutput;
 use super::responses::EmbeddingVector;
 use super::responses::GeneratedImage;
 use super::usage::TokenUsage;
@@ -39,12 +39,12 @@ impl InferenceUpdate {
     }
 
     /// Creates a progress update.
-    pub fn progress(meta: InferenceMeta, seq: StreamSeq, output: InferenceOutput) -> Self {
+    pub fn progress(meta: InferenceMeta, seq: StreamSeq, output: InferenceOutputDelta) -> Self {
         Self::Progress(InferenceProgress { meta, seq, output })
     }
 
     /// Creates a completed update.
-    pub fn completed(meta: InferenceMeta, final_output: InferenceFinal) -> Self {
+    pub fn completed(meta: InferenceMeta, final_output: InferenceOutput) -> Self {
         Self::Completed(InferenceCompleted { meta, final_output })
     }
 
@@ -135,7 +135,7 @@ pub struct InferenceProgress {
     pub seq: StreamSeq,
 
     /// The progressive output payload.
-    pub output: InferenceOutput,
+    pub output: InferenceOutputDelta,
 }
 
 /// Successful terminal update from an inference operation.
@@ -145,7 +145,7 @@ pub struct InferenceCompleted {
     pub meta: InferenceMeta,
 
     /// The successful final output.
-    pub final_output: InferenceFinal,
+    pub final_output: InferenceOutput,
 }
 
 /// Cancelled terminal update from an inference operation.
@@ -169,9 +169,11 @@ pub struct InferenceFailed {
 }
 
 /// Progressive output emitted by an inference operation.
+///
+/// This will eventually be combined into a InferenceOutput
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
-pub enum InferenceOutput {
+pub enum InferenceOutputDelta {
     /// Conversational or multimodal generation deltas.
     MultiModal(MultiModalDelta),
 
@@ -191,7 +193,7 @@ pub enum InferenceOutput {
     Detokenization(DetokenizationDelta),
 }
 
-impl InferenceOutput {
+impl InferenceOutputDelta {
     /// Returns the operation kind that produced this progressive output.
     pub const fn operation_kind(&self) -> InferenceOperationKind {
         match self {

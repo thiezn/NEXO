@@ -20,12 +20,12 @@ pub struct InferenceMeta {
 
 impl InferenceMeta {
     /// Builds inference metadata after a request has been resolved to a concrete model.
-    pub fn from_request_and_model(request: &InferenceRequest, model_id: ModelId) -> Self {
+    pub fn from_request(request: &InferenceRequest) -> Self {
         Self {
             operation_id: request.operation_id,
             run_id: request.run_id,
             round_id: request.round_id.clone(),
-            model_id,
+            model_id: request.model_id,
         }
     }
 }

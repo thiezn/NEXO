@@ -58,7 +58,7 @@ pub static GEMMA_4_E4B_IT_UQFF_AFQ6: LazyLock<ModelManifest> = LazyLock::new(|| 
                 ModelFileKind::UqffShard,
                 GEMMA_4_E4B_IT_UQFF_REPO,
                 "afq6-0.uqff",
-                4_279_637_812,
+                3_667_875_008,
                 "d13c1cac7d313e354367478202fffe1ee0a9c1f9fc16e0037b501b79d7a01f49",
             ),
         ],

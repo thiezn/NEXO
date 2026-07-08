@@ -1,5 +1,5 @@
 use super::{CancelRequest, ConnectRequest, DisconnectRequest};
-use nexo_core::{InferenceRequest, OperationId, SessionId};
+use nexo_core::{CompactionRequest, InferenceIntent, OperationId, SessionId};
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 
@@ -25,7 +25,7 @@ pub enum UserToGatewayMessage {
     GetState,
 
     /// A request to start a new inference run operation with the specified parameters.
-    StartInferenceRun(InferenceRequest),
+    StartInferenceRun(InferenceIntent),
 
     /// A request to append additional instructions to an ongoing inference run operation.
     ///
@@ -35,8 +35,11 @@ pub enum UserToGatewayMessage {
         operation_id: OperationId,
 
         /// The additional instructions to be appended to the ongoing inference operation.
-        instructions: InferenceRequest,
+        instructions: InferenceIntent,
     },
+
+    /// A request to compact a current session.
+    Compact(CompactionRequest),
 
     /// A request to cancel a previously submitted operation.
     Cancel(CancelRequest),

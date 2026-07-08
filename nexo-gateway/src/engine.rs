@@ -1,6 +1,7 @@
-use crate::Result;
+use super::agent::{NexoAgentInput, NexoAgentOutput};
+use crate::{NexoAgent, Result};
 use futures_util::{SinkExt, StreamExt};
-use nexo_core::{GatewayProperties, NexoClient, NexoClientKind};
+use nexo_core::{GatewayProperties, NexoClient, NexoClientKind, PeerId};
 use nexo_ws_schema::{
     ConnectRequest, Frame, GatewayToNodeMessage, GatewayToUserMessage, NexoResponse,
     NodeToGatewayMessage, UserToGatewayMessage,
@@ -11,56 +12,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::info;
-use uuid::Uuid;
-
-/// Unique live peer key derived from stable client and device identifiers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PeerKey {
-    client_id: Uuid,
-    device_id: Uuid,
-}
-
-impl PeerKey {
-    /// Build a peer key from stable client and device identifiers.
-    ///
-    /// # Arguments
-    ///
-    /// * `client_id` - Stable client identifier advertised by the peer.
-    /// * `device_id` - Stable device identifier advertised by the peer.
-    pub fn new(client_id: Uuid, device_id: Uuid) -> Self {
-        Self {
-            client_id,
-            device_id,
-        }
-    }
-
-    /// Build a peer key from a connected Nexo client payload.
-    ///
-    /// # Arguments
-    ///
-    /// * `client` - The domain-level client payload received during connect.
-    pub fn from_client(client: &NexoClient) -> Self {
-        Self::new(client.client().id, client.device().id)
-    }
-
-    /// Return the stable client identifier.
-    ///
-    /// # Arguments
-    ///
-    /// This function takes no arguments.
-    pub fn client_id(&self) -> Uuid {
-        self.client_id
-    }
-
-    /// Return the stable device identifier.
-    ///
-    /// # Arguments
-    ///
-    /// This function takes no arguments.
-    pub fn device_id(&self) -> Uuid {
-        self.device_id
-    }
-}
 
 /// State owned by a single WebSocket connection task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,7 +22,7 @@ enum GatewayConnectionState {
     /// The connection is bound to a Nexo peer.
     Connected {
         /// Stable live peer key for this connection.
-        peer_key: PeerKey,
+        peer_id: PeerId,
 
         /// Domain-level client kind bound to this connection.
         kind: NexoClientKind,
@@ -83,7 +34,7 @@ enum GatewayConnectionState {
 
 /// Result of handling one inbound gateway frame.
 #[derive(Debug, Clone, PartialEq)]
-pub enum GatewayFrameOutcome {
+enum GatewayFrameOutcome {
     /// Send a reply frame and keep the connection open.
     Reply(Frame),
 
@@ -109,7 +60,11 @@ pub struct NexoGateway {
     config: GatewayProperties,
 
     /// Connected peers by stable `(client_id, device_id)` key.
-    peers: Arc<Mutex<HashMap<PeerKey, NexoClient>>>,
+    peers: Arc<Mutex<HashMap<PeerId, NexoClient>>>,
+    // Agent
+    // agent: NexoAgent,
+    // agent_tx: tokio::sync::mpsc::Sender<NexoAgentCommand>,
+    // agent_rx: tokio::sync::mpsc::Receiver<NexoAgentEvent>,
 }
 
 impl NexoGateway {
@@ -119,6 +74,16 @@ impl NexoGateway {
     ///
     /// * `config` - Gateway runtime configuration, including bind address and auth token.
     pub fn new(config: GatewayProperties) -> Self {
+        let agent = NexoAgent::new();
+
+        // Need to think about the interface into nexo agent. Basically
+        // we only need the tx/rx channel here in NexoGateway, NexoAgent
+        // should be on a thread separately managing it's own internal state/concurrency
+        // let (agent_tx, agent_rx) = tokio::sync::mpsc::channel(100);
+        // let (agent_tx, agent_rx) = agent.start();
+        // agent.start(agent_tx, agent_rx);
+        agent.start();
+
         Self {
             config,
             peers: Arc::new(Mutex::new(HashMap::new())),
@@ -168,7 +133,7 @@ impl NexoGateway {
     ///
     /// * `state` - Mutable per-connection protocol state for the socket that received the frame.
     /// * `frame` - The incoming gateway frame to parse and handle.
-    fn handle_frame(
+    async fn handle_frame(
         &self,
         state: &mut GatewayConnectionState,
         frame: Frame,
@@ -178,7 +143,7 @@ impl NexoGateway {
             GatewayConnectionState::Connected { kind, .. } => match kind {
                 NexoClientKind::User => {
                     let (_, message) = frame.into_parts::<UserToGatewayMessage>()?;
-                    self.handle_user_message(state, message)
+                    self.handle_user_message(state, message).await
                 }
                 NexoClientKind::Node => {
                     let (_, message) = frame.into_parts::<NodeToGatewayMessage>()?;
@@ -195,12 +160,12 @@ impl NexoGateway {
     ///
     /// # Arguments
     ///
-    /// * `peer_key` - Stable `(client_id, device_id)` key for the connected peer.
-    pub fn peer(&self, peer_key: PeerKey) -> Option<NexoClient> {
+    /// * `peer_id` - Stable `(client_id, device_id)` key for the connected peer.
+    pub fn peer(&self, peer_id: PeerId) -> Option<NexoClient> {
         self.peers
             .lock()
             .ok()
-            .and_then(|peers| peers.get(&peer_key).cloned())
+            .and_then(|peers| peers.get(&peer_id).cloned())
     }
 
     /// Handle the first application frame for a socket that has not connected yet.
@@ -233,15 +198,15 @@ impl NexoGateway {
         state: &mut GatewayConnectionState,
         request: ConnectRequest,
     ) -> Result<GatewayFrameOutcome> {
-        let peer_key = PeerKey::from_client(&request.client);
+        let peer_id = PeerId::from_client(&request.client);
 
         let kind = request.client.kind();
         self.peers
             .lock()
             .map_err(|_| crate::Error::InvalidPeerState("peer state lock poisoned".into()))?
-            .insert(peer_key, request.client.clone());
+            .insert(peer_id, request.client.clone());
 
-        *state = GatewayConnectionState::Connected { peer_key, kind };
+        *state = GatewayConnectionState::Connected { peer_id, kind };
 
         Ok(match request.client {
             NexoClient::Node(properties) => {
@@ -266,7 +231,7 @@ impl NexoGateway {
     ///
     /// * `state` - Mutable per-connection state for the user socket.
     /// * `message` - Parsed user-to-gateway protocol message.
-    fn handle_user_message(
+    async fn handle_user_message(
         &self,
         state: &mut GatewayConnectionState,
         message: UserToGatewayMessage,
@@ -280,6 +245,11 @@ impl NexoGateway {
                 Ok(GatewayFrameOutcome::CloseAfterReply(Frame::new(
                     GatewayToUserMessage::Disconnect(NexoResponse::completed(request.operation_id)),
                 )?))
+            }
+            UserToGatewayMessage::StartInferenceRun(request) => {
+                todo!("Send this through to the NexoAgent so it can be queued.");
+                // self.agent.run(request).await?;
+                Ok(GatewayFrameOutcome::NoReply)
             }
             other => {
                 let name: &'static str = (&other).into();
@@ -318,13 +288,34 @@ impl NexoGateway {
         }
     }
 
+    /// Handle a message received from the NexoAgent
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Mutable per-connection state for the node socket.
+    /// * `message` - Parsed node-to-gateway protocol message.
+    fn handle_agent_message(
+        &self,
+        state: &mut GatewayConnectionState,
+        message: NexoAgentOutput,
+    ) -> Result<GatewayFrameOutcome> {
+        match message {
+            NexoAgentOutput::StartInferenceRun(node_id, request) => {
+                todo!("Send this through to the Node.");
+            }
+            other => {
+                todo!("Handle other NexoAgentOutput messages");
+            }
+        }
+    }
+
     /// Remove a connected peer from live gateway state.
     ///
     /// # Arguments
     ///
     /// * `state` - Mutable per-connection state that identifies the peer to remove.
     fn disconnect_peer(&self, state: &mut GatewayConnectionState) -> Result {
-        let GatewayConnectionState::Connected { peer_key, kind } = state else {
+        let GatewayConnectionState::Connected { peer_id, kind } = state else {
             return Err(crate::Error::InvalidPeerState(
                 "disconnect received before peer was connected".into(),
             ));
@@ -334,10 +325,10 @@ impl NexoGateway {
             .peers
             .lock()
             .map_err(|_| crate::Error::InvalidPeerState("peer state lock poisoned".into()))?
-            .remove(peer_key)
+            .remove(peer_id)
             .is_some()
         {
-            info!(kind = %kind, client_id = %peer_key.client_id(), device_id = %peer_key.device_id(), "Peer disconnected");
+            info!(kind = %kind, client_id = %peer_id.client_id(), device_id = %peer_id.device_id(), "Peer disconnected");
         }
         *state = GatewayConnectionState::Disconnected;
         Ok(())
@@ -368,7 +359,7 @@ impl NexoGateway {
                 }
             };
 
-            match self.handle_frame(&mut state, frame) {
+            match self.handle_frame(&mut state, frame).await {
                 Ok(GatewayFrameOutcome::Reply(frame)) => {
                     if let Err(error) = send_frame(&mut ws_stream, &frame).await {
                         tracing::warn!(error = ?error, "Failed to send gateway reply");
@@ -473,15 +464,15 @@ mod tests {
         operation_id
     }
 
-    #[test]
-    fn user_connect_binds_peer_and_preserves_operation_id() {
+    #[tokio::test]
+    async fn user_connect_binds_peer_and_preserves_operation_id() {
         let gateway = gateway();
         let mut state = GatewayConnectionState::AwaitingConnect;
         let request = ConnectRequest::new(user_client());
         let expected_operation_id = request.operation_id;
         let frame = Frame::new(UserToGatewayMessage::Connect(request)).unwrap();
 
-        let outcome = gateway.handle_frame(&mut state, frame).unwrap();
+        let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
         let GatewayFrameOutcome::Reply(reply) = outcome else {
             panic!("expected connect reply")
@@ -490,32 +481,32 @@ mod tests {
             operation_id_from_user_connect(&reply),
             expected_operation_id
         );
-        let GatewayConnectionState::Connected { peer_key, kind } = state else {
+        let GatewayConnectionState::Connected { peer_id, kind } = state else {
             panic!("expected connected state")
         };
         assert_eq!(kind, NexoClientKind::User);
-        assert_eq!(gateway.peer(peer_key).unwrap().kind(), NexoClientKind::User);
+        assert_eq!(gateway.peer(peer_id).unwrap().kind(), NexoClientKind::User);
     }
 
-    #[test]
-    fn node_connect_binds_node_kind() {
+    #[tokio::test]
+    async fn node_connect_binds_node_kind() {
         let gateway = gateway();
         let mut state = GatewayConnectionState::AwaitingConnect;
         let request = ConnectRequest::new(node_client());
         let frame = Frame::new(NodeToGatewayMessage::Connect(request)).unwrap();
 
-        let outcome = gateway.handle_frame(&mut state, frame).unwrap();
+        let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
         assert!(matches!(outcome, GatewayFrameOutcome::Reply(_)));
-        let GatewayConnectionState::Connected { peer_key, kind } = state else {
+        let GatewayConnectionState::Connected { peer_id, kind } = state else {
             panic!("expected connected state")
         };
         assert_eq!(kind, NexoClientKind::Node);
-        assert_eq!(gateway.peer(peer_key).unwrap().kind(), NexoClientKind::Node);
+        assert_eq!(gateway.peer(peer_id).unwrap().kind(), NexoClientKind::Node);
     }
 
-    #[test]
-    fn first_connect_is_classified_by_nexo_client_kind() {
+    #[tokio::test]
+    async fn first_connect_is_classified_by_nexo_client_kind() {
         let gateway = gateway();
         let mut state = GatewayConnectionState::AwaitingConnect;
         let frame = Frame::new(UserToGatewayMessage::Connect(ConnectRequest::new(
@@ -523,7 +514,7 @@ mod tests {
         )))
         .unwrap();
 
-        let outcome = gateway.handle_frame(&mut state, frame).unwrap();
+        let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
         assert!(matches!(outcome, GatewayFrameOutcome::Reply(_)));
         let GatewayConnectionState::Connected { kind, .. } = state else {
@@ -532,24 +523,27 @@ mod tests {
         assert_eq!(kind, NexoClientKind::Node);
     }
 
-    #[test]
-    fn disconnect_removes_peer_and_closes_after_reply() {
+    #[tokio::test]
+    async fn disconnect_removes_peer_and_closes_after_reply() {
         let gateway = gateway();
         let mut state = GatewayConnectionState::AwaitingConnect;
         let connect_frame = Frame::new(UserToGatewayMessage::Connect(ConnectRequest::new(
             user_client(),
         )))
         .unwrap();
-        gateway.handle_frame(&mut state, connect_frame).unwrap();
-        let GatewayConnectionState::Connected { peer_key, .. } = state else {
+        gateway
+            .handle_frame(&mut state, connect_frame)
+            .await
+            .unwrap();
+        let GatewayConnectionState::Connected { peer_id, .. } = state else {
             panic!("expected connected state")
         };
-        assert!(gateway.peer(peer_key).is_some());
+        assert!(gateway.peer(peer_id).is_some());
         let disconnect = DisconnectRequest::new();
         let expected_operation_id = disconnect.operation_id;
         let frame = Frame::new(UserToGatewayMessage::Disconnect(disconnect)).unwrap();
 
-        let outcome = gateway.handle_frame(&mut state, frame).unwrap();
+        let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
         let GatewayFrameOutcome::CloseAfterReply(reply) = outcome else {
             panic!("expected close-after-reply")
@@ -562,16 +556,16 @@ mod tests {
         };
         assert_eq!(operation_id, expected_operation_id);
         assert_eq!(state, GatewayConnectionState::Disconnected);
-        assert!(gateway.peer(peer_key).is_none());
+        assert!(gateway.peer(peer_id).is_none());
     }
 
-    #[test]
-    fn first_frame_must_be_connect() {
+    #[tokio::test]
+    async fn first_frame_must_be_connect() {
         let gateway = gateway();
         let mut state = GatewayConnectionState::AwaitingConnect;
         let frame = Frame::new(UserToGatewayMessage::Disconnect(DisconnectRequest::new())).unwrap();
 
-        let error = gateway.handle_frame(&mut state, frame).unwrap_err();
+        let error = gateway.handle_frame(&mut state, frame).await.unwrap_err();
 
         assert!(matches!(error, crate::Error::InvalidPeerState(_)));
         assert_eq!(state, GatewayConnectionState::AwaitingConnect);
@@ -609,7 +603,7 @@ mod tests {
             .await
             .unwrap();
 
-        let key = PeerKey::new(user.client().id, user.device().id);
+        let key = PeerId::new(user.client().id, user.device().id);
         assert_eq!(gateway.peer(key).unwrap().kind(), NexoClientKind::User);
 
         let disconnect = DisconnectRequest::new();

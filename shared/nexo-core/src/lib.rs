@@ -33,19 +33,22 @@ pub mod system;
 
 pub use common::{PageInfo, PageRequest, Timestamp};
 pub use error::{Error, Result};
-pub use ids::{FrameId, ModelId, NodeId, OperationId, RoundId, RunId, SessionId, ToolCallId};
+pub use ids::{
+    FrameId, ModelId, NodeId, OperationId, PeerId, RoundId, RunId, SessionId, ToolCallId,
+};
 pub use inference::{
-    ArtifactIndex, AudioFormat, DetokenizationDelta, DetokenizationPayload, DetokenizationResponse,
-    EmbedPayload, EmbedResponse, EmbeddingDelta, EmbeddingVector, FinishReason, GenerateDelta,
-    GeneratedAudio, GenerationPromptPolicy, ImageDelta, ImageGenerationPayload,
-    ImageGenerationResponse, ImageGenerationSize, InferenceCancelled, InferenceCompleted,
-    InferenceErrorCode, InferenceFailed, InferenceFailure, InferenceFinal, InferenceMeta,
-    InferenceOperation, InferenceOperationKind, InferenceOutput, InferenceProgress,
-    InferenceRequest, InferenceStarted, InferenceStream, InferenceUpdate, ModelSelection,
-    MultiModalDelta, MultiModalResponse, OutputConstraint, OutputOffsetBytes, PerformanceMetrics,
-    Retryability, SamplingConfig, Session, Sessions, SpecialTokenPolicy, SpeechDelta,
-    SpeechGenerationPayload, SpeechGenerationResponse, SpeechLanguage, StreamSeq, StreamingMode,
-    TokenUsage, TokenizationDelta, TokenizationPayload, TokenizationResponse,
+    ArtifactIndex, AudioFormat, CompactionRequest, DetokenizationDelta, DetokenizationPayload,
+    DetokenizationResponse, EmbedPayload, EmbedResponse, EmbeddingDelta, EmbeddingVector,
+    FinishReason, GenerateDelta, GeneratedAudio, GenerationPromptPolicy, ImageDelta,
+    ImageGenerationPayload, ImageGenerationResponse, ImageGenerationSize, InferenceCancelled,
+    InferenceCompleted, InferenceErrorCode, InferenceFailed, InferenceFailure, InferenceIntent,
+    InferenceMeta, InferenceOperation, InferenceOperationKind, InferenceOutput,
+    InferenceOutputDelta, InferenceProgress, InferenceRequest, InferenceStarted, InferenceStream,
+    InferenceUpdate, ModelSelection, MultiModalDelta, MultiModalResponse, OutputConstraint,
+    OutputOffsetBytes, PerformanceMetrics, Retryability, SamplingConfig, Session, Sessions,
+    SpecialTokenPolicy, SpeechDelta, SpeechGenerationPayload, SpeechGenerationResponse,
+    SpeechLanguage, StreamSeq, StreamingMode, TokenUsage, TokenizationDelta, TokenizationPayload,
+    TokenizationResponse,
 };
 pub use message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
@@ -61,7 +64,7 @@ pub use model::{
 // };
 pub use system::{
     ClientInfo, DeviceInfo, GatewayProperties, NexoClient, NexoClientKind, NexoNodeMetrics,
-    NexoState, NodeProperties, Platform, ProtocolInfo, Scope, UserProperties,
+    NexoState, Node, NodeProperties, Platform, ProtocolInfo, Scope, User, UserProperties,
 };
 pub use tools::{
     Tool, ToolCall, ToolCallDelta, ToolChoice, ToolDefinition, ToolExecutionConstraints,

@@ -1,15 +1,14 @@
-use crate::engine::mistralrs::mapping::message::{map_generate_message, MessageMapping};
-use crate::engine::mistralrs::mapping::tools::{map_tool_choice, map_tool_definitions};
 use crate::Result;
+use crate::engine::mistralrs::mapping::message::{MessageMapping, map_generate_message};
+use crate::engine::mistralrs::mapping::tools::{map_tool_choice, map_tool_definitions};
 use mistralrs_core::{
-    Constraint, NormalRequest, ReasoningEffort as MistralReasoningEffort, RequestMessage,
-    Response, SamplingParams, StopTokens,
-};
-use nexo_core::{
-    InferenceRequest, ModelDefinition, OutputConstraint, SamplingConfig, StreamingMode,
-    ThinkingMode,
+    Constraint, NormalRequest, ReasoningEffort as MistralReasoningEffort, RequestMessage, Response,
+    SamplingParams, StopTokens,
 };
 use nexo_core::inference::requests::MultiModalPayload;
+use nexo_core::{
+    InferenceIntent, ModelDefinition, OutputConstraint, SamplingConfig, StreamingMode, ThinkingMode,
+};
 use tokio::sync::mpsc;
 
 /// Maps a shared multimodal request into a Mistral.rs normal request.
@@ -22,7 +21,7 @@ use tokio::sync::mpsc;
 /// * `response` - The one-shot response channel consumed by Mistral.rs.
 /// * `request_ordinal` - The monotonically increasing request ordinal required by Mistral.rs.
 pub(crate) fn map_multimodal_request(
-    request: &InferenceRequest,
+    request: &InferenceIntent,
     payload: &MultiModalPayload,
     descriptor: &ModelDefinition,
     response: mpsc::Sender<Response>,

@@ -3,8 +3,8 @@ use mistralrs_core::{
     CompletionResponse, Delta, Response, ResponseMessage, ResponseOk, ToolCallResponse,
 };
 use nexo_core::{
-    ContentPart, ConversationMessage, FinishReason, InferenceFinal, InferenceMeta,
-    InferenceOutput, InferenceUpdate, MessageRole, MultiModalDelta, MultiModalResponse,
+    ContentPart, ConversationMessage, FinishReason, InferenceOutput, InferenceMeta,
+    InferenceOutputDelta, InferenceUpdate, MessageRole, MultiModalDelta, MultiModalResponse,
     PerformanceMetrics, StreamSeq, TokenUsage, ToolCall, ToolCallDelta,
 };
 
@@ -23,21 +23,21 @@ pub(crate) fn map_multimodal_response(
     match response.as_result() {
         Ok(ResponseOk::Done(done)) => Ok(InferenceUpdate::completed(
             meta.clone(),
-            InferenceFinal::MultiModal(map_chat_done(done)),
+            InferenceOutput::MultiModal(map_chat_done(done)),
         )),
         Ok(ResponseOk::Chunk(chunk)) => Ok(InferenceUpdate::progress(
             meta.clone(),
             seq,
-            InferenceOutput::MultiModal(map_chat_chunk(chunk)),
+            InferenceOutputDelta::MultiModal(map_chat_chunk(chunk)),
         )),
         Ok(ResponseOk::CompletionDone(done)) => Ok(InferenceUpdate::completed(
             meta.clone(),
-            InferenceFinal::MultiModal(map_completion_done(done)),
+            InferenceOutput::MultiModal(map_completion_done(done)),
         )),
         Ok(ResponseOk::CompletionChunk(chunk)) => Ok(InferenceUpdate::progress(
             meta.clone(),
             seq,
-            InferenceOutput::MultiModal(map_completion_chunk(chunk)),
+            InferenceOutputDelta::MultiModal(map_completion_chunk(chunk)),
         )),
         Ok(ResponseOk::ImageGeneration(_)) => Ok(InferenceUpdate::failed(
             meta.clone(),

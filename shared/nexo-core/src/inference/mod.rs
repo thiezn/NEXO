@@ -2,16 +2,16 @@
 
 /// Structured inference failure types.
 pub mod errors;
-/// Inference final result variants.
-pub mod final_output;
 /// Completion finish reason types.
 pub mod finish;
+/// Inference request variants and request payloads.
+pub mod intent;
 /// Inference execution metadata.
 pub mod meta;
 /// Inference stream ordering types.
 pub mod ordering;
-/// Inference request variants and request payloads.
-pub mod request;
+/// Inference final result variants.
+pub mod output;
 /// Inference final response payloads.
 pub mod responses;
 /// Sampling, streaming, and output constraint settings.
@@ -32,12 +32,20 @@ pub mod selection;
 /// Inference session types.
 pub mod session;
 
+/// Inference compaction request types.
+pub mod compaction;
+
+/// Inference request types.
+pub mod request;
+
+pub use compaction::CompactionRequest;
 pub use errors::{InferenceErrorCode, InferenceFailure, Retryability};
-pub use final_output::InferenceFinal;
 pub use finish::FinishReason;
+pub use intent::{InferenceIntent, InferenceOperation, InferenceOperationKind};
 pub use meta::InferenceMeta;
 pub use ordering::{ArtifactIndex, OutputOffsetBytes, StreamSeq};
-pub use request::{InferenceOperation, InferenceOperationKind, InferenceRequest};
+pub use output::InferenceOutput;
+pub use request::InferenceRequest;
 pub use requests::{
     AudioFormat, DetokenizationPayload, EmbedPayload, GenerationPromptPolicy,
     ImageGenerationPayload, ImageGenerationSize, MultiModalPayload, SpecialTokenPolicy,
@@ -54,7 +62,7 @@ pub use stream::GenerateDelta;
 pub use stream::InferenceStream;
 pub use update::{
     DetokenizationDelta, EmbeddingDelta, ImageDelta, InferenceCancelled, InferenceCompleted,
-    InferenceFailed, InferenceOutput, InferenceProgress, InferenceStarted, InferenceUpdate,
+    InferenceFailed, InferenceOutputDelta, InferenceProgress, InferenceStarted, InferenceUpdate,
     MultiModalDelta, SpeechDelta, TokenizationDelta,
 };
 pub use usage::{PerformanceMetrics, TokenUsage};

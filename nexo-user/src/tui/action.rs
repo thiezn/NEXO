@@ -1,9 +1,8 @@
 use crate::{Error, Result};
 use nexo_core::inference::MultiModalPayload;
 use nexo_core::{
-    ContentPart, ConversationMessage, InferenceOperation, InferenceRequest, MessageRole,
-    ModelCapability, ModelSelection, NexoClient, OperationId, ReasoningSettings, RoundId,
-    RunId, SessionId, ToolChoice,
+    ConversationMessage, InferenceIntent, InferenceOperation, ModelCapability, ModelSelection,
+    NexoClient, OperationId, ReasoningSettings, SessionId, ToolChoice,
 };
 use nexo_ws_schema::{CancelRequest, ConnectRequest, DisconnectRequest, UserToGatewayMessage};
 use strum::IntoStaticStr;
@@ -41,7 +40,7 @@ pub enum TuiAction {
     /// Requests that a new inference run be started.
     StartInferenceRun {
         /// The fully typed inference request to submit to the gateway.
-        request: InferenceRequest,
+        request: InferenceIntent,
     },
 
     /// Requests that a previously submitted operation be cancelled.
@@ -66,9 +65,7 @@ impl TuiAction {
             Self::RefreshState => UserToGatewayMessage::GetState,
             Self::ListSessions => UserToGatewayMessage::ListSessions,
             Self::GetSession { session_id } => UserToGatewayMessage::GetSession { session_id },
-            Self::ClearSession { session_id } => {
-                UserToGatewayMessage::ClearSession { session_id }
-            }
+            Self::ClearSession { session_id } => UserToGatewayMessage::ClearSession { session_id },
             Self::StartInferenceRun { request } => UserToGatewayMessage::StartInferenceRun(request),
             Self::Cancel { operation_id } => {
                 UserToGatewayMessage::Cancel(CancelRequest { operation_id })
@@ -90,11 +87,9 @@ impl TuiAction {
             }));
         }
 
-        let request = InferenceRequest {
+        let request = InferenceIntent {
             operation_id: OperationId::new(),
             session_id: session_id.unwrap_or_else(SessionId::new),
-            run_id: RunId::new(),
-            round_id: RoundId::new("round-1".into()),
             model_selection: ModelSelection::Capabilities(vec![
                 ModelCapability::TextGeneration,
                 ModelCapability::ToolCalling,
@@ -102,10 +97,7 @@ impl TuiAction {
                 ModelCapability::Streaming,
             ]),
             operation: InferenceOperation::MultiModal(MultiModalPayload::new_round(
-                vec![ConversationMessage {
-                    role: MessageRole::User,
-                    parts: vec![ContentPart::Text(trimmed_prompt.to_owned())],
-                }],
+                vec![ConversationMessage::new_text(trimmed_prompt)],
                 Vec::new(),
                 ToolChoice::Automatic,
                 ReasoningSettings::default(),

@@ -2,7 +2,7 @@ use crate::catalog::ModelManifest;
 use crate::{Error, Result};
 use futures_util::{StreamExt, stream};
 use nexo_core::{
-    AudioFormat, GeneratedAudio, InferenceFinal, InferenceMeta, InferenceOperation,
+    AudioFormat, GeneratedAudio, InferenceMeta, InferenceOperation, InferenceOutput,
     InferenceRequest, InferenceStream, InferenceUpdate, MediaSource, ModelId, ModelRuntimeState,
     SpeechGenerationPayload, SpeechGenerationResponse,
 };
@@ -101,7 +101,7 @@ impl AnyTtsRuntime {
 
         match model_id {
             ModelId::Kokoro82m => {
-                let meta = InferenceMeta::from_request_and_model(&request, model_id.clone());
+                let meta = InferenceMeta::from_request(&request);
                 match request.operation {
                     InferenceOperation::GenerateSpeech(payload) => {
                         self.infer_speech_generation(meta, payload).await
@@ -160,7 +160,7 @@ impl AnyTtsRuntime {
 
                 Ok(InferenceUpdate::completed(
                     meta,
-                    InferenceFinal::GenerateSpeech(speech),
+                    InferenceOutput::GenerateSpeech(speech),
                 ))
             })
             .await

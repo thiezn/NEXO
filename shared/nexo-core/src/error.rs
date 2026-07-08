@@ -21,6 +21,13 @@ pub enum Error {
         feature: String,
     },
 
+    /// A peer (user or node) is already connected.
+    #[error("peer already connected: {message}")]
+    PeerAlreadyConnected {
+        /// The human-readable validation error message.
+        message: String,
+    },
+
     /// The target service is in a state that prevents the requested operation.
     #[error("invalid state: {message}")]
     InvalidState {

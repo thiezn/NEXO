@@ -12,7 +12,7 @@ use mistralrs_core::{
 };
 use nexo_core::inference::requests::MultiModalPayload;
 use nexo_core::{
-    EmbedResponse, EmbeddingVector, InferenceFinal, InferenceMeta, InferenceOperation,
+    EmbedResponse, EmbeddingVector, InferenceOutput, InferenceMeta, InferenceOperation,
     InferenceRequest, InferenceStream, InferenceUpdate, ModelId, ModelRuntimeState, StreamSeq,
 };
 use std::num::NonZeroUsize;
@@ -117,7 +117,7 @@ impl MistralRsRuntime {
             });
         }
 
-        let meta = InferenceMeta::from_request_and_model(&request, model_id.clone());
+        let meta = InferenceMeta::from_request(&request);
         match request.operation.clone() {
             InferenceOperation::MultiModal(payload) => {
                 self.infer_multimodal(model_id, request, meta, payload)
@@ -266,7 +266,7 @@ impl MistralRsRuntime {
                 }
             }
 
-            let final_output = InferenceFinal::Embed(EmbedResponse {
+            let final_output = InferenceOutput::Embed(EmbedResponse {
                 vectors,
                 usage: Some(usage),
             });

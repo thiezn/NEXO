@@ -38,6 +38,15 @@ pub enum GatewayToNodeMessage {
     },
 
     /// A request to run an inference operation with the specified parameters.
+    ///
+    /// TODO: this is NOT complete yet! A better model would be to ensure
+    /// that the request here is the FULLY PREPARED REQUEST INCLUDING SYSTEM
+    /// PROMPT AND ACTUAL MODEL ID. The InferenceRequest as it stands
+    /// now should only be between the user and gateway. The gateway
+    /// will then collect the required context, model selection and make
+    /// it into a concrete request to the node. The node should not be responsible for
+    /// doing model selection or system prompt injection, it should just run the
+    /// request as-is.
     StartInferenceRun {
         /// The unique identifier for the inference operation to be started.
         operation_id: OperationId,

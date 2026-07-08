@@ -14,7 +14,8 @@ Even afgeleid van MRPF (wilde alleen maar heeeel even een logootje genereren, ve
 
 ## All kinds of random things to do
 
-
+-I want the iOS app to be able to compose a new session. I should be able to semantic search through all my previous sessions, session summaries, skills, knowledge base, andej wiki etc. I can then select full blobs, select partial sentences, add own context, ask it to summarize parts of it. Then finally when satisfied, I can commit the session and ask my first question.
+- Read edit tool blog from Pi. Some nice simple ideas https://x.com/mitsuhiko/status/2072955230862332106
 - Image and audio generation should be tool calls. nexo-node could check on initialization if it has models with this capability and if so, initialize the tools in it's registry.
 - Add a models check cli command. That will go to a hugging face repo and get all the files and sha256 hashes and sizes. It will make it easier to build the manifests.
 - The coding ask/agent/plan modes are not the right mode. What I think I would want is to have a smart enough model that I can talk to, it will ask me questions when needed, I can ask it to present me with diagrams/explanations on things, make code changes and get it to explain them to me, possibly with diff view a summary of changes, diagrams, videos etc. It should feel like an acatual engineering meeting but where you are actually implementing and revising the architecture and implementation during. Meetings now are just deffered action, as you don't have enough time/capacity to implement things during the meeting. With AI, it should be possible to act on hypotheses and ideas during the meeting, get feedback and iterate. a LOT of decisions can be solved DURING the meeting, only the very large (or perhaps physical world) things need to be deferred.

@@ -43,6 +43,7 @@ git2 = { version = "0", features = ["https", "ssh"] }
 anyhow = { workspace = true }
 nexo-notes = { path = "../nexo-tools/nexo-notes" }
 nexo-io = { path = "../nexo-tools/nexo-io" }
+strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"

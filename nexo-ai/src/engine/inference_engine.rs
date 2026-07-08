@@ -4,7 +4,7 @@ use crate::{Error, Result};
 use nexo_core::{InferenceRequest, InferenceStream, ModelDefinition, ModelId, ModelRuntimeState};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{Mutex, watch};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// The runtime implementation for a specific model.
 ///
@@ -75,7 +75,8 @@ struct ModelHandle {
 /// The inner state of a ModelHandle, containing the command channel and state receiver for the model runtime task.
 ///
 /// This separation allows the ModelHandle to provide a clean public API for interacting with the model, while
-/// encapsulating the internal mutable state of the ModelHandle within a separate struct. The inner struct is wrapped in an Arc to allow for shared ownership and thread-safe access across multiple tasks.
+/// encapsulating the internal mutable state of the ModelHandle within a separate struct. The inner struct is wrapped in
+/// an Arc to allow for shared ownership and thread-safe access across multiple tasks.
 struct InnerModelHandle {
     /// Current state of the model
     state: ModelRuntimeState,
@@ -84,8 +85,7 @@ struct InnerModelHandle {
     /// instead of trying to leverage the multi-model support of MistralRs, as that would introduce
     /// unnecessary complexity.
     ///
-    /// This choice might have to be revisited in the future if it turns out this causes a lot
-    /// of overhead.
+    /// This choice might have to be revisited in the future if it turns out this causes a lot of overhead.
     runtime: ModelRuntime,
 }
 
@@ -267,6 +267,7 @@ impl InferenceEngine {
         if let Some(handle) = self.models.get(model_id) {
             handle.load().await
         } else {
+            error!(model_id = %model_id, "Attempted to load unknown model, make sure it's downloaded and available locally");
             Err(Error::UnknownModel {
                 model_id: model_id.clone(),
             })
@@ -278,6 +279,7 @@ impl InferenceEngine {
         if let Some(handle) = self.models.get(model_id) {
             handle.unload().await
         } else {
+            error!(model_id = %model_id, "Attempted to unload unknown model, make sure it's downloaded and available locally");
             Err(Error::UnknownModel {
                 model_id: model_id.clone(),
             })
@@ -300,13 +302,12 @@ impl InferenceEngine {
 
         // Route to the appropriate model runtime based on the payload's model selection criteria
         // and the currently loaded models.
-        let model_id = request.model(self.model_definitions())?;
 
-        if let Some(handle) = self.models.get(&model_id) {
+        if let Some(handle) = self.models.get(&request.model_id) {
             handle.infer(request).await
         } else {
             Err(Error::ModelNotLoaded {
-                model_id: model_id.clone(),
+                model_id: request.model_id,
                 current_state: ModelRuntimeState::Unloaded,
             })
         }

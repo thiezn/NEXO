@@ -2,7 +2,7 @@ use crate::Result;
 use futures_util::StreamExt;
 use nexo_ai::InferenceEngine;
 use nexo_core::{
-    InferenceRequest, ModelId, NexoClient, NodeProperties, OperationId, ToolCall, ToolRegistry,
+    InferenceIntent, ModelId, NexoClient, NodeProperties, OperationId, ToolCall, ToolRegistry,
 };
 use nexo_ws_client::NexoConnection;
 use nexo_ws_schema::{
@@ -70,7 +70,7 @@ impl NexoNode {
                     frame = conn.recv_frame() => {
                         match frame {
                             Ok(frame) => {
-                                self.handle_frame(frame, tx.clone()).await?;
+                                self.handle_frame(frame, &tx).await?;
                             }
                             Err(e) => {
                                 error!("Websocket receive error: {e}");
@@ -109,7 +109,7 @@ impl NexoNode {
     ///
     /// The obvious candidates for offloading are inference and tool call operations, which
     /// can take a long time to complete.
-    async fn handle_frame(&self, frame: Frame, tx: Sender<NodeToGatewayMessage>) -> Result {
+    async fn handle_frame(&self, frame: Frame, tx: &Sender<NodeToGatewayMessage>) -> Result {
         let (frame_id, payload) = frame.into_parts::<GatewayToNodeMessage>()?;
         info!(frame_id = ?frame_id, "Received frame");
 
@@ -322,8 +322,7 @@ async fn start_inference_run(
     request: InferenceRequest,
     tx: mpsc::Sender<NodeToGatewayMessage>,
 ) -> Result {
-    let model_id = request.model(engine.model_definitions())?.clone();
-    let failure_meta = nexo_core::InferenceMeta::from_request_and_model(&request, model_id);
+    let failure_meta = nexo_core::InferenceMeta::from_request(&request);
     let mut stream = engine.run_inference(request).await?;
 
     while let Some(item) = stream.next().await {

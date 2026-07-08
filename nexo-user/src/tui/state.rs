@@ -273,7 +273,7 @@ impl NexoUserState {
         &mut self,
         event: &nexo_ws_schema::NexoEvent<nexo_ws_schema::InferenceRunEvent>,
     ) {
-        use nexo_core::InferenceOutput;
+        use nexo_core::InferenceOutputDelta;
         use nexo_ws_schema::InferenceRunEvent;
 
         match event {
@@ -315,7 +315,7 @@ impl NexoUserState {
                     );
                 }
                 InferenceRunEvent::Output { output, .. } => match output {
-                    InferenceOutput::MultiModal(delta) => {
+                    InferenceOutputDelta::MultiModal(delta) => {
                         if let Some(reasoning_delta) = &delta.reasoning_delta {
                             self.push_history(
                                 HistorySource::Inference,

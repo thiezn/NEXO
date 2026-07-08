@@ -75,8 +75,6 @@ impl Tool for BashTool {
                 let exit_code = output.status.code().unwrap_or(-1);
                 let stdout = transform::ansi::strip_ansi(&String::from_utf8_lossy(&output.stdout));
                 let stderr = transform::ansi::strip_ansi(&String::from_utf8_lossy(&output.stderr));
-                let stdout = transform::truncate::truncate_lines(&stdout, 500);
-                let stderr = transform::truncate::truncate_lines(&stderr, 500);
 
                 let mut out = format!("exit_code: {exit_code}\n");
                 if !stdout.trim().is_empty() {

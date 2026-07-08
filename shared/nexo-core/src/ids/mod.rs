@@ -19,10 +19,13 @@ pub mod session_id;
 /// The strong type used for tool call identifiers.
 pub mod tool_call_id;
 
+pub mod peer_id;
+
 pub use frame_id::FrameId;
 pub use model_id::ModelId;
 pub use node_id::NodeId;
 pub use operation_id::OperationId;
+pub use peer_id::PeerId;
 pub use round_id::RoundId;
 pub use run_id::RunId;
 pub use session_id::SessionId;

@@ -1,4 +1,4 @@
-use nexo_core::{InferenceMeta, InferenceOutput, InferenceUpdate, ModelId, StreamSeq};
+use nexo_core::{InferenceMeta, InferenceOutputDelta, InferenceUpdate, ModelId, StreamSeq};
 use serde::{Deserialize, Serialize};
 
 /// The events that can be emitted related to an operation started by a StartInferenceRun request.
@@ -30,7 +30,7 @@ pub enum InferenceRunEvent {
         seq: StreamSeq,
 
         /// The typed output generated for the inference request.
-        output: InferenceOutput,
+        output: InferenceOutputDelta,
     },
 
     /// The inference request has completed successfully and all output has been generated.

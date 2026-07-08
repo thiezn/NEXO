@@ -11,8 +11,6 @@ pub mod code_filter;
 pub mod html;
 /// JSON formatting and compaction helpers.
 pub mod json;
-/// Output truncation helpers for large payloads.
-pub mod truncate;
 
 static MULTIPLE_BLANK_LINES: LazyLock<Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r"\n{3,}"));

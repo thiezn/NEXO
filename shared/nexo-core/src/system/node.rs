@@ -1,9 +1,109 @@
-use crate::{ModelCapability, ModelId, ToolDefinition};
+use crate::{ModelCapability, ModelId, PeerId, ToolDefinition};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use super::{ClientInfo, DeviceInfo, ProtocolInfo};
+/// A single active Node in the Nexo Gateway.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+pub struct Node {
+    /// Unique identifier for this node, derived from stable client and device identifiers.
+    id: PeerId,
+
+    /// The current state of the node.
+    state: NodeState,
+
+    /// Tool definitions exposed by this node.
+    #[serde(default)]
+    tools: HashSet<ToolDefinition>,
+
+    /// Model IDs available on disk for this node.
+    #[serde(default)]
+    models_on_disk: HashSet<ModelId>,
+
+    /// All models currently loaded in memory for this node.
+    #[serde(default)]
+    models_in_memory: HashSet<ModelId>,
+
+    /// Connected at
+    connected_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl Node {
+    /// Initialize a new node with the given peer ID, state, tools, and models.
+    pub fn new(
+        id: PeerId,
+        state: NodeState,
+        tools: HashSet<ToolDefinition>,
+        models_on_disk: HashSet<ModelId>,
+        models_in_memory: HashSet<ModelId>,
+    ) -> Self {
+        let connected_at = chrono::Utc::now();
+        Self {
+            id,
+            state,
+            tools,
+            models_on_disk,
+            models_in_memory,
+            connected_at,
+        }
+    }
+
+    /// Build a node from the given node properties and state.
+    pub fn from_properties(
+        properties: &NodeProperties,
+        state: NodeState,
+        models_in_memory: HashSet<ModelId>,
+    ) -> Self {
+        let id = PeerId::new(properties.client().id, properties.device().id);
+        let tools = properties.tools().iter().cloned().collect();
+        let models_on_disk = properties.models().iter().cloned().collect();
+        Self::new(id, state, tools, models_on_disk, models_in_memory)
+    }
+
+    /// Return the unique identifier for this node.
+    pub fn id(&self) -> PeerId {
+        self.id
+    }
+
+    /// Return the current state of this node.
+    pub fn state(&self) -> &NodeState {
+        &self.state
+    }
+
+    /// Return the tool definitions exposed by this node.
+    pub fn tools(&self) -> &HashSet<ToolDefinition> {
+        &self.tools
+    }
+
+    /// Return the model IDs available on disk for this node.
+    pub fn models_on_disk(&self) -> &HashSet<ModelId> {
+        &self.models_on_disk
+    }
+
+    /// Return the model IDs currently loaded in memory for this node.
+    pub fn models_in_memory(&self) -> &HashSet<ModelId> {
+        &self.models_in_memory
+    }
+
+    /// Get the timestamp when this node connected.
+    pub fn connected_at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.connected_at
+    }
+}
+
+/// The current state of the Node.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+pub enum NodeState {
+    /// The node is idle and not currently processing any requests.
+    Idle,
+
+    /// The node is currently processing an inference request.
+    RunningInference,
+
+    /// The node is currently processing a tool call request.
+    RunningToolCall,
+}
 
 /// Persisted configuration and advertised runtime state for a Nexo node.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]

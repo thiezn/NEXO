@@ -17,6 +17,7 @@ use strum::ParseError;
     strum::AsRefStr,
     strum::Display,
     strum::EnumString,
+    Copy,
 )]
 #[serde(into = "String", try_from = "String")]
 #[allow(missing_docs)]

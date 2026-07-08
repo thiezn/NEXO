@@ -61,16 +61,16 @@ impl MultiModalPayload {
     ) -> Self {
         Self {
             conversation: Conversation {
-                messages: vec![ConversationMessage {
-                    role: MessageRole::User,
-                    parts: vec![
+                messages: vec![ConversationMessage::new(
+                    MessageRole::User,
+                    vec![
                         ContentPart::Image(ImageInput {
                             source: MediaSource::Base64(image_data),
                             media_type,
                         }),
                         ContentPart::Text(prompt),
                     ],
-                }],
+                )],
             },
             tools: Vec::new(),
             tool_choice: ToolChoice::Disabled,
@@ -97,9 +97,9 @@ impl MultiModalPayload {
     ) -> Self {
         Self {
             conversation: Conversation {
-                messages: vec![ConversationMessage {
-                    role: MessageRole::User,
-                    parts: vec![
+                messages: vec![ConversationMessage::new(
+                    MessageRole::User,
+                    vec![
                         ContentPart::Audio(AudioInput {
                             source: MediaSource::Base64(audio_data),
                             media_type,
@@ -108,7 +108,7 @@ impl MultiModalPayload {
                         }),
                         ContentPart::Text(prompt),
                     ],
-                }],
+                )],
             },
             tools: Vec::new(),
             tool_choice: ToolChoice::Disabled,

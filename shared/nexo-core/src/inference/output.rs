@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use super::request::InferenceOperationKind;
+use super::InferenceOperationKind;
 use super::responses::{
     DetokenizationResponse, EmbedResponse, ImageGenerationResponse, MultiModalResponse,
     SpeechGenerationResponse, TokenizationResponse,
 };
 
-/// Successful terminal output from an inference operation.
+/// Successful full output from an inference operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
-pub enum InferenceFinal {
+pub enum InferenceOutput {
     /// Final conversational or multimodal generation output.
     MultiModal(MultiModalResponse),
 
@@ -29,7 +29,7 @@ pub enum InferenceFinal {
     Detokenize(DetokenizationResponse),
 }
 
-impl InferenceFinal {
+impl InferenceOutput {
     /// Returns the operation kind that produced this final output.
     pub const fn operation_kind(&self) -> InferenceOperationKind {
         match self {
