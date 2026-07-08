@@ -133,7 +133,11 @@ impl NexoUserState {
                 self.push_history(
                     HistorySource::Gateway,
                     HistoryKind::GatewayState,
-                    "gateway state updated",
+                    &format!(
+                        "gateway state updated (users: {}, nodes: {})",
+                        state.user_count(),
+                        state.node_count()
+                    ),
                 );
             }
             TuiEvent::SessionsListed { sessions } => {
@@ -372,6 +376,9 @@ impl NexoUserState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexo_core::system::node::NodeState;
+    use nexo_core::{ClientInfo, DeviceInfo, Node, NodeProperties, User, UserProperties};
+    use std::collections::HashSet;
 
     #[test]
     fn applies_connected_event() {
@@ -414,5 +421,36 @@ mod tests {
         assert_eq!(entry.source, HistorySource::User);
         assert_eq!(entry.kind, HistoryKind::UserPrompt);
         assert_eq!(entry.body, "hello world");
+    }
+
+    #[test]
+    fn state_updated_history_includes_user_and_node_counts() {
+        let mut user_state = NexoUserState::new();
+        let mut nexo_state = NexoState::new();
+
+        let user_properties =
+            UserProperties::new(ClientInfo::new("user"), DeviceInfo::default(), "token");
+        nexo_state
+            .add_user(User::from_properties(&user_properties))
+            .expect("failed to add user");
+
+        let node_properties =
+            NodeProperties::new(ClientInfo::new("node"), DeviceInfo::default(), "token");
+        nexo_state
+            .add_node(Node::from_properties(
+                &node_properties,
+                NodeState::Idle,
+                HashSet::new(),
+            ))
+            .expect("failed to add node");
+
+        user_state.apply_event(&TuiEvent::StateUpdated { state: nexo_state });
+
+        let entry = user_state
+            .timeline()
+            .last()
+            .expect("timeline should contain state update");
+        assert_eq!(entry.kind, HistoryKind::GatewayState);
+        assert_eq!(entry.body, "gateway state updated (users: 1, nodes: 1)");
     }
 }

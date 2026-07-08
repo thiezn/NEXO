@@ -30,6 +30,22 @@ pub enum Error {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 
+    /// Error occurred while queueing input for the NexoAgent.
+    #[error(transparent)]
+    AgentInputChannel(#[from] tokio::sync::mpsc::error::TrySendError<crate::agent::NexoAgentInput>),
+
+    /// Error occurred while forwarding output from the NexoAgent.
+    #[error(transparent)]
+    AgentOutputChannel(#[from] tokio::sync::mpsc::error::SendError<crate::agent::NexoAgentOutput>),
+
+    /// Error occurred while waiting for a spawned task to complete.
+    #[error(transparent)]
+    TaskJoin(#[from] tokio::task::JoinError),
+
+    /// Error occurred while queueing a directed frame for a connected peer.
+    #[error(transparent)]
+    PeerFrameChannel(#[from] tokio::sync::mpsc::error::TrySendError<nexo_ws_schema::Frame>),
+
     /// Received a frame that is invalid for the current peer connection state.
     #[error("invalid peer state: {0}")]
     InvalidPeerState(String),

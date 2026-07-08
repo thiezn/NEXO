@@ -1,6 +1,6 @@
 use crate::Result;
 use mold_ai_inference::Flux2Engine;
-use nexo_core::{InferenceIntent, InferenceStream, ModelId};
+use nexo_core::{InferenceRequest, InferenceStream, ModelId};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -48,7 +48,7 @@ impl MoldRuntime {
     pub(crate) async fn infer(
         &self,
         _model_id: &ModelId,
-        _request: InferenceIntent,
+        _request: InferenceRequest,
     ) -> Result<InferenceStream> {
         todo!("Implement inference request submission for Mold runtime");
     }

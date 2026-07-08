@@ -169,7 +169,7 @@ pub(crate) fn map_tool_result_message(
 ///
 /// * `role` - The shared message role to encode.
 /// * `strategy` - The role strategy required by the target model.
-pub(crate) fn map_role(role: MessageRole, strategy: RoleStrategy) -> &'static str {
+pub(crate) fn map_role(role: &MessageRole, strategy: &RoleStrategy) -> &'static str {
     match role {
         MessageRole::System => "system",
         MessageRole::Developer => {

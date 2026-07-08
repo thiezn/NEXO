@@ -7,7 +7,8 @@ use mistralrs_core::{
 };
 use nexo_core::inference::requests::MultiModalPayload;
 use nexo_core::{
-    InferenceIntent, ModelDefinition, OutputConstraint, SamplingConfig, StreamingMode, ThinkingMode,
+    InferenceRequest, ModelDefinition, OutputConstraint, SamplingConfig, StreamingMode,
+    ThinkingMode,
 };
 use tokio::sync::mpsc;
 
@@ -21,7 +22,7 @@ use tokio::sync::mpsc;
 /// * `response` - The one-shot response channel consumed by Mistral.rs.
 /// * `request_ordinal` - The monotonically increasing request ordinal required by Mistral.rs.
 pub(crate) fn map_multimodal_request(
-    request: &InferenceIntent,
+    request: &InferenceRequest,
     payload: &MultiModalPayload,
     descriptor: &ModelDefinition,
     response: mpsc::Sender<Response>,
@@ -33,7 +34,7 @@ pub(crate) fn map_multimodal_request(
     for message in &payload.conversation.messages {
         mapped.messages.extend(map_generate_message(
             message,
-            *descriptor.role_strategy(),
+            descriptor.role_strategy(),
             &mut mapped.images,
             &mut mapped.audios,
         )?);

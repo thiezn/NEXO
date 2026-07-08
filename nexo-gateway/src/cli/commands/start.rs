@@ -20,5 +20,5 @@ pub async fn run(host: Option<String>, port: Option<u16>) -> Result {
     if let Some(p) = port {
         config = config.into_builder().port(p).build();
     }
-    NexoGateway::new(config).run().await
+    NexoGateway::new(config)?.run().await
 }

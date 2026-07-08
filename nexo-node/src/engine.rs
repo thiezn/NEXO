@@ -2,7 +2,7 @@ use crate::Result;
 use futures_util::StreamExt;
 use nexo_ai::InferenceEngine;
 use nexo_core::{
-    InferenceIntent, ModelId, NexoClient, NodeProperties, OperationId, ToolCall, ToolRegistry,
+    InferenceRequest, ModelId, NexoClient, NodeProperties, OperationId, ToolCall, ToolRegistry,
 };
 use nexo_ws_client::NexoConnection;
 use nexo_ws_schema::{

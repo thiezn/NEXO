@@ -140,7 +140,8 @@ impl NexoUser {
     /// * `event_tx` - The sender used to publish normalized TUI events.
     async fn handle_frame(&self, frame: Frame, event_tx: &Sender<TuiEvent>) -> Result {
         let (frame_id, payload) = frame.into_parts::<GatewayToUserMessage>()?;
-        info!(frame_id = ?frame_id, "Received frame");
+        let message_type: &'static str = (&payload).into();
+        info!(frame_id = ?frame_id, message_type = message_type, "Received frame");
 
         // Guidelines for handling incoming messages:
         //

@@ -3,7 +3,7 @@ use mistralrs_core::{
     CompletionResponse, Delta, Response, ResponseMessage, ResponseOk, ToolCallResponse,
 };
 use nexo_core::{
-    ContentPart, ConversationMessage, FinishReason, InferenceOutput, InferenceMeta,
+    ContentPart, ConversationMessage, FinishReason, InferenceMeta, InferenceOutput,
     InferenceOutputDelta, InferenceUpdate, MessageRole, MultiModalDelta, MultiModalResponse,
     PerformanceMetrics, StreamSeq, TokenUsage, ToolCall, ToolCallDelta,
 };
@@ -129,10 +129,7 @@ fn map_completion_done(done: CompletionResponse) -> MultiModalResponse {
     let choice = done.choices.into_iter().next();
     let (message, finish_reason) = if let Some(choice) = choice {
         (
-            ConversationMessage {
-                role: MessageRole::Assistant,
-                parts: vec![ContentPart::Text(choice.text)],
-            },
+            ConversationMessage::new(MessageRole::Assistant, vec![ContentPart::Text(choice.text)]),
             map_finish_reason(Some(&choice.finish_reason)),
         )
     } else {
@@ -197,10 +194,7 @@ fn map_response_message(message: ResponseMessage) -> ConversationMessage {
         );
     }
 
-    ConversationMessage {
-        role: map_message_role(&message.role),
-        parts,
-    }
+    ConversationMessage::new(map_message_role(&message.role), parts)
 }
 
 /// Maps a Mistral.rs streaming delta into the shared multimodal delta contract.
@@ -314,8 +308,5 @@ fn map_performance(usage: &mistralrs_core::Usage) -> PerformanceMetrics {
 
 /// Creates an empty assistant message for responses that complete without content.
 fn empty_assistant_message() -> ConversationMessage {
-    ConversationMessage {
-        role: MessageRole::Assistant,
-        parts: Vec::new(),
-    }
+    ConversationMessage::new(MessageRole::Assistant, Vec::new())
 }

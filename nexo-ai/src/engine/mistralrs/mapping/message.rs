@@ -6,9 +6,7 @@ use crate::{Error, Result};
 use either::Either;
 use indexmap::IndexMap;
 use mistralrs_core::{AudioInput as MistralAudioInput, MessageContent};
-use nexo_core::{
-    ContentPart, ConversationMessage, MessageRole, RoleStrategy,
-};
+use nexo_core::{ContentPart, ConversationMessage, MessageRole, RoleStrategy};
 
 /// Aggregates the mapped chat transcript alongside the referenced media payloads.
 #[derive(Default)]
@@ -33,7 +31,7 @@ pub(crate) struct MessageMapping {
 /// * `audios` - The ordered audio payload accumulator referenced by multimodal message parts.
 pub(crate) fn map_generate_message(
     message: &ConversationMessage,
-    role_strategy: RoleStrategy,
+    role_strategy: &RoleStrategy,
     images: &mut Vec<image::DynamicImage>,
     audios: &mut Vec<MistralAudioInput>,
 ) -> Result<Vec<IndexMap<String, MessageContent>>> {
@@ -43,7 +41,7 @@ pub(crate) fn map_generate_message(
     let mut image_parts = Vec::new();
     let mut audio_parts = Vec::new();
 
-    for part in &message.parts {
+    for part in message.parts() {
         match part {
             ContentPart::Text(text) => text_parts.push(text.clone()),
             ContentPart::ToolCall(call) => tool_calls.push(call.clone()),
@@ -63,7 +61,7 @@ pub(crate) fn map_generate_message(
             || !tool_calls.is_empty()
             || !image_parts.is_empty()
             || !audio_parts.is_empty()
-            || message.role != MessageRole::Tool
+            || message.role() != &MessageRole::Tool
         {
             return Err(Error::UnsupportedMessagePart {
                 part: "mixed tool-result message",
@@ -85,7 +83,7 @@ pub(crate) fn map_generate_message(
     let mut mapped = IndexMap::new();
     mapped.insert(
         "role".to_string(),
-        Either::Left(map_role(message.role, role_strategy).to_string()),
+        Either::Left(map_role(message.role(), role_strategy).to_string()),
     );
 
     if image_parts.is_empty() && audio_parts.is_empty() {

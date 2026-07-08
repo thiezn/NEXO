@@ -15,10 +15,6 @@ pub enum UserToGatewayMessage {
     /// Request the current state of the Nexo system, including the available models,
     /// nodes, and other relevant information.
     ///
-    /// NOTE: This replaces all previous status, health, systempresence and tick events.
-    /// We rely on WebSocket protocol to keep the connection alive and send pings, so we
-    /// don't need to send status events anymore.
-    ///
     /// The gateway will periodically send state events to the user so we can
     /// update the user interface with the latest information about the system. This event
     /// can force a state update.

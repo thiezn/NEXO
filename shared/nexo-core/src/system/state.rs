@@ -1,6 +1,7 @@
 use crate::{Error, Node, PeerId, Result, User};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
 /// The state of the Nexo System.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -59,5 +60,15 @@ impl NexoState {
     /// Removes a node from the Nexo system state.
     pub fn remove_node(&mut self, node_id: &PeerId) {
         self.nodes.remove(node_id);
+    }
+
+    /// Returns the number of active nodes.
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Returns the number of active users.
+    pub fn user_count(&self) -> usize {
+        self.users.len()
     }
 }

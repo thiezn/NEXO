@@ -6,10 +6,12 @@ use nexo_core::{
 };
 use nexo_ws_schema::{InferenceRunEvent, NexoEvent};
 use std::collections::VecDeque;
-use std::thread::sleep;
-use std::time::Duration;
 use strum::IntoStaticStr;
-use tracing::info;
+use tokio::sync::mpsc;
+use tokio::time::{self, Duration};
+use tracing::{info, warn};
+
+const QUEUE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// A single job that the NexoAgent can perform.
 ///
@@ -35,7 +37,7 @@ pub enum NexoAgentInput {
     /// A new user has connected
     UserConnected(User),
 
-    // A new node has connected
+    /// A new node has connected
     NodeConnected(Node),
 
     /// A user has disconnected
@@ -64,8 +66,14 @@ pub enum NexoAgentInput {
     /// An event emitted from the Node related to an inference run operation.
     NodeInferenceRunEvent(NexoEvent<InferenceRunEvent>),
 
-    /// Retrieve the current state of the whole Nexo system
-    GetState,
+    /// Retrieve the current state of the whole Nexo system.
+    GetState {
+        /// The requesting user peer that should receive the response.
+        requester: PeerId,
+
+        /// The operation identifier to preserve in the gateway response.
+        operation_id: nexo_core::OperationId,
+    },
 }
 
 /// An event sent from the Nexo Agent
@@ -78,8 +86,17 @@ pub enum NexoAgentOutput {
     /// Send a fully prepared request to the node for processing.
     StartInferenceRun(Node, InferenceRequest),
 
-    /// Return the current state of the Nexo system
-    GetState(NexoState),
+    /// Return the current state of the Nexo system.
+    GetState {
+        /// The requesting user peer that should receive the response.
+        requester: PeerId,
+
+        /// The operation identifier to preserve in the gateway response.
+        operation_id: nexo_core::OperationId,
+
+        /// Snapshot of the current in-memory system state.
+        state: NexoState,
+    },
 }
 
 /// The Nexo Agent is responsible for coordinating a single session.
@@ -116,49 +133,67 @@ impl NexoAgent {
     /// Starts the NexoAgent.
     ///
     /// This is the main entry point and will start a loop that processes tasks from it's queue.
-    pub fn start(mut self) {
+    pub fn start(
+        mut self,
+        mut input_rx: mpsc::Receiver<NexoAgentInput>,
+        gateway_output_tx: mpsc::Sender<NexoAgentOutput>,
+    ) -> tokio::task::JoinHandle<Result> {
         info!("Starting NexoAgent...");
 
-        // TODO: This is just a temporary loop and queue. We need
-        // logic to determine what the actual next task is that we're
-        // allowed to execute.
-        //
-        // Some points to consider
-        // - We cannot run a new inference run on the same same session
-        // - Queue needs to be stored in persistent storage so we can recover from crash/reboot
-        // - We can probably solve this in SQL with a fancy query, if we can somehow lock a session there. It would
-        //   be nice if all that logic is inside the DB, to avoid having to handle this in code.
-        // - Recoverability will need some thought. Need towrite out some scenarios like, gateway crash, node crash,
-        //   BOTH gateway and node crashes. Especially the latter case is important as the gateway might boot up again
-        //   and assume the node is still working on an inference request. However, if the node also crashed, we will
-        //   never get response for it so need some way to detect that/get node state perhaps, etc.
-        loop {
-            if let Some(task) = self.fifo_queue.pop_front() {
-                match task {
-                    AgentJob::RunInference(_) => {
-                        info!("Processing inference run");
+        tokio::spawn(async move {
+            let (agent_output_tx, mut agent_output_rx) = mpsc::channel(100);
+            let mut queue_poll = time::interval(QUEUE_POLL_INTERVAL);
+
+            loop {
+                tokio::select! {
+                    _ = queue_poll.tick() => {
+                        self.process_fifo_queue_tick().await;
                     }
-                    AgentJob::RunTool(_) => {
-                        info!("Processing tool call");
+
+                    maybe_input = input_rx.recv() => {
+                        let Some(input) = maybe_input else {
+                            info!("NexoAgent input channel closed; stopping agent loop");
+                            break;
+                        };
+
+                        self.handle_input(input, &agent_output_tx).await?;
+                    }
+
+                    maybe_output = agent_output_rx.recv() => {
+                        let Some(output) = maybe_output else {
+                            info!("NexoAgent deferred output channel closed; stopping agent loop");
+                            break;
+                        };
+
+                        self.forward_output_to_gateway(output, &gateway_output_tx).await?;
                     }
                 }
             }
-            sleep(Duration::from_secs(5));
-        }
+
+            Ok(())
+        })
     }
 
-    /// Handles a command sent to the NexoAgent.
+    /// Handles a NexoAgentInput sent to the NexoAgent.
     ///
     /// # Arguments
     ///
-    /// * `command` - The command to be handled by the NexoAgent.
-    async fn handle_command(&mut self, command: NexoAgentInput) -> Result {
-        match command {
+    /// * `input` - The input to be handled by the NexoAgent.
+    async fn handle_input(
+        &mut self,
+        input: NexoAgentInput,
+        output_tx: &mpsc::Sender<NexoAgentOutput>,
+    ) -> Result {
+        match input {
             NexoAgentInput::UserConnected(user) => {
-                self.state.add_user(user)?;
+                if let Err(error) = self.state.add_user(user) {
+                    warn!(error = %error, "Failed to add user to in-memory state");
+                }
             }
             NexoAgentInput::NodeConnected(node) => {
-                self.state.add_node(node)?;
+                if let Err(error) = self.state.add_node(node) {
+                    warn!(error = %error, "Failed to add node to in-memory state");
+                }
             }
             NexoAgentInput::UserDisconnected(peer_id) => {
                 self.state.remove_user(&peer_id);
@@ -166,25 +201,57 @@ impl NexoAgent {
             NexoAgentInput::NodeDisconnected(peer_id) => {
                 self.state.remove_node(&peer_id);
             }
-            NexoAgentInput::UserStartInferenceRun(request) => {
-                todo!("Store in queue")
+            NexoAgentInput::UserStartInferenceRun(_request) => {
+                info!("UserStartInferenceRun accepted by placeholder agent loop");
             }
             NexoAgentInput::UserAppendInferenceInstructions {
-                operation_id,
-                instructions,
+                operation_id: _,
+                instructions: _,
             } => {
-                todo!("Store in queue")
+                info!("UserAppendInferenceInstructions accepted by placeholder agent loop");
             }
-            NexoAgentInput::UserCompact(request) => {
-                todo!("Store in queue")
+            NexoAgentInput::UserCompact(_request) => {
+                info!("UserCompact accepted by placeholder agent loop");
             }
-            NexoAgentInput::NodeInferenceRunEvent(event) => {
-                todo!("Store in queue")
+            NexoAgentInput::NodeInferenceRunEvent(_event) => {
+                info!("NodeInferenceRunEvent accepted by placeholder agent loop");
             }
-            NexoAgentInput::GetState => {
-                todo!("Return current state")
+            NexoAgentInput::GetState {
+                requester,
+                operation_id,
+            } => {
+                output_tx
+                    .send(NexoAgentOutput::GetState {
+                        requester,
+                        operation_id,
+                        state: self.state.clone(),
+                    })
+                    .await?;
             }
         }
+
+        Ok(())
+    }
+
+    async fn process_fifo_queue_tick(&mut self) {
+        if let Some(task) = self.fifo_queue.pop_front() {
+            match task {
+                AgentJob::RunInference(_) => {
+                    info!("Queued inference job placeholder popped");
+                }
+                AgentJob::RunTool(_) => {
+                    info!("Queued tool job placeholder popped");
+                }
+            }
+        }
+    }
+
+    async fn forward_output_to_gateway(
+        &self,
+        output: NexoAgentOutput,
+        gateway_output_tx: &mpsc::Sender<NexoAgentOutput>,
+    ) -> Result {
+        gateway_output_tx.send(output).await?;
         Ok(())
     }
 
@@ -244,8 +311,7 @@ impl NexoAgent {
     async fn route_tool(&self, tool_call: &ToolCall) -> Result<Node> {
         // - Determine which node to use for the tool call.
         // - Return the routing information for the tool call.
-
-        Ok(Node::new())
+        todo!("Implement tool routing logic");
     }
 
     /// I probably want to move this to separate routing manager.
@@ -254,7 +320,121 @@ impl NexoAgent {
         // - Check if the model is already loaded on a node, or if it needs to be loaded. TODO: This needs
         //   to lock everything until we've got confirmation the model is loaded.
         // - Return the routing information for the inference request.
+        todo!("Implement inference routing logic");
+    }
+}
 
-        Ok((ModelId::Gemma4E4bItUqffAfq6, Node::new()))
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use nexo_core::inference::requests::multimodal::MultiModalPayload;
+    use nexo_core::{
+        ClientInfo, DeviceInfo, InferenceOperation, ModelCapability, ModelSelection, OperationId,
+        ReasoningSettings, SessionId, ToolChoice, UserProperties,
+    };
+
+    fn test_user() -> User {
+        let properties =
+            UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
+        User::from_properties(&properties)
+    }
+
+    #[tokio::test]
+    async fn get_state_returns_current_snapshot() {
+        let mut agent = NexoAgent::new();
+        let user = test_user();
+        let peer_id = user.id();
+
+        agent
+            .handle_input(
+                NexoAgentInput::UserConnected(user),
+                &tokio::sync::mpsc::channel(1).0,
+            )
+            .await
+            .expect("failed to handle connected user");
+
+        let operation_id = nexo_core::OperationId::new();
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(1);
+        let output = agent
+            .handle_input(
+                NexoAgentInput::GetState {
+                    requester: peer_id,
+                    operation_id,
+                },
+                &output_tx,
+            )
+            .await;
+
+        assert!(output.is_ok());
+
+        let Some(NexoAgentOutput::GetState {
+            requester,
+            operation_id: out_operation_id,
+            state,
+        }) = output_rx.recv().await
+        else {
+            panic!("expected get_state output")
+        };
+
+        assert_eq!(requester, peer_id);
+        assert_eq!(out_operation_id, operation_id);
+        assert_eq!(state.user_count(), 1);
+        assert_eq!(state.node_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn out_of_scope_inputs_do_not_panic_or_emit_output() {
+        let mut agent = NexoAgent::new();
+        let user = test_user();
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(1);
+
+        let output = agent
+            .handle_input(
+                NexoAgentInput::UserStartInferenceRun(InferenceIntent {
+                    operation_id: OperationId::new(),
+                    session_id: SessionId::new(),
+                    model_selection: ModelSelection::Capabilities(vec![
+                        ModelCapability::TextGeneration,
+                        ModelCapability::Streaming,
+                    ]),
+                    operation: InferenceOperation::MultiModal(MultiModalPayload::new_round(
+                        vec![ConversationMessage::new_text("hello")],
+                        Vec::new(),
+                        ToolChoice::Automatic,
+                        ReasoningSettings::default(),
+                    )),
+                }),
+                &output_tx,
+            )
+            .await;
+        assert!(output.is_ok());
+        assert!(output_rx.try_recv().is_err());
+
+        agent
+            .handle_input(NexoAgentInput::UserConnected(user.clone()), &output_tx)
+            .await
+            .expect("failed to handle connected user");
+        agent
+            .handle_input(NexoAgentInput::UserDisconnected(user.id()), &output_tx)
+            .await
+            .expect("failed to handle disconnected user");
+
+        agent
+            .handle_input(
+                NexoAgentInput::GetState {
+                    requester: user.id(),
+                    operation_id: nexo_core::OperationId::new(),
+                },
+                &output_tx,
+            )
+            .await
+            .expect("failed to handle get_state");
+
+        let Some(NexoAgentOutput::GetState { state, .. }) = output_rx.recv().await else {
+            panic!("expected get_state output")
+        };
+        assert_eq!(state.user_count(), 0);
     }
 }

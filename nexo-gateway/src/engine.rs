@@ -1,7 +1,8 @@
 use super::agent::{NexoAgentInput, NexoAgentOutput};
 use crate::{NexoAgent, Result};
 use futures_util::{SinkExt, StreamExt};
-use nexo_core::{GatewayProperties, NexoClient, NexoClientKind, PeerId};
+use nexo_core::system::node::NodeState;
+use nexo_core::{GatewayProperties, NexoClient, NexoClientKind, Node, PeerId, User};
 use nexo_ws_schema::{
     ConnectRequest, Frame, GatewayToNodeMessage, GatewayToUserMessage, NexoResponse,
     NodeToGatewayMessage, UserToGatewayMessage,
@@ -9,9 +10,13 @@ use nexo_ws_schema::{
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::info;
+use tracing::{info, warn};
+
+const AGENT_CHANNEL_CAPACITY: usize = 256;
+const PEER_CHANNEL_CAPACITY: usize = 64;
 
 /// State owned by a single WebSocket connection task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,17 +59,41 @@ enum GatewayConnectMessage {
 
 /// Central coordinator for nexo-gateway, ties configuration,
 /// tool registry, websocket loop and inference engine together.
-#[derive(Clone)]
 pub struct NexoGateway {
     /// The configuration for the gateway.
     config: GatewayProperties,
 
     /// Connected peers by stable `(client_id, device_id)` key.
     peers: Arc<Mutex<HashMap<PeerId, NexoClient>>>,
-    // Agent
-    // agent: NexoAgent,
-    // agent_tx: tokio::sync::mpsc::Sender<NexoAgentCommand>,
-    // agent_rx: tokio::sync::mpsc::Receiver<NexoAgentEvent>,
+
+    /// Sender used by gateway connection tasks to forward inputs into the NexoAgent.
+    agent_input_tx: mpsc::Sender<NexoAgentInput>,
+
+    /// One-time receiver consumed when the NexoAgent runtime is started.
+    agent_input_rx: Option<mpsc::Receiver<NexoAgentInput>>,
+
+    /// Sender used by the NexoAgent to emit outputs back into the gateway runtime.
+    agent_output_tx: mpsc::Sender<NexoAgentOutput>,
+
+    /// One-time receiver consumed by the gateway output dispatcher task.
+    agent_output_rx: Option<mpsc::Receiver<NexoAgentOutput>>,
+
+    /// Per-peer directed channels used to push outbound frames to the right websocket task.
+    peer_frame_txs: Arc<Mutex<HashMap<PeerId, mpsc::Sender<Frame>>>>,
+}
+
+impl Clone for NexoGateway {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            peers: Arc::clone(&self.peers),
+            agent_input_tx: self.agent_input_tx.clone(),
+            agent_input_rx: None,
+            agent_output_tx: self.agent_output_tx.clone(),
+            agent_output_rx: None,
+            peer_frame_txs: Arc::clone(&self.peer_frame_txs),
+        }
+    }
 }
 
 impl NexoGateway {
@@ -73,57 +102,76 @@ impl NexoGateway {
     /// # Arguments
     ///
     /// * `config` - Gateway runtime configuration, including bind address and auth token.
-    pub fn new(config: GatewayProperties) -> Self {
-        let agent = NexoAgent::new();
+    pub fn new(config: GatewayProperties) -> Result<Self> {
+        let (agent_input_tx, agent_input_rx) = mpsc::channel(AGENT_CHANNEL_CAPACITY);
+        let (agent_output_tx, agent_output_rx) = mpsc::channel(AGENT_CHANNEL_CAPACITY);
 
-        // Need to think about the interface into nexo agent. Basically
-        // we only need the tx/rx channel here in NexoGateway, NexoAgent
-        // should be on a thread separately managing it's own internal state/concurrency
-        // let (agent_tx, agent_rx) = tokio::sync::mpsc::channel(100);
-        // let (agent_tx, agent_rx) = agent.start();
-        // agent.start(agent_tx, agent_rx);
-        agent.start();
-
-        Self {
+        Ok(Self {
             config,
             peers: Arc::new(Mutex::new(HashMap::new())),
-        }
+            agent_input_tx,
+            agent_input_rx: Some(agent_input_rx),
+            agent_output_tx,
+            agent_output_rx: Some(agent_output_rx),
+            peer_frame_txs: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 
     /// Start the gateway runtime.
     ///
-    /// # Arguments
-    ///
-    /// This function takes no arguments.
-    pub async fn run(&self) -> Result {
+    /// This will consume NexoGateway and run the main accept loop,
+    /// spawning a new task for each accepted WebSocket connection.
+    pub async fn run(mut self) -> Result {
+        let agent_input_rx = self.agent_input_rx.take().ok_or_else(|| {
+            crate::Error::InvalidPeerState("agent input receiver already taken".into())
+        })?;
+        let agent_output_rx = self.agent_output_rx.take().ok_or_else(|| {
+            crate::Error::InvalidPeerState("agent output receiver already taken".into())
+        })?;
+
+        let mut agent_task = NexoAgent::new().start(agent_input_rx, self.agent_output_tx.clone());
+        let mut dispatcher_task = self.start_agent_output_dispatcher(agent_output_rx);
+
         let addr = self.config.bind_addr();
         let listener = TcpListener::bind(&addr).await?;
         info!(addr = %addr, "NEXO Gateway listening");
 
         loop {
-            let (stream, peer_addr) = listener.accept().await?;
-            let gateway = self.clone();
-            let auth_token = self.config.auth_token().to_owned();
+            tokio::select! {
+                accept_result = listener.accept() => {
+                    let (stream, peer_addr) = accept_result?;
+                    let gateway = self.clone();
+                    let auth_token = self.config.auth_token().to_owned();
 
-            tokio::spawn(async move {
-                #[allow(clippy::result_large_err)]
-                let callback = |req: &http::Request<()>, response: http::Response<()>| {
-                    if has_valid_auth(req.headers(), &auth_token) {
-                        Ok(response)
-                    } else {
-                        let mut response = http::Response::new(Some("Unauthorized".to_owned()));
-                        *response.status_mut() = http::StatusCode::UNAUTHORIZED;
-                        Err(response)
-                    }
-                };
+                    tokio::spawn(async move {
+                        #[allow(clippy::result_large_err)]
+                        let callback = |req: &http::Request<()>, response: http::Response<()>| {
+                            if has_valid_auth(req.headers(), &auth_token) {
+                                Ok(response)
+                            } else {
+                                let mut response = http::Response::new(Some("Unauthorized".to_owned()));
+                                *response.status_mut() = http::StatusCode::UNAUTHORIZED;
+                                Err(response)
+                            }
+                        };
 
-                match tokio_tungstenite::accept_hdr_async(stream, callback).await {
-                    Ok(ws_stream) => gateway.handle_connection(ws_stream).await,
-                    Err(error) => {
-                        tracing::warn!(peer_addr = %peer_addr, error = ?error, "WebSocket handshake failed");
-                    }
+                        match tokio_tungstenite::accept_hdr_async(stream, callback).await {
+                            Ok(ws_stream) => gateway.handle_connection(ws_stream).await,
+                            Err(error) => {
+                                tracing::warn!(peer_addr = %peer_addr, error = ?error, "WebSocket handshake failed");
+                            }
+                        }
+                    });
                 }
-            });
+                agent_result = &mut agent_task => {
+                    agent_result??;
+                    return Ok(());
+                }
+                dispatcher_result = &mut dispatcher_task => {
+                    dispatcher_result??;
+                    return Ok(());
+                }
+            }
         }
     }
 
@@ -208,17 +256,30 @@ impl NexoGateway {
 
         *state = GatewayConnectionState::Connected { peer_id, kind };
 
+        if let Err(error) = self.agent_input_tx.try_send(match &request.client {
+            NexoClient::Node(properties) => NexoAgentInput::NodeConnected(Node::from_properties(
+                properties,
+                NodeState::Idle,
+                std::collections::HashSet::new(),
+            )),
+            NexoClient::User(properties) => {
+                NexoAgentInput::UserConnected(User::from_properties(properties))
+            }
+        }) {
+            warn!(error = ?error, peer_id = %peer_id, "Failed to forward connect event to agent");
+        }
+
         Ok(match request.client {
             NexoClient::Node(properties) => {
                 info!(client_id = %properties.client().id, device_id = %properties.device().id, tools = ?properties.tools(), "Node peer connected");
 
-                GatewayFrameOutcome::Reply(Frame::new(GatewayToUserMessage::Connect(
+                GatewayFrameOutcome::Reply(Frame::new(GatewayToNodeMessage::Connect(
                     NexoResponse::completed(request.operation_id),
                 ))?)
             }
             NexoClient::User(properties) => {
                 info!(client_id = %properties.client().id, device_id = %properties.device().id, "User peer connected");
-                GatewayFrameOutcome::Reply(Frame::new(GatewayToNodeMessage::Connect(
+                GatewayFrameOutcome::Reply(Frame::new(GatewayToUserMessage::Connect(
                     NexoResponse::completed(request.operation_id),
                 ))?)
             }
@@ -247,8 +308,27 @@ impl NexoGateway {
                 )?))
             }
             UserToGatewayMessage::StartInferenceRun(request) => {
-                todo!("Send this through to the NexoAgent so it can be queued.");
-                // self.agent.run(request).await?;
+                if let Err(error) = self
+                    .agent_input_tx
+                    .try_send(NexoAgentInput::UserStartInferenceRun(request))
+                {
+                    warn!(error = %error, "Failed to forward StartInferenceRun to agent");
+                }
+                Ok(GatewayFrameOutcome::NoReply)
+            }
+            UserToGatewayMessage::GetState => {
+                let GatewayConnectionState::Connected { peer_id, .. } = state else {
+                    return Err(crate::Error::InvalidPeerState(
+                        "get_state received before peer was connected".into(),
+                    ));
+                };
+
+                let operation_id = nexo_core::OperationId::new();
+                self.agent_input_tx.try_send(NexoAgentInput::GetState {
+                    requester: *peer_id,
+                    operation_id,
+                })?;
+
                 Ok(GatewayFrameOutcome::NoReply)
             }
             other => {
@@ -288,32 +368,42 @@ impl NexoGateway {
         }
     }
 
-    /// Handle a message received from the NexoAgent
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - Mutable per-connection state for the node socket.
-    /// * `message` - Parsed node-to-gateway protocol message.
-    fn handle_agent_message(
-        &self,
-        state: &mut GatewayConnectionState,
-        message: NexoAgentOutput,
-    ) -> Result<GatewayFrameOutcome> {
+    /// Handle a message received from the NexoAgent.
+    fn handle_agent_output(&self, message: NexoAgentOutput) -> Result {
         match message {
-            NexoAgentOutput::StartInferenceRun(node_id, request) => {
-                todo!("Send this through to the Node.");
+            NexoAgentOutput::StartInferenceRun(_node, _request) => {
+                info!("StartInferenceRun output received but routing is not implemented yet");
             }
-            other => {
-                todo!("Handle other NexoAgentOutput messages");
+            NexoAgentOutput::GetState {
+                requester,
+                operation_id,
+                state,
+            } => {
+                let frame = Frame::new(GatewayToUserMessage::GetState(NexoResponse::Completed {
+                    operation_id,
+                    result: state,
+                }))?;
+
+                if let Some(tx) = self
+                    .peer_frame_txs
+                    .lock()
+                    .map_err(|_| {
+                        crate::Error::InvalidPeerState("peer sender lock poisoned".into())
+                    })?
+                    .get(&requester)
+                    .cloned()
+                {
+                    tx.try_send(frame)?;
+                } else {
+                    info!(peer_id = %requester, "Dropping get_state response for disconnected peer");
+                }
             }
         }
+
+        Ok(())
     }
 
     /// Remove a connected peer from live gateway state.
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - Mutable per-connection state that identifies the peer to remove.
     fn disconnect_peer(&self, state: &mut GatewayConnectionState) -> Result {
         let GatewayConnectionState::Connected { peer_id, kind } = state else {
             return Err(crate::Error::InvalidPeerState(
@@ -329,54 +419,82 @@ impl NexoGateway {
             .is_some()
         {
             info!(kind = %kind, client_id = %peer_id.client_id(), device_id = %peer_id.device_id(), "Peer disconnected");
+
+            let input = match kind {
+                NexoClientKind::User => NexoAgentInput::UserDisconnected(*peer_id),
+                NexoClientKind::Node => NexoAgentInput::NodeDisconnected(*peer_id),
+            };
+            if let Err(error) = self.agent_input_tx.try_send(input) {
+                warn!(error = %error, peer_id = %peer_id, "Failed to forward disconnect to agent");
+            }
         }
+
+        if let Ok(mut peer_senders) = self.peer_frame_txs.lock() {
+            peer_senders.remove(peer_id);
+        }
+
         *state = GatewayConnectionState::Disconnected;
         Ok(())
     }
 
     /// Run the read/write loop for one accepted WebSocket connection.
-    ///
-    /// # Arguments
-    ///
-    /// * `ws_stream` - Accepted WebSocket stream for one connected peer.
     async fn handle_connection(&self, mut ws_stream: WebSocketStream<TcpStream>) {
         let mut state = GatewayConnectionState::AwaitingConnect;
+        let (peer_tx, mut peer_rx) = mpsc::channel::<Frame>(PEER_CHANNEL_CAPACITY);
 
-        while let Some(message) = ws_stream.next().await {
-            let frame = match message {
-                Ok(Message::Text(text)) => match serde_json::from_str::<Frame>(&text) {
-                    Ok(frame) => frame,
-                    Err(error) => {
-                        tracing::warn!(error = ?error, "Received invalid frame JSON");
+        loop {
+            tokio::select! {
+                maybe_message = ws_stream.next() => {
+                    let Some(message) = maybe_message else {
+                        break;
+                    };
+
+                    let frame = match message {
+                        Ok(Message::Text(text)) => match serde_json::from_str::<Frame>(&text) {
+                            Ok(frame) => frame,
+                            Err(error) => {
+                                tracing::warn!(error = ?error, "Received invalid frame JSON");
+                                break;
+                            }
+                        },
+                        Ok(Message::Close(_)) | Err(_) => break,
+                        Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => continue,
+                        Ok(Message::Binary(_)) => {
+                            tracing::warn!("Received unexpected binary WebSocket message");
+                            continue;
+                        }
+                    };
+
+                    match self.handle_frame(&mut state, frame).await {
+                        Ok(GatewayFrameOutcome::Reply(frame)) => {
+                            if let GatewayConnectionState::Connected { peer_id, .. } = state {
+                                self.register_peer_sender(peer_id, &peer_tx);
+                            }
+
+                            if let Err(error) = send_frame(&mut ws_stream, &frame).await {
+                                tracing::warn!(error = ?error, "Failed to send gateway reply");
+                                break;
+                            }
+                        }
+                        Ok(GatewayFrameOutcome::CloseAfterReply(frame)) => {
+                            if let Err(error) = send_frame(&mut ws_stream, &frame).await {
+                                tracing::warn!(error = ?error, "Failed to send gateway disconnect reply");
+                            }
+                            let _ = ws_stream.close(None).await;
+                            return;
+                        }
+                        Ok(GatewayFrameOutcome::NoReply) => {}
+                        Err(error) => {
+                            tracing::warn!(error = ?error, "Gateway frame handling failed");
+                            break;
+                        }
+                    }
+                }
+                Some(frame) = peer_rx.recv() => {
+                    if let Err(error) = send_frame(&mut ws_stream, &frame).await {
+                        tracing::warn!(error = ?error, "Failed to send directed peer frame");
                         break;
                     }
-                },
-                Ok(Message::Close(_)) | Err(_) => break,
-                Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => continue,
-                Ok(Message::Binary(_)) => {
-                    tracing::warn!("Received unexpected binary WebSocket message");
-                    continue;
-                }
-            };
-
-            match self.handle_frame(&mut state, frame).await {
-                Ok(GatewayFrameOutcome::Reply(frame)) => {
-                    if let Err(error) = send_frame(&mut ws_stream, &frame).await {
-                        tracing::warn!(error = ?error, "Failed to send gateway reply");
-                        break;
-                    }
-                }
-                Ok(GatewayFrameOutcome::CloseAfterReply(frame)) => {
-                    if let Err(error) = send_frame(&mut ws_stream, &frame).await {
-                        tracing::warn!(error = ?error, "Failed to send gateway disconnect reply");
-                    }
-                    let _ = ws_stream.close(None).await;
-                    return;
-                }
-                Ok(GatewayFrameOutcome::NoReply) => {}
-                Err(error) => {
-                    tracing::warn!(error = ?error, "Gateway frame handling failed");
-                    break;
                 }
             }
         }
@@ -385,16 +503,33 @@ impl NexoGateway {
     }
 
     /// Remove a connected peer when its socket closes without a protocol disconnect.
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - Mutable per-connection state to inspect and clean up.
     fn cleanup_connection(&self, state: &mut GatewayConnectionState) {
         if matches!(state, GatewayConnectionState::Connected { .. })
             && let Err(error) = self.disconnect_peer(state)
         {
             tracing::warn!(error = ?error, "Failed to clean up peer connection");
         }
+    }
+
+    fn register_peer_sender(&self, peer_id: PeerId, peer_tx: &mpsc::Sender<Frame>) {
+        if let Ok(mut peer_senders) = self.peer_frame_txs.lock() {
+            peer_senders.insert(peer_id, peer_tx.clone());
+        }
+    }
+
+    fn start_agent_output_dispatcher(
+        &self,
+        mut receiver: mpsc::Receiver<NexoAgentOutput>,
+    ) -> tokio::task::JoinHandle<Result> {
+        let gateway = self.clone();
+        tokio::spawn(async move {
+            while let Some(message) = receiver.recv().await {
+                gateway.handle_agent_output(message)?;
+            }
+
+            info!("Agent output dispatcher stopped");
+            Ok(())
+        })
     }
 }
 
@@ -416,7 +551,7 @@ fn has_valid_auth(headers: &http::HeaderMap, expected_token: &str) -> bool {
 /// # Arguments
 ///
 /// * `ws_stream` - WebSocket stream to write the frame to.
-/// * `frame` - Frame envelope to serialize as a text message.\
+/// * `frame` - Frame envelope to serialize as a text message.
 #[inline]
 async fn send_frame(ws_stream: &mut WebSocketStream<TcpStream>, frame: &Frame) -> Result {
     let json = serde_json::to_string(frame)?;
@@ -434,9 +569,10 @@ mod tests {
     };
     use nexo_ws_client::NexoConnection;
     use nexo_ws_schema::{DisconnectRequest, NexoResponse};
+    use tokio::time::{Duration, timeout};
 
     fn gateway() -> NexoGateway {
-        NexoGateway::new(GatewayProperties::default())
+        NexoGateway::new(GatewayProperties::default()).unwrap()
     }
 
     fn user_client() -> NexoClient {
@@ -497,7 +633,14 @@ mod tests {
 
         let outcome = gateway.handle_frame(&mut state, frame).await.unwrap();
 
-        assert!(matches!(outcome, GatewayFrameOutcome::Reply(_)));
+        let GatewayFrameOutcome::Reply(reply) = outcome else {
+            panic!("expected connect reply")
+        };
+        let (_, message) = reply.into_parts::<GatewayToNodeMessage>().unwrap();
+        assert!(matches!(
+            message,
+            GatewayToNodeMessage::Connect(NexoResponse::Completed { .. })
+        ));
         let GatewayConnectionState::Connected { peer_id, kind } = state else {
             panic!("expected connected state")
         };
@@ -521,6 +664,40 @@ mod tests {
             panic!("expected connected state")
         };
         assert_eq!(kind, NexoClientKind::Node);
+    }
+
+    #[tokio::test]
+    async fn user_get_state_is_forwarded_to_agent_and_replied_from_agent_output() {
+        let mut gateway = gateway();
+        let agent_input_rx = gateway.agent_input_rx.take().unwrap();
+        let agent_output_rx = gateway.agent_output_rx.take().unwrap();
+        let _agent_task = NexoAgent::new().start(agent_input_rx, gateway.agent_output_tx.clone());
+        let _dispatcher_task = gateway.start_agent_output_dispatcher(agent_output_rx);
+
+        let user = user_client();
+        let peer_id = PeerId::from_client(&user);
+        let (peer_tx, mut peer_rx) = tokio::sync::mpsc::channel::<Frame>(4);
+        gateway.register_peer_sender(peer_id, &peer_tx);
+
+        gateway
+            .agent_input_tx
+            .try_send(NexoAgentInput::GetState {
+                requester: peer_id,
+                operation_id: OperationId::new(),
+            })
+            .unwrap();
+
+        let frame = timeout(Duration::from_secs(1), peer_rx.recv())
+            .await
+            .expect("timed out waiting for get_state reply")
+            .expect("peer channel closed before get_state reply");
+
+        let (_, message) = frame.into_parts::<GatewayToUserMessage>().unwrap();
+        let GatewayToUserMessage::GetState(NexoResponse::Completed { result, .. }) = message else {
+            panic!("expected get_state completed response")
+        };
+        assert_eq!(result.user_count(), 0);
+        assert_eq!(result.node_count(), 0);
     }
 
     #[tokio::test]
