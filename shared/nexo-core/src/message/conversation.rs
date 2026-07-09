@@ -21,6 +21,7 @@ impl ConversationMessage {
         }
     }
 
+    /// Creates a new user message with the given text content.
     pub fn new_text(text: &str) -> Self {
         Self {
             role: MessageRole::User,

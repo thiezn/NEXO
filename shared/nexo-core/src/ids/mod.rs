@@ -19,6 +19,7 @@ pub mod session_id;
 /// The strong type used for tool call identifiers.
 pub mod tool_call_id;
 
+/// The strong type used for NexoGateway client peer identifiers.
 pub mod peer_id;
 
 pub use frame_id::FrameId;

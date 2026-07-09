@@ -2,7 +2,7 @@ use crate::Result;
 use crate::memory::db::DbClient;
 use nexo_core::{
     CompactionRequest, ConversationMessage, InferenceIntent, InferenceRequest, ModelId, NexoState,
-    Node, PeerId, ToolCall, User,
+    Node, OperationId, PeerId, ToolCall, User,
 };
 use nexo_ws_schema::{InferenceRunEvent, NexoEvent};
 use std::collections::VecDeque;
@@ -20,10 +20,54 @@ const QUEUE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Debug, IntoStaticStr, PartialEq)]
 enum AgentJob {
     /// A job to run an inference request.
-    RunInference(InferenceIntent),
+    RunInference {
+        operation_id: OperationId,
+        intent: InferenceIntent,
+    },
+    // TODO: A job to run a tool call, useful for cron jobs.
+    // RunTool(ToolCall),
+}
 
-    /// A job to run a tool call.
-    RunTool(ToolCall),
+/// Tracking the state of a single Inference run.
+enum InferenceRunState {
+    /// Transforming InferenceIntent into a full InferenceRequest, including context, system prompt, etc.
+    PreparingContext {
+        user_peer_id: PeerId,
+        operation_id: OperationId,
+    },
+
+    // Freeing up the node for the inference run, if it is currently busy with another run.
+    UnloadingModel {
+        operation_id: OperationId,
+        user_peer_id: PeerId,
+        node_peer_id: PeerId,
+        model_id: ModelId,
+    },
+
+    /// Loading the model on the node, if it is not already loaded.
+    LoadingModel {
+        operation_id: OperationId,
+        user_peer_id: PeerId,
+        node_peer_id: PeerId,
+        model_id: ModelId,
+    },
+
+    /// The inference run is currently being processed by a node.
+    InProgress {
+        operation_id: OperationId,
+        user_peer_id: PeerId,
+        node_peer_id: PeerId,
+        model_id: ModelId,
+    },
+
+    /// The inference run has completed successfully.
+    Completed(OperationId),
+
+    /// The inference run has failed with an error.
+    Failed {
+        operation_id: OperationId,
+        error_message: String,
+    },
 }
 
 /// A message sent from NexoGateway to the NexoAgent.
@@ -54,7 +98,7 @@ pub enum NexoAgentInput {
     /// TODO: Review the required payload.
     UserAppendInferenceInstructions {
         /// The unique identifier for the inference operation to which the instructions should be appended.
-        operation_id: nexo_core::OperationId,
+        operation_id: OperationId,
 
         /// The additional instructions to be appended to the ongoing inference operation.
         instructions: InferenceIntent,
@@ -72,7 +116,7 @@ pub enum NexoAgentInput {
         requester: PeerId,
 
         /// The operation identifier to preserve in the gateway response.
-        operation_id: nexo_core::OperationId,
+        operation_id: OperationId,
     },
 }
 
@@ -92,7 +136,7 @@ pub enum NexoAgentOutput {
         requester: PeerId,
 
         /// The operation identifier to preserve in the gateway response.
-        operation_id: nexo_core::OperationId,
+        operation_id: OperationId,
 
         /// Snapshot of the current in-memory system state.
         state: NexoState,
@@ -113,7 +157,7 @@ pub struct NexoAgent {
     /// The Database client
     db: DbClient,
 
-    /// The current state of the Nexo Sytem
+    /// The current state of the Nexo System
     state: NexoState,
 
     /// The work queue, tmp just a string
@@ -238,10 +282,9 @@ impl NexoAgent {
             match task {
                 AgentJob::RunInference(_) => {
                     info!("Queued inference job placeholder popped");
-                }
-                AgentJob::RunTool(_) => {
-                    info!("Queued tool job placeholder popped");
-                }
+                } // AgentJob::RunTool(_) => {
+                  //     info!("Queued tool job placeholder popped");
+                  // }
             }
         }
     }
@@ -355,7 +398,7 @@ mod tests {
             .await
             .expect("failed to handle connected user");
 
-        let operation_id = nexo_core::OperationId::new();
+        let operation_id = OperationId::new();
         let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(1);
         let output = agent
             .handle_input(
@@ -425,7 +468,7 @@ mod tests {
             .handle_input(
                 NexoAgentInput::GetState {
                     requester: user.id(),
-                    operation_id: nexo_core::OperationId::new(),
+                    operation_id: OperationId::new(),
                 },
                 &output_tx,
             )

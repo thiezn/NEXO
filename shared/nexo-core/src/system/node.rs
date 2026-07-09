@@ -98,6 +98,12 @@ pub enum NodeState {
     /// The node is idle and not currently processing any requests.
     Idle,
 
+    /// Loading a model into memory for inference or tool calling.
+    LoadingModel,
+
+    /// Unloading a model from memory to free up resources.
+    UnloadingModel,
+
     /// The node is currently processing an inference request.
     RunningInference,
 
