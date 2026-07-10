@@ -1,5 +1,4 @@
 use super::DbClient;
-use super::db_types::to_json_string;
 use crate::{Error, Result};
 use nexo_core::{PeerId, ToolDefinition};
 
@@ -99,9 +98,9 @@ impl DbClient {
             )
             .bind(&tool.name)
             .bind(&tool.description)
-            .bind(to_json_string(&tool.parameters)?)
+            .bind(serde_json::to_string(&tool.parameters)?)
             .bind(tool.contract_version.clone())
-            .bind(to_json_string(&tool.execution)?)
+            .bind(serde_json::to_string(&tool.execution)?)
             .bind(&now)
             .bind(&now)
             .execute(&mut **tx)

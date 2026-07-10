@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS inference_intents (
 CREATE TABLE IF NOT EXISTS inference_runs (
 	operation_id TEXT PRIMARY KEY REFERENCES operations(operation_id) ON DELETE CASCADE,
 	run_state TEXT NOT NULL CHECK (run_state IN (
+		'queued',
 		'preparing_context',
 		'unloading_model',
 		'loading_model',
@@ -116,7 +117,7 @@ CREATE TABLE IF NOT EXISTS inference_runs (
 	model_id TEXT,
 	error_message TEXT,
 	created_at TEXT NOT NULL,
-	preparing_started_at TEXT NOT NULL,
+	preparing_started_at TEXT,
 	node_selected_at TEXT,
 	model_loading_started_at TEXT,
 	in_progress_at TEXT,

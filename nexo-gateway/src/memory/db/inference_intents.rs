@@ -1,5 +1,4 @@
 use super::DbClient;
-use super::db_types::{from_json_str, to_json_string};
 use crate::{Error, Result};
 use nexo_core::{InferenceIntent, InferenceOperationKind, OperationId};
 use serde::{Deserialize, Serialize};
@@ -48,8 +47,8 @@ impl DbClient {
         .bind(intent.operation_id.to_string())
         .bind(intent.session_id.to_string())
         .bind(InferenceOperationKind::from(&intent.operation).to_string())
-        .bind(to_json_string(&intent.model_selection)?)
-        .bind(to_json_string(&StoredInferenceIntent::from(intent))?)
+        .bind(serde_json::to_string(&intent.model_selection)?)
+        .bind(serde_json::to_string(&StoredInferenceIntent::from(intent))?)
         .bind(&now)
         .bind(&now)
         .execute(self.pool())
@@ -78,7 +77,7 @@ impl DbClient {
             });
         };
 
-        Ok(InferenceIntent::from(from_json_str::<StoredInferenceIntent>(&intent_json)?))
+        Ok(InferenceIntent::from(serde_json::from_str::<StoredInferenceIntent>(&intent_json)?))
     }
 }
 

@@ -62,4 +62,8 @@ pub enum Error {
         /// Human-readable identifier for the missing resource.
         identifier: String,
     },
+
+    /// Persisted inference run data does not match the declared lifecycle state.
+    #[error("invalid inference run state: {0}")]
+    InvalidInferenceRunState(String),
 }

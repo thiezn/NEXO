@@ -329,10 +329,19 @@ impl NexoGateway {
                     GatewayToUserMessage::Disconnect(NexoResponse::completed(request.operation_id)),
                 )?))
             }
-            UserToGatewayMessage::StartInferenceRun(request) => {
+            UserToGatewayMessage::StartInferenceRun(intent) => {
+                let PeerConnectionState::Connected { peer_id, .. } = state else {
+                    return Err(Error::InvalidPeerState(
+                        "start_inference_run received before peer was connected".into(),
+                    ));
+                };
+
                 if let Err(error) = self
                     .agent_input_tx
-                    .try_send(NexoAgentInput::UserStartInferenceRun(request))
+                    .try_send(NexoAgentInput::UserStartInferenceRun {
+                        requester: *peer_id,
+                        intent: intent,
+                    })
                 {
                     warn!(error = %error, "Failed to forward StartInferenceRun to agent");
                 }
