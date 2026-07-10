@@ -21,6 +21,6 @@ pub use client::{
 };
 pub use gateway::GatewayProperties;
 pub use metrics::NexoNodeMetrics;
-pub use node::{Node, NodeProperties};
+pub use node::{Node, NodeProperties, NodeState, NodeStateKind};
 pub use state::NexoState;
 pub use user::{User, UserProperties};

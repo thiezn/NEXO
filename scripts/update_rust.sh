@@ -14,15 +14,18 @@ rustup update stable
 echo "Running cargo clean to remove old build artifacts..."
 cargo clean
 
+echo "Removing Cargo.lock file to ensure a fresh dependency resolution until we can get cargo upgrade to work..."
+rm -f Cargo.lock
+
 echo "Updating Cargo dependencies..."
 cargo update
 
 # This needs ```cargo install cargo-edit``` first
 echo "Bumping all dependencies to their latest versions..."
-# NOTE, cargo upgrade doesn't respect ~/.cargo/config.toml proxy
-HTTP_PROXY="socks5h://192.168.2.1:6789" 
-HTTPS_PROXY="socks5h://192.168.2.1:6789"
-cargo upgrade --recursive --verbose
+# NOTE, cargo upgrade doesn't respect ~/.cargo/config.toml proxy. Raised https://github.com/killercup/cargo-edit/issues/965
+# HTTP_PROXY="socks5h://192.168.2.1:6789" 
+# HTTPS_PROXY="socks5h://192.168.2.1:6789"
+# cargo upgrade --recursive --verbose
 
 # echo "Disable unused features in dependencies... (DISABLED FOR NOW, IT TAKES A LOT OF TIME AND SPACE)"
 # https://github.com/ToBinio/cargo-features-manager

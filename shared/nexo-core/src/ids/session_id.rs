@@ -3,6 +3,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[cfg(feature = "sqlx")]
+use sqlx::error::BoxDynError;
+#[cfg(feature = "sqlx")]
+use sqlx::sqlite::{Sqlite, SqliteValueRef};
+#[cfg(feature = "sqlx")]
+use sqlx::{Decode, Type};
+
 /// A stable identifier for a long-lived conversation or inference session.
 #[derive(
     Debug,
@@ -52,5 +59,24 @@ impl From<String> for SessionId {
 impl From<&str> for SessionId {
     fn from(value: &str) -> Self {
         Self::from_string(value.to_owned())
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl Type<Sqlite> for SessionId {
+    fn type_info() -> <Sqlite as sqlx::Database>::TypeInfo {
+        <String as Type<Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &<Sqlite as sqlx::Database>::TypeInfo) -> bool {
+        <String as Type<Sqlite>>::compatible(ty)
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl<'r> Decode<'r, Sqlite> for SessionId {
+    fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
+        let value = <String as Decode<Sqlite>>::decode(value)?;
+        Ok(Self::from(value))
     }
 }

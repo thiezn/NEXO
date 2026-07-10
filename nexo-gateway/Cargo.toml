@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 nexo-ws-schema = { workspace = true, features = ["clap"] }
-nexo-core = { workspace = true }
+nexo-core = { workspace = true, features = ["sqlx"] }
 cli-helpers = { workspace = true, features = [
     "clap",
     "config",
@@ -17,7 +17,7 @@ cli-helpers = { workspace = true, features = [
     "paths",
     "tracing",
 ] }
-sqlx = { version = "0", features = [
+sqlx = { workspace = true, features = [
     "runtime-tokio",
     "tls-native-tls",
     "sqlite",

@@ -2,6 +2,13 @@ use crate::ModelFamily;
 use serde::{Deserialize, Serialize};
 use strum::ParseError;
 
+#[cfg(feature = "sqlx")]
+use sqlx::error::BoxDynError;
+#[cfg(feature = "sqlx")]
+use sqlx::sqlite::{Sqlite, SqliteValueRef};
+#[cfg(feature = "sqlx")]
+use sqlx::{Decode, Type};
+
 /// A stable identifier for an inference model.
 #[derive(
     Debug,
@@ -165,6 +172,25 @@ impl PartialEq<str> for ModelId {
 impl PartialEq<ModelId> for str {
     fn eq(&self, other: &ModelId) -> bool {
         other == self
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl Type<Sqlite> for ModelId {
+    fn type_info() -> <Sqlite as sqlx::Database>::TypeInfo {
+        <String as Type<Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &<Sqlite as sqlx::Database>::TypeInfo) -> bool {
+        <String as Type<Sqlite>>::compatible(ty)
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl<'r> Decode<'r, Sqlite> for ModelId {
+    fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
+        let value = <String as Decode<Sqlite>>::decode(value)?;
+        ModelId::try_from(value).map_err(Box::<dyn std::error::Error + Send + Sync>::from)
     }
 }
 

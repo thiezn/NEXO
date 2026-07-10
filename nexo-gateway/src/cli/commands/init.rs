@@ -28,7 +28,7 @@ pub async fn run() -> cli_helpers::Result {
 
     // Initialize the database
     let db_path = cli_helpers::resolve_path_str(config.db_path())?;
-    // crate::memory::database::initialize(&db_path).await?;
+    // crate::memory::db::initialize(&db_path).await?;
 
     // Pre-create markdown storage directory
     let storage_root = cli_helpers::resolve_path_str(config.storage_root())?;

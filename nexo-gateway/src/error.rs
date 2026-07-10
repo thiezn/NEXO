@@ -18,6 +18,10 @@ pub enum Error {
     #[error(transparent)]
     NexoCore(#[from] nexo_core::Error),
 
+    /// Error occurred while talking to SQLite through SQLx.
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
+
     /// Error occured while accepting or handling a TCP connection.
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -49,4 +53,13 @@ pub enum Error {
     /// Received a frame that is invalid for the current peer connection state.
     #[error("invalid peer state: {0}")]
     InvalidPeerState(String),
+
+    /// Requested resource could not be found in persistent storage.
+    #[error("{resource} not found: {identifier}")]
+    NotFound {
+        /// Logical resource name.
+        resource: &'static str,
+        /// Human-readable identifier for the missing resource.
+        identifier: String,
+    },
 }

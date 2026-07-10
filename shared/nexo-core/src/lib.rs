@@ -64,7 +64,8 @@ pub use model::{
 // };
 pub use system::{
     ClientInfo, DeviceInfo, GatewayProperties, NexoClient, NexoClientKind, NexoNodeMetrics,
-    NexoState, Node, NodeProperties, Platform, ProtocolInfo, Scope, User, UserProperties,
+    NexoState, Node, NodeProperties, NodeState, NodeStateKind, Platform, ProtocolInfo, Scope,
+    User, UserProperties,
 };
 pub use tools::{
     Tool, ToolCall, ToolCallDelta, ToolChoice, ToolDefinition, ToolExecutionConstraints,

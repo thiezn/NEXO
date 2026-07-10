@@ -3,6 +3,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+#[cfg(feature = "sqlx")]
+use sqlx::error::BoxDynError;
+#[cfg(feature = "sqlx")]
+use sqlx::sqlite::{Sqlite, SqliteRow, SqliteValueRef};
+#[cfg(feature = "sqlx")]
+use sqlx::{Decode, FromRow, Row, Type};
+#[cfg(feature = "sqlx")]
+use std::io;
+
 use super::{ClientInfo, DeviceInfo, ProtocolInfo};
 /// A single active Node in the Nexo Gateway.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
@@ -92,8 +101,50 @@ impl Node {
     }
 }
 
+#[cfg(feature = "sqlx")]
+impl<'r> FromRow<'r, SqliteRow> for Node {
+    fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
+        let client_id: String = row.try_get("client_id")?;
+        let device_id: String = row.try_get("device_id")?;
+        let node_state: NodeStateKind = row.try_get("node_state")?;
+        let tools_json: String = row.try_get("tools_json")?;
+        let models_on_disk_json: String = row.try_get("models_on_disk_json")?;
+        let models_in_memory_json: String = row.try_get("models_in_memory_json")?;
+        let connected_at: chrono::DateTime<chrono::Utc> = row.try_get("connected_at")?;
+
+        Ok(Self {
+            id: decode_peer_id(client_id, device_id)?,
+            state: NodeState::from(node_state),
+            tools: decode_json_hash_set("tools_json", &tools_json)?,
+            models_on_disk: decode_json_hash_set("models_on_disk_json", &models_on_disk_json)?,
+            models_in_memory: decode_json_hash_set(
+                "models_in_memory_json",
+                &models_in_memory_json,
+            )?,
+            connected_at,
+        })
+    }
+}
+
 /// The current state of the Node.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq, strum::EnumDiscriminants,
+)]
+#[strum_discriminants(name(NodeStateKind))]
+#[strum_discriminants(vis(pub))]
+#[strum_discriminants(doc = "The current runtime state of a node persisted in the database.")]
+#[strum_discriminants(derive(
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+    strum::AsRefStr,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr
+))]
+#[strum_discriminants(serde(rename_all = "snake_case"))]
+#[strum_discriminants(strum(serialize_all = "snake_case"))]
 pub enum NodeState {
     /// The node is idle and not currently processing any requests.
     Idle,
@@ -109,6 +160,69 @@ pub enum NodeState {
 
     /// The node is currently processing a tool call request.
     RunningToolCall,
+}
+
+impl From<NodeStateKind> for NodeState {
+    fn from(value: NodeStateKind) -> Self {
+        match value {
+            NodeStateKind::Idle => Self::Idle,
+            NodeStateKind::LoadingModel => Self::LoadingModel,
+            NodeStateKind::UnloadingModel => Self::UnloadingModel,
+            NodeStateKind::RunningInference => Self::RunningInference,
+            NodeStateKind::RunningToolCall => Self::RunningToolCall,
+        }
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl Type<Sqlite> for NodeStateKind {
+    fn type_info() -> <Sqlite as sqlx::Database>::TypeInfo {
+        <String as Type<Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &<Sqlite as sqlx::Database>::TypeInfo) -> bool {
+        <String as Type<Sqlite>>::compatible(ty)
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl<'r> Decode<'r, Sqlite> for NodeStateKind {
+    fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
+        let value = <String as Decode<Sqlite>>::decode(value)?;
+        value
+            .parse()
+            .map_err(Box::<dyn std::error::Error + Send + Sync>::from)
+    }
+}
+
+#[cfg(feature = "sqlx")]
+fn decode_peer_id(client_id: String, device_id: String) -> Result<PeerId, sqlx::Error> {
+    let client_id = uuid::Uuid::parse_str(&client_id).map_err(|error| {
+        sqlx::Error::Decode(Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid client_id '{}': {}", client_id, error),
+        )))
+    })?;
+    let device_id = uuid::Uuid::parse_str(&device_id).map_err(|error| {
+        sqlx::Error::Decode(Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid device_id '{}': {}", device_id, error),
+        )))
+    })?;
+    Ok(PeerId::new(client_id, device_id))
+}
+
+#[cfg(feature = "sqlx")]
+fn decode_json_hash_set<T>(field: &'static str, value: &str) -> Result<HashSet<T>, sqlx::Error>
+where
+    T: for<'de> serde::Deserialize<'de> + Eq + std::hash::Hash,
+{
+    serde_json::from_str(value).map_err(|error| {
+        sqlx::Error::Decode(Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid {field} '{}': {}", value, error),
+        )))
+    })
 }
 
 /// Persisted configuration and advertised runtime state for a Nexo node.

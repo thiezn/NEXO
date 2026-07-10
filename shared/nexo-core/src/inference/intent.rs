@@ -6,6 +6,13 @@ use crate::{Error, ModelDefinition, ModelSelection, Result};
 use crate::{ModelId, OperationId, SessionId};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlx")]
+use sqlx::error::BoxDynError;
+#[cfg(feature = "sqlx")]
+use sqlx::sqlite::{Sqlite, SqliteValueRef};
+#[cfg(feature = "sqlx")]
+use sqlx::{Decode, Type};
+
 /// A unified representation of request for inference by a user.
 ///
 /// - The type of inference request can be any modality
@@ -104,5 +111,24 @@ impl InferenceOperation {
     /// Returns the operation kind for this request payload.
     pub fn kind(&self) -> InferenceOperationKind {
         self.into()
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl Type<Sqlite> for InferenceOperationKind {
+    fn type_info() -> <Sqlite as sqlx::Database>::TypeInfo {
+        <String as Type<Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &<Sqlite as sqlx::Database>::TypeInfo) -> bool {
+        <String as Type<Sqlite>>::compatible(ty)
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl<'r> Decode<'r, Sqlite> for InferenceOperationKind {
+    fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
+        let value = <String as Decode<Sqlite>>::decode(value)?;
+        value.parse().map_err(Box::<dyn std::error::Error + Send + Sync>::from)
     }
 }

@@ -6,7 +6,7 @@ use nexo_core::{
 };
 use nexo_ws_schema::{InferenceRunEvent, NexoEvent};
 use std::collections::VecDeque;
-use strum::IntoStaticStr;
+use strum::{EnumDiscriminants, IntoStaticStr};
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 use tracing::{info, warn};
@@ -17,18 +17,69 @@ const QUEUE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 ///
 /// These jobs are queued up in the NexoAgent queue. The agent is responsible
 /// for handling parallelism/sequencing.
-#[derive(Debug, IntoStaticStr, PartialEq)]
+#[derive(Debug, IntoStaticStr, PartialEq, EnumDiscriminants)]
+#[strum_discriminants(name(AgentJobKind))]
+#[strum_discriminants(vis(pub))]
+#[strum_discriminants(doc = "The category of agent job persisted in the database.")]
+#[strum_discriminants(derive(
+    Hash,
+    strum::AsRefStr,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr
+))]
+#[strum_discriminants(strum(serialize_all = "snake_case"))]
 enum AgentJob {
     /// A job to run an inference request.
     RunInference {
         operation_id: OperationId,
+        user_peer_id: PeerId,
         intent: InferenceIntent,
     },
     // TODO: A job to run a tool call, useful for cron jobs.
     // RunTool(ToolCall),
 }
 
+/// The persisted queue lifecycle of an agent job.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::AsRefStr,
+    strum::Display,
+    strum::EnumString,
+    IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum AgentJobQueueStatus {
+    /// The job is waiting to be claimed.
+    Queued,
+    /// The job has been claimed for processing.
+    Claimed,
+    /// The job completed successfully.
+    Completed,
+    /// The job completed with failure.
+    Failed,
+}
+
 /// Tracking the state of a single Inference run.
+#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants)]
+#[strum_discriminants(name(InferenceRunStateKind))]
+#[strum_discriminants(vis(pub))]
+#[strum_discriminants(
+    doc = "The current lifecycle state of an inference run persisted in the database."
+)]
+#[strum_discriminants(derive(
+    Hash,
+    strum::AsRefStr,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr
+))]
+#[strum_discriminants(strum(serialize_all = "snake_case"))]
 enum InferenceRunState {
     /// Transforming InferenceIntent into a full InferenceRequest, including context, system prompt, etc.
     PreparingContext {
@@ -280,7 +331,11 @@ impl NexoAgent {
     async fn process_fifo_queue_tick(&mut self) {
         if let Some(task) = self.fifo_queue.pop_front() {
             match task {
-                AgentJob::RunInference(_) => {
+                AgentJob::RunInference {
+                    operation_id,
+                    user_peer_id,
+                    intent,
+                } => {
                     info!("Queued inference job placeholder popped");
                 } // AgentJob::RunTool(_) => {
                   //     info!("Queued tool job placeholder popped");

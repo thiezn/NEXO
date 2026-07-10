@@ -5,6 +5,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+#[cfg(feature = "sqlx")]
+use sqlx::sqlite::SqliteRow;
+#[cfg(feature = "sqlx")]
+use sqlx::{FromRow, Row};
+#[cfg(feature = "sqlx")]
+use std::io;
+
 /// A single active User in the NexoGateway
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 pub struct User {
@@ -51,6 +58,44 @@ impl User {
     pub fn connected_at(&self) -> chrono::DateTime<chrono::Utc> {
         self.connected_at
     }
+}
+
+#[cfg(feature = "sqlx")]
+impl<'r> FromRow<'r, SqliteRow> for User {
+    fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
+        let client_id: String = row.try_get("client_id")?;
+        let device_id: String = row.try_get("device_id")?;
+        let tools_json: String = row.try_get("tools_json")?;
+        let connected_at: chrono::DateTime<chrono::Utc> = row.try_get("connected_at")?;
+
+        Ok(Self {
+            id: decode_peer_id(client_id, device_id)?,
+            tools: serde_json::from_str(&tools_json).map_err(|error| {
+                sqlx::Error::Decode(Box::new(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid tools_json '{}': {}", tools_json, error),
+                )))
+            })?,
+            connected_at,
+        })
+    }
+}
+
+#[cfg(feature = "sqlx")]
+fn decode_peer_id(client_id: String, device_id: String) -> Result<PeerId, sqlx::Error> {
+    let client_id = uuid::Uuid::parse_str(&client_id).map_err(|error| {
+        sqlx::Error::Decode(Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid client_id '{}': {}", client_id, error),
+        )))
+    })?;
+    let device_id = uuid::Uuid::parse_str(&device_id).map_err(|error| {
+        sqlx::Error::Decode(Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid device_id '{}': {}", device_id, error),
+        )))
+    })?;
+    Ok(PeerId::new(client_id, device_id))
 }
 
 /// Persisted configuration and handshake identity for a user-facing client.
