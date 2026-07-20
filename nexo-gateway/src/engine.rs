@@ -9,11 +9,11 @@ use nexo_ws_schema::{
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use strum::EnumDiscriminants;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
-use strum::EnumDiscriminants;
 use tracing::{debug, info, warn};
 
 const AGENT_CHANNEL_CAPACITY: usize = 256;
@@ -23,7 +23,7 @@ const PEER_CHANNEL_CAPACITY: usize = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumDiscriminants)]
 #[strum_discriminants(name(PeerConnectionStateKind))]
 #[strum_discriminants(vis(pub(crate)))]
-#[strum_discriminants(doc = "The persisted connection-state kind of a gateway peer." )]
+#[strum_discriminants(doc = "The persisted connection-state kind of a gateway peer.")]
 #[strum_discriminants(derive(
     Hash,
     strum::AsRefStr,
@@ -123,6 +123,10 @@ impl NexoGateway {
         let (agent_input_tx, agent_input_rx) = mpsc::channel(AGENT_CHANNEL_CAPACITY);
         let (agent_output_tx, agent_output_rx) = mpsc::channel(AGENT_CHANNEL_CAPACITY);
 
+        info!(db_path = ?config.db_path(), "Database path");
+        info!(nexo_storage_path = ?config.nexo_storage_path(), "NEXO storage path");
+        info!(storage_path = ?config.storage_root(), "Storage root path");
+
         Ok(Self {
             config,
             peers: Arc::new(Mutex::new(HashMap::new())),
@@ -148,7 +152,9 @@ impl NexoGateway {
             .take()
             .ok_or_else(|| Error::InvalidPeerState("agent output receiver already taken".into()))?;
 
-        let mut agent_task = NexoAgent::new().start(agent_input_rx, self.agent_output_tx.clone());
+        let mut agent_task =
+            NexoAgent::from_config(self.config.db_path(), self.config.nexo_storage_path())?
+                .start(agent_input_rx, self.agent_output_tx.clone());
         let mut dispatcher_task = self.start_agent_output_dispatcher(agent_output_rx);
 
         let addr = self.config.bind_addr();
@@ -336,12 +342,12 @@ impl NexoGateway {
                     ));
                 };
 
-                if let Err(error) = self
-                    .agent_input_tx
-                    .try_send(NexoAgentInput::UserStartInferenceRun {
-                        requester: *peer_id,
-                        intent: intent,
-                    })
+                if let Err(error) =
+                    self.agent_input_tx
+                        .try_send(NexoAgentInput::UserStartInferenceRun {
+                            requester: *peer_id,
+                            intent: intent,
+                        })
                 {
                     warn!(error = %error, "Failed to forward StartInferenceRun to agent");
                 }

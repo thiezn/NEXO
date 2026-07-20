@@ -1,14 +1,15 @@
+use super::InferenceRun;
 use super::job::AgentJob;
 use super::messages::{NexoAgentInput, NexoAgentOutput};
-use super::InferenceRun;
-use crate::memory::db::DbClient;
 use crate::Result;
+use crate::memory::db::DbClient;
 use nexo_core::{
     CompactionRequest, ConversationMessage, InferenceIntent, InferenceMeta, InferenceOutputDelta,
     InferenceRequest, ModelId, NexoState, Node, OperationId, PeerId, StreamSeq, ToolCall,
 };
 use nexo_ws_schema::{InferenceRunEvent, NexoEvent};
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 use tracing::{info, warn};
@@ -20,6 +21,8 @@ const QUEUE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 pub struct NexoAgent {
     /// The database client.
     db: DbClient,
+    /// Resolved path to the git-backed nexo-storage repository configured for this runtime.
+    nexo_storage_path: PathBuf,
     /// The current in-memory system state.
     state: NexoState,
     /// The in-memory FIFO queue of pending jobs.
@@ -29,7 +32,21 @@ pub struct NexoAgent {
 impl NexoAgent {
     /// Create a new NexoAgent instance backed by the default database.
     pub fn new() -> Self {
-        Self::with_db(DbClient::new())
+        Self::with_db_and_storage(DbClient::new(), default_nexo_storage_path())
+    }
+
+    /// Create a new NexoAgent instance from resolved runtime config paths.
+    ///
+    /// # Arguments
+    ///
+    /// * `db_path` - Resolved filesystem path to the SQLite database file.
+    /// * `nexo_storage_path` - Resolved filesystem path to the git-backed storage root.
+    pub fn from_config(db_path: &Path, nexo_storage_path: &Path) -> Result<Self> {
+        let db = DbClient::from_path(db_path)?;
+        Ok(Self::with_db_and_storage(
+            db,
+            nexo_storage_path.to_path_buf(),
+        ))
     }
 
     /// Create a new NexoAgent instance backed by an injected database client.
@@ -38,10 +55,15 @@ impl NexoAgent {
     ///
     /// * `db` - The database client to use for persistence.
     pub(crate) fn with_db(db: DbClient) -> Self {
+        Self::with_db_and_storage(db, default_nexo_storage_path())
+    }
+
+    fn with_db_and_storage(db: DbClient, nexo_storage_path: PathBuf) -> Self {
         Self {
             fifo_queue: VecDeque::new(),
             state: NexoState::new(),
             db,
+            nexo_storage_path,
         }
     }
 
@@ -56,7 +78,10 @@ impl NexoAgent {
         mut input_rx: mpsc::Receiver<NexoAgentInput>,
         gateway_output_tx: mpsc::Sender<NexoAgentOutput>,
     ) -> tokio::task::JoinHandle<Result> {
-        info!("Starting NexoAgent...");
+        info!(
+            nexo_storage_path = %self.nexo_storage_path.display(),
+            "Starting NexoAgent..."
+        );
 
         tokio::spawn(async move {
             let (agent_output_tx, mut agent_output_rx) = mpsc::channel(100);
@@ -123,7 +148,8 @@ impl NexoAgent {
                 self.state.remove_node(&peer_id);
             }
             NexoAgentInput::UserStartInferenceRun { requester, intent } => {
-                self.queue_user_start_inference_run(requester, intent).await?;
+                self.queue_user_start_inference_run(requester, intent)
+                    .await?;
             }
             NexoAgentInput::UserAppendInferenceInstructions {
                 operation_id,
@@ -140,14 +166,16 @@ impl NexoAgent {
                 node,
                 model_id,
             } => {
-                self.handle_model_loaded(operation_id, node, model_id).await?;
+                self.handle_model_loaded(operation_id, node, model_id)
+                    .await?;
             }
             NexoAgentInput::ModelUnloaded {
                 operation_id,
                 node,
                 model_id,
             } => {
-                self.handle_model_unloaded(operation_id, node, model_id).await?;
+                self.handle_model_unloaded(operation_id, node, model_id)
+                    .await?;
             }
             NexoAgentInput::NodeInferenceRunEvent(event) => {
                 self.handle_node_inference_run_event(event).await?;
@@ -187,7 +215,8 @@ impl NexoAgent {
         let queued_run = InferenceRun::new(operation_id, requester);
         self.db.save_inference_run(&queued_run).await?;
 
-        self.fifo_queue.push_back(AgentJob::from((requester, intent)));
+        self.fifo_queue
+            .push_back(AgentJob::from((requester, intent)));
         info!(%operation_id, %requester, "Queued inference run");
         Ok(())
     }
@@ -312,7 +341,10 @@ impl NexoAgent {
             NexoEvent::Correlated {
                 operation_id,
                 event,
-            } => self.handle_correlated_inference_run_event(operation_id, event).await,
+            } => {
+                self.handle_correlated_inference_run_event(operation_id, event)
+                    .await
+            }
             NexoEvent::Unsolicited { event } => {
                 let _ = event;
                 // TODO: Decide whether unsolicited inference events should be ignored, logged,
@@ -339,22 +371,27 @@ impl NexoAgent {
                 self.handle_inference_run_started(operation_id, meta).await
             }
             InferenceRunEvent::RoundCompleted { meta } => {
-                self.handle_inference_round_completed(operation_id, meta).await
+                self.handle_inference_round_completed(operation_id, meta)
+                    .await
             }
             InferenceRunEvent::Output { meta, seq, output } => {
-                self.handle_inference_output(operation_id, meta, seq, output).await
+                self.handle_inference_output(operation_id, meta, seq, output)
+                    .await
             }
             InferenceRunEvent::RunCompleted {
                 meta,
                 total_outputs,
-            } => self
-                .handle_inference_run_completed(operation_id, meta, total_outputs)
-                .await,
+            } => {
+                self.handle_inference_run_completed(operation_id, meta, total_outputs)
+                    .await
+            }
             InferenceRunEvent::Cancelled { meta, reason } => {
-                self.handle_inference_cancelled(operation_id, meta, reason).await
+                self.handle_inference_cancelled(operation_id, meta, reason)
+                    .await
             }
             InferenceRunEvent::Failed { meta, error } => {
-                self.handle_inference_failed(operation_id, meta, error).await
+                self.handle_inference_failed(operation_id, meta, error)
+                    .await
             }
         }
     }
@@ -549,6 +586,13 @@ impl NexoAgent {
         let _ = request;
         todo!("Implement inference routing logic");
     }
+}
+
+fn default_nexo_storage_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".nexo")
+        .join("nexo-storage")
 }
 
 #[cfg(test)]

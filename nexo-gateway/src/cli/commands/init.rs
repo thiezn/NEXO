@@ -1,6 +1,7 @@
 use nexo_core::{ClientInfo, GatewayProperties};
+use std::path::PathBuf;
 
-use super::{gateway_config_path, save_gateway_properties};
+use crate::memory::db::DbClient;
 
 /// Interactively initialize the gateway configuration and local storage.
 ///
@@ -9,6 +10,11 @@ use super::{gateway_config_path, save_gateway_properties};
 /// Returns an error when configuration prompts fail, the config cannot be
 /// saved, or the database and storage directories cannot be created.
 pub async fn run() -> cli_helpers::Result {
+    let config_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".nexo")
+        .join("nexo-gateway.toml");
+
     tracing::info!("Initializing NEXO Gateway...");
 
     let host = cli_helpers::interactive::text_input("Bind host", Some("127.0.0.1"))?;
@@ -23,12 +29,22 @@ pub async fn run() -> cli_helpers::Result {
     .port(port)
     .build();
 
-    save_gateway_properties(&config)?;
-    tracing::info!("Config saved to {}", gateway_config_path().display());
+    cli_helpers::config::save(&config, &config_path)?;
+    tracing::info!("Config saved to {}", config_path.display());
 
     // Initialize the database
-    let db_path = cli_helpers::resolve_path_str(config.db_path())?;
-    // crate::memory::db::initialize(&db_path).await?;
+    let db = DbClient::from_path(config.db_path()).map_err(|error| {
+        cli_helpers::Error::Other(format!(
+            "Failed to prepare database at '{}': {error}",
+            config.db_path().display()
+        ))
+    })?;
+    db.initialize_schema().await.map_err(|error| {
+        cli_helpers::Error::Other(format!(
+            "Failed to initialize database schema at '{}': {error}",
+            config.db_path().display()
+        ))
+    })?;
 
     // Pre-create markdown storage directory
     let storage_root = cli_helpers::resolve_path_str(config.storage_root())?;
@@ -41,8 +57,8 @@ pub async fn run() -> cli_helpers::Result {
     })?;
 
     println!("NEXO Gateway initialized successfully.");
-    println!("  Config: {}", gateway_config_path().display());
-    println!("  Database: {}", db_path.display());
+    println!("  Config: {}", config_path.display());
+    println!("  Database: {}", config.db_path().display());
     println!("  Markdown storage: {}", markdown_dir.display());
     println!("\nRun `nexo start` to start the gateway.");
 

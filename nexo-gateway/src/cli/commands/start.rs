@@ -1,8 +1,12 @@
 use crate::{NexoGateway, Result};
+use std::path::PathBuf;
 
 /// Command handler for the `start` command of the `nexo-gateway` CLI.
 pub async fn run(host: Option<String>, port: Option<u16>) -> Result {
-    let path = super::gateway_config_path();
+    let path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".nexo")
+        .join("nexo-gateway.toml");
     let mut config = if path.exists() {
         let config: nexo_core::GatewayProperties = cli_helpers::config::load(&path)?;
         config.into_builder().build()
@@ -11,7 +15,7 @@ pub async fn run(host: Option<String>, port: Option<u16>) -> Result {
             nexo_core::ClientInfo::new(env!("CARGO_PKG_VERSION")),
             nexo_ws_schema::AUTH_TOKEN,
         );
-        super::save_gateway_properties(&config)?;
+        cli_helpers::config::save(&config, &path)?;
         config
     };
     if let Some(h) = host {

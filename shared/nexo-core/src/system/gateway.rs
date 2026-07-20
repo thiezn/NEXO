@@ -1,5 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use super::{ClientInfo, ProtocolInfo};
 
@@ -21,7 +22,7 @@ pub struct GatewayProperties {
     client: ClientInfo,
 
     /// SQLite database path for persistent gateway state.
-    db_path: String,
+    db_path: PathBuf,
 
     /// Root storage directory used by the gateway.
     storage_root: String,
@@ -30,7 +31,7 @@ pub struct GatewayProperties {
     auth_token: String,
 
     /// Path to the git-backed nexo-storage repository.
-    nexo_storage_path: String,
+    nexo_storage_path: PathBuf,
 }
 
 impl GatewayProperties {
@@ -78,7 +79,7 @@ impl GatewayProperties {
     }
 
     /// SQLite database path for persistent gateway state.
-    pub fn db_path(&self) -> &str {
+    pub fn db_path(&self) -> &Path {
         &self.db_path
     }
 
@@ -93,7 +94,7 @@ impl GatewayProperties {
     }
 
     /// Path to the git-backed nexo-storage repository.
-    pub fn nexo_storage_path(&self) -> &str {
+    pub fn nexo_storage_path(&self) -> &Path {
         &self.nexo_storage_path
     }
 
@@ -115,10 +116,10 @@ pub struct GatewayPropertiesBuilder {
     host: String,
     port: u16,
     client: ClientInfo,
-    db_path: String,
+    db_path: PathBuf,
     storage_root: String,
     auth_token: String,
-    nexo_storage_path: String,
+    nexo_storage_path: PathBuf,
 }
 
 impl GatewayPropertiesBuilder {
@@ -128,10 +129,10 @@ impl GatewayPropertiesBuilder {
             host: "0.0.0.0".to_string(),
             port: 6969,
             client,
-            db_path: "~/.nexo/storage/relational/gateway.db".to_string(),
+            db_path: PathBuf::from("~/.nexo/storage/relational/gateway.db"),
             storage_root: "~/.nexo/storage".to_string(),
             auth_token: auth_token.into(),
-            nexo_storage_path: "~/.nexo/nexo-storage".to_string(),
+            nexo_storage_path: PathBuf::from("~/.nexo/nexo-storage"),
         }
     }
 
@@ -148,7 +149,7 @@ impl GatewayPropertiesBuilder {
     }
 
     /// Set the SQLite database path.
-    pub fn db_path(mut self, db_path: impl Into<String>) -> Self {
+    pub fn db_path(mut self, db_path: impl Into<PathBuf>) -> Self {
         self.db_path = db_path.into();
         self
     }
@@ -160,7 +161,7 @@ impl GatewayPropertiesBuilder {
     }
 
     /// Set the git-backed nexo-storage path.
-    pub fn nexo_storage_path(mut self, nexo_storage_path: impl Into<String>) -> Self {
+    pub fn nexo_storage_path(mut self, nexo_storage_path: impl Into<PathBuf>) -> Self {
         self.nexo_storage_path = nexo_storage_path.into();
         self
     }
@@ -168,15 +169,34 @@ impl GatewayPropertiesBuilder {
     /// Build complete gateway properties.
     pub fn build(self) -> GatewayProperties {
         let protocol = ProtocolInfo::new_gateway(&self.client);
+        let db_path = expand_home_path(self.db_path);
+        let nexo_storage_path = expand_home_path(self.nexo_storage_path);
         GatewayProperties {
             host: self.host,
             port: self.port,
             protocol,
             client: self.client,
-            db_path: self.db_path,
+            db_path,
             storage_root: self.storage_root,
             auth_token: self.auth_token,
-            nexo_storage_path: self.nexo_storage_path,
+            nexo_storage_path,
         }
     }
+}
+
+fn expand_home_path(path: PathBuf) -> PathBuf {
+    let mut components = path.components();
+    let Some(first) = components.next() else {
+        return path;
+    };
+
+    if !matches!(first, std::path::Component::Normal(segment) if segment == "~") {
+        return path;
+    }
+
+    let mut resolved = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    for component in components {
+        resolved.push(component.as_os_str());
+    }
+    resolved
 }
