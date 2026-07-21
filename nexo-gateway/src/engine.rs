@@ -4,7 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use nexo_core::system::node::NodeState;
 use nexo_core::{GatewayProperties, NexoClient, NexoClientKind, Node, PeerId, User};
 use nexo_ws_schema::{
-    ConnectRequest, Frame, GatewayToNodeMessage, GatewayToUserMessage, NexoResponse,
+    ConnectRequest, Frame, GatewayToNodeMessage, GatewayToUserMessage, NexoEvent, NexoResponse,
     NodeToGatewayMessage, UserToGatewayMessage,
 };
 use std::collections::HashMap;
@@ -387,6 +387,16 @@ impl NexoGateway {
         state: &mut PeerConnectionState,
         message: NodeToGatewayMessage,
     ) -> Result<GatewayFrameOutput> {
+        let PeerConnectionState::Connected {
+            peer_id: source_node_id,
+            kind: NexoClientKind::Node,
+        } = state
+        else {
+            return Err(Error::InvalidPeerState(
+                "node message received outside connected node state".into(),
+            ));
+        };
+
         match message {
             NodeToGatewayMessage::Connect(_) => Err(Error::InvalidPeerState(
                 "connect received after peer was already connected".into(),
@@ -397,6 +407,45 @@ impl NexoGateway {
                     GatewayToNodeMessage::Disconnect(NexoResponse::completed(request.operation_id)),
                 )?))
             }
+            NodeToGatewayMessage::LoadModelEvent(NexoEvent::Correlated {
+                operation_id,
+                event,
+            }) => {
+                debug!(%operation_id, node_peer_id = %source_node_id, event = ?event, "Forwarding model-load event to agent");
+                self.agent_input_tx
+                    .try_send(NexoAgentInput::NodeLoadModelEvent {
+                        operation_id,
+                        source_node_id: *source_node_id,
+                        event,
+                    })?;
+                Ok(GatewayFrameOutput::NoReply)
+            }
+            NodeToGatewayMessage::UnloadModelEvent(NexoEvent::Correlated {
+                operation_id,
+                event,
+            }) => {
+                debug!(%operation_id, node_peer_id = %source_node_id, event = ?event, "Forwarding model-unload event to agent");
+                self.agent_input_tx
+                    .try_send(NexoAgentInput::NodeUnloadModelEvent {
+                        operation_id,
+                        source_node_id: *source_node_id,
+                        event,
+                    })?;
+                Ok(GatewayFrameOutput::NoReply)
+            }
+            NodeToGatewayMessage::StartInferenceRunEvent(NexoEvent::Correlated {
+                operation_id,
+                event,
+            }) => {
+                debug!(%operation_id, node_peer_id = %source_node_id, "Forwarding inference event to agent");
+                self.agent_input_tx
+                    .try_send(NexoAgentInput::NodeInferenceRunEvent {
+                        source_node_id: *source_node_id,
+                        operation_id,
+                        event,
+                    })?;
+                Ok(GatewayFrameOutput::NoReply)
+            }
             other => {
                 info!(message = ?other, "Node message parsed for later routing");
                 Ok(GatewayFrameOutput::NoReply)
@@ -404,12 +453,49 @@ impl NexoGateway {
         }
     }
 
-    /// Handle a message received from the NexoAgent.
+    /// Translate and dispatch one domain output emitted by the NexoAgent.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - Domain command or user response emitted by the agent runtime.
     fn handle_agent_output(&self, message: NexoAgentOutput) -> Result {
         match message {
-            NexoAgentOutput::StartInferenceRun(_node, _request) => {
-                info!("StartInferenceRun output received but routing is not implemented yet");
-            }
+            NexoAgentOutput::LoadModel {
+                node_peer_id,
+                operation_id,
+                model_id,
+            } => self.dispatch_node_message(
+                node_peer_id,
+                operation_id,
+                GatewayToNodeMessage::LoadModel {
+                    operation_id,
+                    model_id,
+                },
+            )?,
+            NexoAgentOutput::UnloadModel {
+                node_peer_id,
+                operation_id,
+                model_id,
+            } => self.dispatch_node_message(
+                node_peer_id,
+                operation_id,
+                GatewayToNodeMessage::UnloadModel {
+                    operation_id,
+                    model_id,
+                },
+            )?,
+            NexoAgentOutput::StartInference {
+                node_peer_id,
+                operation_id,
+                request,
+            } => self.dispatch_node_message(
+                node_peer_id,
+                operation_id,
+                GatewayToNodeMessage::StartInferenceRun {
+                    operation_id,
+                    request,
+                },
+            )?,
             NexoAgentOutput::GetState {
                 requester,
                 operation_id,
@@ -434,6 +520,37 @@ impl NexoGateway {
             }
         }
 
+        Ok(())
+    }
+
+    /// Serialize and dispatch a websocket message to one connected node.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_peer_id` - Authenticated peer ID of the target node.
+    /// * `operation_id` - Operation correlated with the command.
+    /// * `message` - Websocket protocol message produced by gateway translation.
+    fn dispatch_node_message(
+        &self,
+        node_peer_id: PeerId,
+        operation_id: nexo_core::OperationId,
+        message: GatewayToNodeMessage,
+    ) -> Result {
+        let message_type: &'static str = (&message).into();
+        let frame = Frame::new(message)?;
+        let sender = self
+            .peer_frame_txs
+            .lock()
+            .map_err(|_| Error::InvalidPeerState("peer sender lock poisoned".into()))?
+            .get(&node_peer_id)
+            .cloned();
+
+        if let Some(sender) = sender {
+            sender.try_send(frame)?;
+            debug!(%operation_id, %node_peer_id, message_type, "Dispatched agent command to node websocket");
+        } else {
+            warn!(%operation_id, %node_peer_id, message_type, "Dropping agent command for disconnected node");
+        }
         Ok(())
     }
 
@@ -682,6 +799,59 @@ mod tests {
         };
         assert_eq!(kind, NexoClientKind::Node);
         assert_eq!(gateway.peer(peer_id).unwrap().kind(), NexoClientKind::Node);
+    }
+
+    #[tokio::test]
+    async fn agent_model_commands_are_translated_at_gateway_boundary() {
+        let gateway = gateway();
+        let node = node_client();
+        let node_peer_id = PeerId::from_client(&node);
+        let operation_id = OperationId::new();
+        let model_id = nexo_core::ModelId::Kokoro82m;
+        let (peer_tx, mut peer_rx) = tokio::sync::mpsc::channel::<Frame>(2);
+        gateway.register_peer_sender(node_peer_id, &peer_tx);
+
+        gateway
+            .handle_agent_output(NexoAgentOutput::LoadModel {
+                node_peer_id,
+                operation_id,
+                model_id,
+            })
+            .unwrap();
+        let (_, load_message) = peer_rx
+            .recv()
+            .await
+            .unwrap()
+            .into_parts::<GatewayToNodeMessage>()
+            .unwrap();
+        assert!(matches!(
+            load_message,
+            GatewayToNodeMessage::LoadModel {
+                operation_id: dispatched_operation_id,
+                model_id: dispatched_model_id,
+            } if dispatched_operation_id == operation_id && dispatched_model_id == model_id
+        ));
+
+        gateway
+            .handle_agent_output(NexoAgentOutput::UnloadModel {
+                node_peer_id,
+                operation_id,
+                model_id,
+            })
+            .unwrap();
+        let (_, unload_message) = peer_rx
+            .recv()
+            .await
+            .unwrap()
+            .into_parts::<GatewayToNodeMessage>()
+            .unwrap();
+        assert!(matches!(
+            unload_message,
+            GatewayToNodeMessage::UnloadModel {
+                operation_id: dispatched_operation_id,
+                model_id: dispatched_model_id,
+            } if dispatched_operation_id == operation_id && dispatched_model_id == model_id
+        ));
     }
 
     #[tokio::test]

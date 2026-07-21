@@ -2,6 +2,8 @@
 
 /// Structured inference failure types.
 pub mod errors;
+/// Inference and model lifecycle event payloads shared across runtimes and transports.
+pub mod events;
 /// Completion finish reason types.
 pub mod finish;
 /// Inference request variants and request payloads.
@@ -40,6 +42,7 @@ pub mod request;
 
 pub use compaction::CompactionRequest;
 pub use errors::{InferenceErrorCode, InferenceFailure, Retryability};
+pub use events::{InferenceRunEvent, LoadModelEvent, UnloadModelEvent};
 pub use finish::FinishReason;
 pub use intent::{InferenceIntent, InferenceOperation, InferenceOperationKind};
 pub use meta::InferenceMeta;

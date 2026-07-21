@@ -20,7 +20,6 @@ use sqlx::{Decode, Type};
 ///   model selection logic.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[allow(clippy::large_enum_variant)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub struct InferenceIntent {
     /// The unique identifier for the inference request.
     pub operation_id: OperationId,
@@ -129,6 +128,38 @@ impl Type<Sqlite> for InferenceOperationKind {
 impl<'r> Decode<'r, Sqlite> for InferenceOperationKind {
     fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
         let value = <String as Decode<Sqlite>>::decode(value)?;
-        value.parse().map_err(Box::<dyn std::error::Error + Send + Sync>::from)
+        value
+            .parse()
+            .map_err(Box::<dyn std::error::Error + Send + Sync>::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference::requests::multimodal::MultiModalPayload;
+    use crate::{ConversationMessage, ModelCapability, ReasoningSettings, ToolChoice};
+
+    #[test]
+    fn inference_intent_json_round_trips_with_operation_discriminator() {
+        let intent = InferenceIntent {
+            operation_id: OperationId::new(),
+            session_id: SessionId::new(),
+            model_selection: ModelSelection::Capabilities(vec![ModelCapability::TextGeneration]),
+            operation: InferenceOperation::MultiModal(MultiModalPayload::new_round(
+                vec![ConversationMessage::new_text("hello")],
+                Vec::new(),
+                ToolChoice::Automatic,
+                ReasoningSettings::default(),
+            )),
+        };
+
+        let json = serde_json::to_string(&intent).expect("intent should serialize");
+        let decoded: InferenceIntent =
+            serde_json::from_str(&json).expect("intent should deserialize");
+
+        assert_eq!(decoded, intent);
+        assert!(json.contains(r#""type":"multi_modal""#));
+        assert!(!json.contains(r#""type":"InferenceIntent""#));
     }
 }

@@ -1,5 +1,7 @@
 use super::DbClient;
-use crate::{Error, Result};
+#[cfg(test)]
+use crate::Error;
+use crate::Result;
 use nexo_core::{OperationId, PeerId};
 
 impl DbClient {
@@ -33,6 +35,7 @@ impl DbClient {
     /// # Arguments
     ///
     /// * `operation_id` - The stable operation identifier to load.
+    #[cfg(test)]
     async fn get_operation(&self, operation_id: OperationId) -> Result<(OperationId, PeerId)> {
         let row = sqlx::query_as::<_, (OperationId, String, String)>(
             "SELECT operation_id, user_client_id, user_device_id FROM operations WHERE operation_id = ?",
@@ -72,7 +75,8 @@ mod tests {
     }
 
     fn test_user() -> User {
-        let properties = UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
+        let properties =
+            UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
         User::from_properties(&properties)
     }
 
@@ -85,7 +89,8 @@ mod tests {
         let operation_id = OperationId::new();
         db.create_operation(operation_id, user.id()).await.unwrap();
 
-        let (stored_operation_id, stored_user_peer_id) = db.get_operation(operation_id).await.unwrap();
+        let (stored_operation_id, stored_user_peer_id) =
+            db.get_operation(operation_id).await.unwrap();
         assert_eq!(stored_operation_id, operation_id);
         assert_eq!(stored_user_peer_id, user.id());
     }

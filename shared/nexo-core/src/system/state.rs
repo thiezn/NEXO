@@ -67,6 +67,11 @@ impl NexoState {
         self.nodes.len()
     }
 
+    /// Return the currently active nodes keyed by peer identifier.
+    pub fn nodes(&self) -> &HashMap<PeerId, Node> {
+        &self.nodes
+    }
+
     /// Returns the number of active users.
     pub fn user_count(&self) -> usize {
         self.users.len()

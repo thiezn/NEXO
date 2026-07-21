@@ -43,12 +43,12 @@ pub use inference::{
     ImageGenerationPayload, ImageGenerationResponse, ImageGenerationSize, InferenceCancelled,
     InferenceCompleted, InferenceErrorCode, InferenceFailed, InferenceFailure, InferenceIntent,
     InferenceMeta, InferenceOperation, InferenceOperationKind, InferenceOutput,
-    InferenceOutputDelta, InferenceProgress, InferenceRequest, InferenceStarted, InferenceStream,
-    InferenceUpdate, ModelSelection, MultiModalDelta, MultiModalResponse, OutputConstraint,
-    OutputOffsetBytes, PerformanceMetrics, Retryability, SamplingConfig, Session, Sessions,
-    SpecialTokenPolicy, SpeechDelta, SpeechGenerationPayload, SpeechGenerationResponse,
-    SpeechLanguage, StreamSeq, StreamingMode, TokenUsage, TokenizationDelta, TokenizationPayload,
-    TokenizationResponse,
+    InferenceOutputDelta, InferenceProgress, InferenceRequest, InferenceRunEvent, InferenceStarted,
+    InferenceStream, InferenceUpdate, LoadModelEvent, ModelSelection, MultiModalDelta,
+    MultiModalResponse, OutputConstraint, OutputOffsetBytes, PerformanceMetrics, Retryability,
+    SamplingConfig, Session, Sessions, SpecialTokenPolicy, SpeechDelta, SpeechGenerationPayload,
+    SpeechGenerationResponse, SpeechLanguage, StreamSeq, StreamingMode, TokenUsage,
+    TokenizationDelta, TokenizationPayload, TokenizationResponse, UnloadModelEvent,
 };
 pub use message::{
     AudioInput, ContentPart, Conversation, ConversationMessage, ImageInput, MediaSource,
@@ -64,11 +64,11 @@ pub use model::{
 // };
 pub use system::{
     ClientInfo, DeviceInfo, GatewayProperties, NexoClient, NexoClientKind, NexoNodeMetrics,
-    NexoState, Node, NodeProperties, NodeState, NodeStateKind, Platform, ProtocolInfo, Scope,
-    User, UserProperties,
+    NexoState, Node, NodeProperties, NodeState, NodeStateKind, Platform, ProtocolInfo, Scope, User,
+    UserProperties,
 };
 pub use tools::{
-    Tool, ToolCall, ToolCallDelta, ToolChoice, ToolDefinition, ToolExecutionConstraints,
-    ToolParallelism, ToolRegistry, ToolResult, ToolResultContent, ToolResultStatus,
-    ToolSideEffectLevel,
+    ExecuteToolEvent, Tool, ToolCall, ToolCallDelta, ToolChoice, ToolDefinition,
+    ToolExecutionConstraints, ToolParallelism, ToolRegistry, ToolResult, ToolResultContent,
+    ToolResultStatus, ToolSideEffectLevel,
 };

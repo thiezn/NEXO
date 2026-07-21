@@ -1,20 +1,19 @@
-use super::InferenceRun;
-use super::job::AgentJob;
 use super::messages::{NexoAgentInput, NexoAgentOutput};
+use super::{AgentJobKind, InferenceRoutingCandidate};
 use crate::Result;
 use crate::memory::db::DbClient;
 use nexo_core::{
     CompactionRequest, ConversationMessage, InferenceIntent, InferenceMeta, InferenceOutputDelta,
-    InferenceRequest, ModelId, NexoState, Node, OperationId, PeerId, StreamSeq, ToolCall,
+    InferenceRequest, InferenceRunEvent, LoadModelEvent, ModelDefinition, ModelId, ModelSelection,
+    NexoState, OperationId, PeerId, StreamSeq, UnloadModelEvent,
 };
-use nexo_ws_schema::{InferenceRunEvent, NexoEvent};
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
-use tracing::{info, warn};
+use tracing::{debug, error, info, warn};
 
 const QUEUE_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const JOB_WAIT_TIMEOUT: chrono::Duration = chrono::Duration::minutes(5);
 
 /// The Nexo Agent is responsible for coordinating session work and persisted lifecycle updates.
 #[derive(Debug)]
@@ -25,8 +24,6 @@ pub struct NexoAgent {
     nexo_storage_path: PathBuf,
     /// The current in-memory system state.
     state: NexoState,
-    /// The in-memory FIFO queue of pending jobs.
-    pub(crate) fifo_queue: VecDeque<AgentJob>,
 }
 
 impl NexoAgent {
@@ -54,13 +51,13 @@ impl NexoAgent {
     /// # Arguments
     ///
     /// * `db` - The database client to use for persistence.
+    #[cfg(test)]
     pub(crate) fn with_db(db: DbClient) -> Self {
         Self::with_db_and_storage(db, default_nexo_storage_path())
     }
 
     fn with_db_and_storage(db: DbClient, nexo_storage_path: PathBuf) -> Self {
         Self {
-            fifo_queue: VecDeque::new(),
             state: NexoState::new(),
             db,
             nexo_storage_path,
@@ -90,7 +87,10 @@ impl NexoAgent {
             loop {
                 tokio::select! {
                     _ = queue_poll.tick() => {
-                        self.process_fifo_queue_tick().await?;
+                        if let Err(error) = self.process_fifo_queue_tick(&agent_output_tx).await {
+                            error!(error = %error, "Agent queue tick failed; stopping agent loop");
+                            return Err(error);
+                        }
                     }
                     maybe_input = input_rx.recv() => {
                         let Some(input) = maybe_input else {
@@ -98,7 +98,10 @@ impl NexoAgent {
                             break;
                         };
 
-                        self.handle_input(input, &agent_output_tx).await?;
+                        if let Err(error) = self.handle_input(input, &agent_output_tx).await {
+                            error!(error = %error, "Agent input handling failed; stopping agent loop");
+                            return Err(error);
+                        }
                     }
                     maybe_output = agent_output_rx.recv() => {
                         let Some(output) = maybe_output else {
@@ -161,24 +164,45 @@ impl NexoAgent {
             NexoAgentInput::UserCompact(request) => {
                 self.handle_user_compact(request).await?;
             }
-            NexoAgentInput::ModelLoaded {
+            NexoAgentInput::NodeLoadModelEvent {
                 operation_id,
-                node,
-                model_id,
-            } => {
-                self.handle_model_loaded(operation_id, node, model_id)
-                    .await?;
-            }
-            NexoAgentInput::ModelUnloaded {
+                source_node_id,
+                event,
+            } => match event {
+                LoadModelEvent::Started { model_id } => {
+                    debug!(%operation_id, %source_node_id, %model_id, "Node started loading model");
+                }
+                LoadModelEvent::Completed { model_id } => {
+                    self.handle_model_loaded(operation_id, source_node_id, model_id)
+                        .await?;
+                }
+                LoadModelEvent::Failed { model_id, error } => {
+                    error!(%operation_id, %source_node_id, %model_id, error = %error, "Node failed to load model");
+                }
+            },
+            NexoAgentInput::NodeUnloadModelEvent {
                 operation_id,
-                node,
-                model_id,
+                source_node_id,
+                event,
+            } => match event {
+                UnloadModelEvent::Started { model_id } => {
+                    debug!(%operation_id, %source_node_id, %model_id, "Node started unloading model");
+                }
+                UnloadModelEvent::Completed { model_id } => {
+                    self.handle_model_unloaded(operation_id, source_node_id, model_id)
+                        .await?;
+                }
+                UnloadModelEvent::Failed { model_id, error } => {
+                    error!(%operation_id, %source_node_id, %model_id, error = %error, "Node failed to unload model");
+                }
+            },
+            NexoAgentInput::NodeInferenceRunEvent {
+                source_node_id,
+                operation_id,
+                event,
             } => {
-                self.handle_model_unloaded(operation_id, node, model_id)
+                self.handle_node_inference_run_event(source_node_id, operation_id, event)
                     .await?;
-            }
-            NexoAgentInput::NodeInferenceRunEvent(event) => {
-                self.handle_node_inference_run_event(event).await?;
             }
             NexoAgentInput::GetState {
                 requester,
@@ -209,14 +233,7 @@ impl NexoAgent {
         intent: InferenceIntent,
     ) -> Result {
         let operation_id = intent.operation_id;
-        self.db.create_operation(operation_id, requester).await?;
-        self.db.upsert_inference_intent(&intent).await?;
-
-        let queued_run = InferenceRun::new(operation_id, requester);
-        self.db.save_inference_run(&queued_run).await?;
-
-        self.fifo_queue
-            .push_back(AgentJob::from((requester, intent)));
+        self.db.enqueue_inference_job(requester, &intent).await?;
         info!(%operation_id, %requester, "Queued inference run");
         Ok(())
     }
@@ -248,17 +265,26 @@ impl NexoAgent {
         Ok(())
     }
 
-    /// Process the next queued job, if any.
-    async fn process_fifo_queue_tick(&mut self) -> Result {
-        if let Some(task) = self.fifo_queue.pop_front() {
-            match task {
-                AgentJob::RunInference {
-                    operation_id,
-                    user_peer_id,
-                    intent,
-                } => {
-                    self.start_queued_inference_job(operation_id, user_peer_id, intent)
-                        .await?;
+    /// Advance a bounded FIFO batch of runnable persisted jobs by at most one external action each.
+    ///
+    /// # Arguments
+    ///
+    /// * `output_tx` - Domain-output channel used to request gateway-managed external actions.
+    async fn process_fifo_queue_tick(
+        &mut self,
+        output_tx: &mpsc::Sender<NexoAgentOutput>,
+    ) -> Result {
+        for job in self.db.list_runnable_jobs().await? {
+            match job.kind {
+                AgentJobKind::RunInference => {
+                    let intent = self.db.get_inference_intent(job.operation_id).await?;
+                    self.progress_inference_job(
+                        job.operation_id,
+                        job.user_peer_id,
+                        intent,
+                        output_tx,
+                    )
+                    .await?;
                 }
             }
         }
@@ -266,25 +292,164 @@ impl NexoAgent {
         Ok(())
     }
 
-    /// Begin processing a queued inference job.
+    /// Advance one runnable inference job according to its durable workflow state.
     ///
     /// # Arguments
     ///
     /// * `operation_id` - The operation being started.
     /// * `user_peer_id` - The owning user peer for the run.
     /// * `intent` - The persisted inference intent payload.
-    async fn start_queued_inference_job(
-        &self,
+    /// * `output_tx` - Domain-output channel used to request the next gateway-managed action.
+    async fn progress_inference_job(
+        &mut self,
         operation_id: OperationId,
         user_peer_id: PeerId,
         intent: InferenceIntent,
+        output_tx: &mpsc::Sender<NexoAgentOutput>,
     ) -> Result {
-        let queued_run = InferenceRun::new(operation_id, user_peer_id);
-        let preparing_run = queued_run.into_preparing_context();
-        self.db.save_inference_run(&preparing_run).await?;
-
-        let _ = intent;
-        info!(%operation_id, %user_peer_id, "Queued inference job entered preparing_context");
+        let snapshot = self.db.load_inference_run_snapshot(operation_id).await?;
+        match snapshot.state {
+            super::InferenceRunState::Queued => {
+                if self.db.begin_context_preparation(operation_id).await? {
+                    info!(%operation_id, %user_peer_id, "Queued inference job entered preparing_context");
+                }
+            }
+            super::InferenceRunState::PreparingContext => {
+                let candidates = self.route_inference_candidates(&intent).await?;
+                if candidates.is_empty() {
+                    debug!(%operation_id, "No connected node can satisfy the inference model selection");
+                }
+                for candidate in candidates {
+                    let deadline = (chrono::Utc::now() + JOB_WAIT_TIMEOUT).to_rfc3339();
+                    let transitioned = match candidate {
+                        InferenceRoutingCandidate::Loaded { node, model_id } => {
+                            let transitioned = self
+                                .db
+                                .begin_inference_on_loaded_model(
+                                    operation_id,
+                                    node.id(),
+                                    model_id,
+                                    &deadline,
+                                )
+                                .await?;
+                            if transitioned {
+                                output_tx
+                                    .send(NexoAgentOutput::StartInference {
+                                        node_peer_id: node.id(),
+                                        operation_id,
+                                        request: self.collect_context(&intent, model_id).await?,
+                                    })
+                                    .await?;
+                                info!(%operation_id, node_peer_id = %node.id(), %model_id, "Dispatched inference using loaded model");
+                            }
+                            transitioned
+                        }
+                        InferenceRoutingCandidate::Load { node, model_id } => {
+                            let transitioned = self
+                                .db
+                                .begin_model_loading(operation_id, node.id(), model_id, &deadline)
+                                .await?;
+                            if transitioned {
+                                output_tx
+                                    .send(NexoAgentOutput::LoadModel {
+                                        node_peer_id: node.id(),
+                                        operation_id,
+                                        model_id,
+                                    })
+                                    .await?;
+                                info!(%operation_id, node_peer_id = %node.id(), %model_id, "Dispatched model load to empty node");
+                            }
+                            transitioned
+                        }
+                        InferenceRoutingCandidate::UnloadThenLoad {
+                            node,
+                            model_id,
+                            unloading_model_id,
+                        } => {
+                            let transitioned = self
+                                .db
+                                .begin_model_unloading(
+                                    operation_id,
+                                    node.id(),
+                                    model_id,
+                                    unloading_model_id,
+                                    &deadline,
+                                )
+                                .await?;
+                            if transitioned {
+                                output_tx
+                                    .send(NexoAgentOutput::UnloadModel {
+                                        node_peer_id: node.id(),
+                                        operation_id,
+                                        model_id: unloading_model_id,
+                                    })
+                                    .await?;
+                                info!(%operation_id, node_peer_id = %node.id(), target_model_id = %model_id, %unloading_model_id, "Dispatched model eviction before target load");
+                            }
+                            transitioned
+                        }
+                    };
+                    if transitioned {
+                        break;
+                    }
+                    debug!(%operation_id, "Routing candidate became unavailable before its lease was acquired");
+                }
+            }
+            super::InferenceRunState::UnloadingModel {
+                node_peer_id,
+                model_id,
+                unloading_model_id,
+            } => {
+                let deadline = (chrono::Utc::now() + JOB_WAIT_TIMEOUT).to_rfc3339();
+                if self
+                    .db
+                    .begin_model_loading_after_unload(
+                        operation_id,
+                        node_peer_id,
+                        model_id,
+                        unloading_model_id,
+                        &deadline,
+                    )
+                    .await?
+                {
+                    output_tx
+                        .send(NexoAgentOutput::LoadModel {
+                            node_peer_id,
+                            operation_id,
+                            model_id,
+                        })
+                        .await?;
+                    info!(%operation_id, %node_peer_id, %model_id, %unloading_model_id, "Dispatched target model load after eviction");
+                }
+            }
+            super::InferenceRunState::LoadingModel {
+                node_peer_id,
+                model_id,
+            } => {
+                let request = self.collect_context(&intent, model_id).await?;
+                let deadline = (chrono::Utc::now() + JOB_WAIT_TIMEOUT).to_rfc3339();
+                if self
+                    .db
+                    .begin_inference_after_model_load(
+                        operation_id,
+                        node_peer_id,
+                        model_id,
+                        &deadline,
+                    )
+                    .await?
+                {
+                    output_tx
+                        .send(NexoAgentOutput::StartInference {
+                            node_peer_id,
+                            operation_id,
+                            request,
+                        })
+                        .await?;
+                    info!(%operation_id, %node_peer_id, %model_id, "Dispatched inference after model load completion");
+                }
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -293,18 +458,23 @@ impl NexoAgent {
     /// # Arguments
     ///
     /// * `operation_id` - The operation associated with the model load.
-    /// * `node` - The node that loaded the model.
+    /// * `source_node_id` - The authenticated node that loaded the model.
     /// * `model_id` - The model that was loaded.
     async fn handle_model_loaded(
         &mut self,
         operation_id: OperationId,
-        node: Node,
+        source_node_id: PeerId,
         model_id: ModelId,
     ) -> Result {
-        let _ = (operation_id, node, model_id);
-        // TODO: Resolve the persisted run for `operation_id`, confirm it is in `loading_model`,
-        // and transition the typestate into `in_progress` once node/gateway routing is wired.
-        info!("ModelLoaded accepted by placeholder agent loop");
+        if self
+            .db
+            .complete_model_loading(operation_id, source_node_id, model_id)
+            .await?
+        {
+            info!(%operation_id, node_peer_id = %source_node_id, %model_id, "Model load persisted; inference job is runnable");
+        } else {
+            warn!(%operation_id, node_peer_id = %source_node_id, %model_id, "Ignoring stale or mismatched model-loaded event");
+        }
         Ok(())
     }
 
@@ -313,54 +483,50 @@ impl NexoAgent {
     /// # Arguments
     ///
     /// * `operation_id` - The operation associated with the model unload.
-    /// * `node` - The node that unloaded the model.
+    /// * `source_node_id` - The authenticated node that unloaded the model.
     /// * `model_id` - The model that was unloaded.
     async fn handle_model_unloaded(
         &mut self,
         operation_id: OperationId,
-        node: Node,
+        source_node_id: PeerId,
         model_id: ModelId,
     ) -> Result {
-        let _ = (operation_id, node, model_id);
-        // TODO: Resolve the persisted run for `operation_id`, confirm it is in `unloading_model`,
-        // and transition the typestate into `loading_model` once load/unload orchestration is wired.
-        info!("ModelUnloaded accepted by placeholder agent loop");
+        if self
+            .db
+            .complete_model_unloading(operation_id, source_node_id, model_id)
+            .await?
+        {
+            info!(%operation_id, node_peer_id = %source_node_id, unloading_model_id = %model_id, "Model eviction persisted; inference job is runnable");
+        } else {
+            warn!(%operation_id, node_peer_id = %source_node_id, unloading_model_id = %model_id, "Ignoring stale or mismatched model-unloaded event");
+        }
         Ok(())
     }
 
-    /// Handle a node-originated inference run event.
+    /// Handle an authenticated, correlated node inference event.
     ///
     /// # Arguments
     ///
-    /// * `event` - The correlated or unsolicited inference run event to normalize.
+    /// * `source_node_id` - Authenticated node that emitted the event.
+    /// * `operation_id` - Operation correlated by the gateway protocol layer.
+    /// * `event` - Shared inference lifecycle event payload.
     async fn handle_node_inference_run_event(
         &mut self,
-        event: NexoEvent<InferenceRunEvent>,
+        source_node_id: PeerId,
+        operation_id: OperationId,
+        event: InferenceRunEvent,
     ) -> Result {
-        match event {
-            NexoEvent::Correlated {
-                operation_id,
-                event,
-            } => {
-                self.handle_correlated_inference_run_event(operation_id, event)
-                    .await
-            }
-            NexoEvent::Unsolicited { event } => {
-                let _ = event;
-                // TODO: Decide whether unsolicited inference events should be ignored, logged,
-                // or mapped onto a durable run lookup keyed by `InferenceMeta` once node resume exists.
-                info!("Unsolicited NodeInferenceRunEvent accepted by placeholder agent loop");
-                Ok(())
-            }
-        }
+        debug!(%operation_id, %source_node_id, "Handling authenticated inference event");
+        self.handle_correlated_inference_run_event(operation_id, event)
+            .await
     }
 
-    /// Handle a correlated node-originated inference run event.
+    /// Apply one shared inference lifecycle event to its durable operation.
     ///
     /// # Arguments
     ///
-    /// * `operation_id` - The operation associated with the event.
-    /// * `event` - The specific inference run event payload.
+    /// * `operation_id` - Operation associated with the event.
+    /// * `event` - Shared inference lifecycle event.
     async fn handle_correlated_inference_run_event(
         &mut self,
         operation_id: OperationId,
@@ -514,29 +680,6 @@ impl NexoAgent {
         Ok(())
     }
 
-    /// Execute a single inference run.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - The inference intent to execute.
-    async fn inference_run(&self, request: InferenceIntent) -> Result {
-        let (model_id, node_id) = self.route_inference(&request).await?;
-        let full_request = self.collect_context(&request, model_id).await?;
-
-        let _ = (node_id, full_request);
-        todo!("Send full composed request gateway for distributing to node");
-    }
-
-    /// Execute a single tool call.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - The tool call to execute.
-    async fn tool_run(&self, request: ToolCall) -> Result {
-        let _ = request;
-        todo!("Determine tool to use (router)");
-    }
-
     /// Collect the full inference context for a request.
     ///
     /// # Arguments
@@ -556,7 +699,7 @@ impl NexoAgent {
         let request = InferenceRequest::from_intent(
             intent,
             model_id,
-            vec![
+            [
                 vec![system_prompt],
                 vec![developer_prompt],
                 conversation_history,
@@ -567,24 +710,74 @@ impl NexoAgent {
         Ok(request)
     }
 
-    /// Determine which node should execute a tool call.
+    /// Build ordered node/model routes for an inference request.
+    ///
+    /// Loaded models are preferred, followed by empty nodes. Occupied nodes that require one
+    /// model eviction are returned last because the current node contract does not expose memory
+    /// capacity or per-model memory requirements.
     ///
     /// # Arguments
     ///
-    /// * `tool_call` - The tool call to route.
-    async fn route_tool(&self, tool_call: &ToolCall) -> Result<Node> {
-        let _ = tool_call;
-        todo!("Implement tool routing logic");
-    }
+    /// * `request` - Persisted inference intent whose model selection must be satisfied.
+    async fn route_inference_candidates(
+        &self,
+        request: &InferenceIntent,
+    ) -> Result<Vec<InferenceRoutingCandidate>> {
+        let mut candidates = self
+            .db
+            .list_nodes()
+            .await?
+            .into_iter()
+            .filter(|node| self.state.nodes().contains_key(&node.id()))
+            .flat_map(|node| {
+                node.models_on_disk()
+                    .iter()
+                    .filter(|model_id| {
+                        model_matches_selection(**model_id, &request.model_selection)
+                    })
+                    .map(|model_id| {
+                        if node.models_in_memory().contains(model_id) {
+                            InferenceRoutingCandidate::Loaded {
+                                node: node.clone(),
+                                model_id: *model_id,
+                            }
+                        } else if node.models_in_memory().is_empty() {
+                            InferenceRoutingCandidate::Load {
+                                node: node.clone(),
+                                model_id: *model_id,
+                            }
+                        } else {
+                            let unloading_model_id = node
+                                .models_in_memory()
+                                .iter()
+                                .copied()
+                                .min_by_key(|loaded_model_id| String::from(*loaded_model_id))
+                                .expect("occupied node has at least one loaded model");
+                            InferenceRoutingCandidate::UnloadThenLoad {
+                                node: node.clone(),
+                                model_id: *model_id,
+                                unloading_model_id,
+                            }
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(InferenceRoutingCandidate::sort_key);
 
-    /// Determine which node and model should execute an inference request.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - The inference request to route.
-    async fn route_inference(&self, request: &InferenceIntent) -> Result<(ModelId, Node)> {
-        let _ = request;
-        todo!("Implement inference routing logic");
+        Ok(candidates)
+    }
+}
+
+fn model_matches_selection(model_id: ModelId, selection: &ModelSelection) -> bool {
+    match selection {
+        ModelSelection::SpecificModel(selected) => *selected == model_id,
+        ModelSelection::Capabilities(required) => {
+            let definition = ModelDefinition::new(model_id);
+            required
+                .iter()
+                .all(|capability| definition.capabilities().contains(capability))
+        }
     }
 }
 
@@ -603,15 +796,25 @@ mod tests {
     use crate::agent::InferenceRunState;
     use nexo_core::inference::requests::multimodal::MultiModalPayload;
     use nexo_core::{
-        ClientInfo, DeviceInfo, InferenceOperation, ModelCapability, ModelSelection, OperationId,
-        ReasoningSettings, SessionId, ToolChoice, User, UserProperties,
+        ClientInfo, DeviceInfo, InferenceOperation, ModelCapability, ModelSelection, Node,
+        NodeProperties, NodeState, OperationId, ReasoningSettings, SessionId, ToolChoice, User,
+        UserProperties,
     };
     use sqlx::sqlite::SqlitePoolOptions;
+    use std::collections::HashSet;
 
     fn test_user() -> User {
         let properties =
             UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
         User::from_properties(&properties)
+    }
+
+    fn test_node(models_in_memory: HashSet<ModelId>) -> Node {
+        let properties =
+            NodeProperties::builder(ClientInfo::new("test-node"), DeviceInfo::default(), "token")
+                .models(vec![ModelId::Gemma4E4bItUqffAfq6])
+                .build();
+        Node::from_properties(&properties, NodeState::Idle, models_in_memory)
     }
 
     async fn test_db() -> DbClient {
@@ -762,6 +965,240 @@ mod tests {
 
         assert_eq!(snapshot.operation_id, operation_id);
         assert_eq!(snapshot.state, InferenceRunState::Queued);
-        assert_eq!(agent.fifo_queue.len(), 1);
+        let jobs = db
+            .list_runnable_jobs()
+            .await
+            .expect("failed to load runnable jobs");
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].operation_id, operation_id);
+    }
+
+    #[tokio::test]
+    async fn sqlite_queue_survives_agent_reconstruction() {
+        let db = test_db().await;
+        let mut accepting_agent = NexoAgent::with_db(db.clone());
+        let user = test_user();
+        let intent = test_intent();
+        let operation_id = intent.operation_id;
+        let (output_tx, _output_rx) = tokio::sync::mpsc::channel(1);
+
+        accepting_agent
+            .handle_input(NexoAgentInput::UserConnected(user.clone()), &output_tx)
+            .await
+            .unwrap();
+        accepting_agent
+            .handle_input(
+                NexoAgentInput::UserStartInferenceRun {
+                    requester: user.id(),
+                    intent,
+                },
+                &output_tx,
+            )
+            .await
+            .unwrap();
+        drop(accepting_agent);
+
+        let mut reconstructed_agent = NexoAgent::with_db(db.clone());
+        reconstructed_agent
+            .process_fifo_queue_tick(&output_tx)
+            .await
+            .unwrap();
+        reconstructed_agent
+            .process_fifo_queue_tick(&output_tx)
+            .await
+            .unwrap();
+
+        let snapshot = db.load_inference_run_snapshot(operation_id).await.unwrap();
+        assert_eq!(snapshot.state, InferenceRunState::PreparingContext);
+    }
+
+    #[tokio::test]
+    async fn model_loaded_only_wakes_job_until_next_tick() {
+        let db = test_db().await;
+        let mut agent = NexoAgent::with_db(db.clone());
+        let user = test_user();
+        let node = test_node(HashSet::new());
+        let intent = test_intent();
+        let operation_id = intent.operation_id;
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(4);
+
+        agent
+            .handle_input(NexoAgentInput::UserConnected(user.clone()), &output_tx)
+            .await
+            .unwrap();
+        agent
+            .handle_input(NexoAgentInput::NodeConnected(node.clone()), &output_tx)
+            .await
+            .unwrap();
+        agent
+            .handle_input(
+                NexoAgentInput::UserStartInferenceRun {
+                    requester: user.id(),
+                    intent,
+                },
+                &output_tx,
+            )
+            .await
+            .unwrap();
+
+        agent.process_fifo_queue_tick(&output_tx).await.unwrap();
+        agent.process_fifo_queue_tick(&output_tx).await.unwrap();
+        let Some(NexoAgentOutput::LoadModel {
+            node_peer_id,
+            operation_id: dispatched_operation_id,
+            model_id,
+        }) = output_rx.recv().await
+        else {
+            panic!("expected model-load command")
+        };
+        assert_eq!(node_peer_id, node.id());
+        assert_eq!(dispatched_operation_id, operation_id);
+        assert_eq!(model_id, ModelId::Gemma4E4bItUqffAfq6);
+
+        agent
+            .handle_input(
+                NexoAgentInput::NodeLoadModelEvent {
+                    operation_id,
+                    source_node_id: node.id(),
+                    event: LoadModelEvent::Completed {
+                        model_id: ModelId::Gemma4E4bItUqffAfq6,
+                    },
+                },
+                &output_tx,
+            )
+            .await
+            .unwrap();
+        assert!(output_rx.try_recv().is_err());
+
+        let loading = db.load_inference_run_snapshot(operation_id).await.unwrap();
+        assert!(matches!(
+            loading.state,
+            InferenceRunState::LoadingModel { .. }
+        ));
+
+        agent.process_fifo_queue_tick(&output_tx).await.unwrap();
+        let Some(NexoAgentOutput::StartInference {
+            node_peer_id,
+            operation_id: dispatched_operation_id,
+            ..
+        }) = output_rx.recv().await
+        else {
+            panic!("expected inference command")
+        };
+        assert_eq!(node_peer_id, node.id());
+        assert_eq!(dispatched_operation_id, operation_id);
+
+        let running = db.load_inference_run_snapshot(operation_id).await.unwrap();
+        assert!(matches!(
+            running.state,
+            InferenceRunState::InProgress { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn occupied_node_unloads_before_loading_target_model() {
+        let db = test_db().await;
+        let mut agent = NexoAgent::with_db(db.clone());
+        let user = test_user();
+        let unloading_model_id = ModelId::Kokoro82m;
+        let target_model_id = ModelId::Gemma4E4bItUqffAfq6;
+        let node = test_node(HashSet::from([unloading_model_id]));
+        let intent = test_intent();
+        let operation_id = intent.operation_id;
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(8);
+
+        agent
+            .handle_input(NexoAgentInput::UserConnected(user.clone()), &output_tx)
+            .await
+            .unwrap();
+        agent
+            .handle_input(NexoAgentInput::NodeConnected(node.clone()), &output_tx)
+            .await
+            .unwrap();
+        agent
+            .handle_input(
+                NexoAgentInput::UserStartInferenceRun {
+                    requester: user.id(),
+                    intent,
+                },
+                &output_tx,
+            )
+            .await
+            .unwrap();
+
+        agent.process_fifo_queue_tick(&output_tx).await.unwrap();
+        agent.process_fifo_queue_tick(&output_tx).await.unwrap();
+        assert!(matches!(
+            output_rx.recv().await,
+            Some(NexoAgentOutput::UnloadModel {
+                node_peer_id,
+                operation_id: dispatched_operation_id,
+                model_id,
+            }) if node_peer_id == node.id()
+                && dispatched_operation_id == operation_id
+                && model_id == unloading_model_id
+        ));
+
+        agent
+            .handle_input(
+                NexoAgentInput::NodeUnloadModelEvent {
+                    operation_id,
+                    source_node_id: node.id(),
+                    event: UnloadModelEvent::Completed {
+                        model_id: unloading_model_id,
+                    },
+                },
+                &output_tx,
+            )
+            .await
+            .unwrap();
+        assert!(output_rx.try_recv().is_err());
+
+        let unloading = db.load_inference_run_snapshot(operation_id).await.unwrap();
+        assert_eq!(
+            unloading.state,
+            InferenceRunState::UnloadingModel {
+                node_peer_id: node.id(),
+                model_id: target_model_id,
+                unloading_model_id,
+            }
+        );
+
+        agent.process_fifo_queue_tick(&output_tx).await.unwrap();
+        assert!(matches!(
+            output_rx.recv().await,
+            Some(NexoAgentOutput::LoadModel {
+                node_peer_id,
+                operation_id: dispatched_operation_id,
+                model_id,
+            }) if node_peer_id == node.id()
+                && dispatched_operation_id == operation_id
+                && model_id == target_model_id
+        ));
+
+        agent
+            .handle_input(
+                NexoAgentInput::NodeLoadModelEvent {
+                    operation_id,
+                    source_node_id: node.id(),
+                    event: LoadModelEvent::Completed {
+                        model_id: target_model_id,
+                    },
+                },
+                &output_tx,
+            )
+            .await
+            .unwrap();
+        assert!(output_rx.try_recv().is_err());
+
+        agent.process_fifo_queue_tick(&output_tx).await.unwrap();
+        assert!(matches!(
+            output_rx.recv().await,
+            Some(NexoAgentOutput::StartInference {
+                node_peer_id,
+                operation_id: dispatched_operation_id,
+                ..
+            }) if node_peer_id == node.id() && dispatched_operation_id == operation_id
+        ));
     }
 }

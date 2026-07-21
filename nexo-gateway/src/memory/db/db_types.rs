@@ -1,15 +1,15 @@
 //! These types represent the internal database row projections and serde helpers for persistence.
 //! They are not intended to be used outside of the database module, so its not allowed to have them as inputs
 //! or outputs of the public DbClient API methods.
-//! 
+//!
 //! Types that generalize to application-level concepts (like PeerId, OperationId, etc.) are defined in nexo-core
 //! and should be used instead of duplicating them here.
 
 use crate::Error;
 use crate::Result;
 use crate::agent::{
-    AgentJobKind, AgentJobQueueStatus, InferenceRunSnapshot, InferenceRunState,
-    InferenceRunStateKind, InferenceRunTimeline,
+    InferenceRunSnapshot, InferenceRunState, InferenceRunStateKind, InferenceRunTimeline,
+    RunnableJobCandidate,
 };
 use nexo_core::{ModelId, OperationId, PeerId};
 use sqlx::Row;
@@ -27,6 +27,8 @@ pub struct InferenceRunRow {
     pub node_peer_id: Option<PeerId>,
     /// Selected model, if known.
     pub model_id: Option<ModelId>,
+    /// Loaded model being evicted during the unloading phase, if any.
+    pub unloading_model_id: Option<ModelId>,
     /// Persisted failure message, if any.
     pub error_message: Option<String>,
     /// When the run row was first created.
@@ -47,25 +49,6 @@ pub struct InferenceRunRow {
     pub last_state_changed_at: String,
 }
 
-/// Internal row projection of a queued inference job.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AgentJobQueueRecord {
-    /// FIFO ordering column.
-    pub queue_position: i64,
-    /// Stable operation identifier.
-    pub operation_id: OperationId,
-    /// User peer that owns the operation.
-    pub user_peer_id: PeerId,
-    /// Category of queued job.
-    pub job_kind: AgentJobKind,
-    /// Queue lifecycle status.
-    pub status: AgentJobQueueStatus,
-    /// Total claim attempts so far.
-    pub attempt_count: i64,
-    /// Failure message for failed jobs.
-    pub failure_message: Option<String>,
-}
-
 impl<'r> sqlx::FromRow<'r, SqliteRow> for InferenceRunRow {
     fn from_row(row: &SqliteRow) -> std::result::Result<Self, sqlx::Error> {
         let node_client_id: Option<String> = row.try_get("node_client_id")?;
@@ -76,6 +59,7 @@ impl<'r> sqlx::FromRow<'r, SqliteRow> for InferenceRunRow {
             run_state: parse_enum_value("run_state", row.try_get::<String, _>("run_state")?)?,
             node_peer_id: optional_peer_id_from_parts(node_client_id, node_device_id)?,
             model_id: row.try_get("model_id")?,
+            unloading_model_id: row.try_get("unloading_model_id")?,
             error_message: row.try_get("error_message")?,
             created_at: row.try_get("created_at")?,
             preparing_started_at: row.try_get("preparing_started_at")?,
@@ -99,6 +83,11 @@ impl TryFrom<InferenceRunRow> for InferenceRunSnapshot {
             InferenceRunStateKind::UnloadingModel => InferenceRunState::UnloadingModel {
                 node_peer_id: required_field(value.node_peer_id, "node_peer_id", value.run_state)?,
                 model_id: required_field(value.model_id, "model_id", value.run_state)?,
+                unloading_model_id: required_field(
+                    value.unloading_model_id,
+                    "unloading_model_id",
+                    value.run_state,
+                )?,
             },
             InferenceRunStateKind::LoadingModel => InferenceRunState::LoadingModel {
                 node_peer_id: required_field(value.node_peer_id, "node_peer_id", value.run_state)?,
@@ -140,16 +129,13 @@ impl TryFrom<InferenceRunRow> for InferenceRunSnapshot {
     }
 }
 
-impl<'r> sqlx::FromRow<'r, SqliteRow> for AgentJobQueueRecord {
+impl<'r> sqlx::FromRow<'r, SqliteRow> for RunnableJobCandidate {
     fn from_row(row: &SqliteRow) -> std::result::Result<Self, sqlx::Error> {
         Ok(Self {
             queue_position: row.try_get("queue_position")?,
             operation_id: row.try_get("operation_id")?,
             user_peer_id: peer_id_from_columns(row, "user_client_id", "user_device_id")?,
-            job_kind: parse_enum_value("job_kind", row.try_get::<String, _>("job_kind")?)?,
-            status: parse_enum_value("status", row.try_get::<String, _>("status")?)?,
-            attempt_count: row.try_get("attempt_count")?,
-            failure_message: row.try_get("failure_message")?,
+            kind: parse_enum_value("job_kind", row.try_get::<String, _>("job_kind")?)?,
         })
     }
 }
@@ -219,9 +205,7 @@ fn required_field<T>(
     run_state: InferenceRunStateKind,
 ) -> Result<T, Error> {
     value.ok_or_else(|| {
-        Error::InvalidInferenceRunState(format!(
-            "missing {field} for persisted state {run_state}"
-        ))
+        Error::InvalidInferenceRunState(format!("missing {field} for persisted state {run_state}"))
     })
 }
 
@@ -244,6 +228,7 @@ mod tests {
             run_state,
             node_peer_id: None,
             model_id: None,
+            unloading_model_id: None,
             error_message: None,
             created_at: "2026-07-10T10:00:00Z".into(),
             preparing_started_at: None,
@@ -278,6 +263,7 @@ mod tests {
         let mut row = test_row(InferenceRunStateKind::UnloadingModel);
         row.node_peer_id = Some(user.id());
         row.model_id = Some(ModelId::Kokoro82m);
+        row.unloading_model_id = Some(ModelId::Gemma4E4bItUqffAfq6);
         row.preparing_started_at = Some("2026-07-10T10:00:01Z".into());
         row.node_selected_at = Some("2026-07-10T10:00:02Z".into());
         row.last_state_changed_at = "2026-07-10T10:00:02Z".into();
@@ -287,6 +273,7 @@ mod tests {
         let InferenceRunState::UnloadingModel {
             node_peer_id,
             model_id,
+            unloading_model_id,
         } = snapshot.state
         else {
             panic!("expected unloading_model snapshot")
@@ -294,6 +281,10 @@ mod tests {
 
         assert_eq!(node_peer_id, user.id());
         assert_eq!(model_id, ModelId::Kokoro82m);
-        assert_eq!(snapshot.timeline.node_selected_at.as_deref(), Some("2026-07-10T10:00:02Z"));
+        assert_eq!(unloading_model_id, ModelId::Gemma4E4bItUqffAfq6);
+        assert_eq!(
+            snapshot.timeline.node_selected_at.as_deref(),
+            Some("2026-07-10T10:00:02Z")
+        );
     }
 }

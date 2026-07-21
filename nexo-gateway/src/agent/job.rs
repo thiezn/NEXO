@@ -1,45 +1,7 @@
-use nexo_core::{InferenceIntent, OperationId, PeerId};
-use strum::{EnumDiscriminants, IntoStaticStr};
+use nexo_core::{ModelId, Node, OperationId, PeerId};
+use strum::IntoStaticStr;
 
-/// A single job that the NexoAgent can perform.
-///
-/// These jobs are queued up in the NexoAgent queue. The agent is responsible
-/// for handling parallelism and sequencing.
-#[derive(Debug, IntoStaticStr, PartialEq, EnumDiscriminants)]
-#[strum_discriminants(name(AgentJobKind))]
-#[strum_discriminants(vis(pub))]
-#[strum_discriminants(doc = "The category of agent job persisted in the database.")]
-#[strum_discriminants(derive(
-    Hash,
-    strum::AsRefStr,
-    strum::Display,
-    strum::EnumString,
-    strum::IntoStaticStr
-))]
-#[strum_discriminants(strum(serialize_all = "snake_case"))]
-pub(crate) enum AgentJob {
-    /// A job to run an inference request.
-    RunInference {
-        /// Stable operation identifier for the job.
-        operation_id: OperationId,
-        /// Owning user peer for the job.
-        user_peer_id: PeerId,
-        /// Original inference intent payload.
-        intent: InferenceIntent,
-    },
-}
-
-impl From<(PeerId, InferenceIntent)> for AgentJob {
-    fn from((user_peer_id, intent): (PeerId, InferenceIntent)) -> Self {
-        Self::RunInference {
-            operation_id: intent.operation_id,
-            user_peer_id,
-            intent,
-        }
-    }
-}
-
-/// The persisted queue lifecycle of an agent job.
+/// The category of agent job persisted in the database.
 #[derive(
     Debug,
     Clone,
@@ -53,11 +15,84 @@ impl From<(PeerId, InferenceIntent)> for AgentJob {
     IntoStaticStr,
 )]
 #[strum(serialize_all = "snake_case")]
-pub enum AgentJobQueueStatus {
-    /// The job is waiting to be claimed.
-    Queued,
-    /// The job has been claimed for processing.
-    Claimed,
+pub enum AgentJobKind {
+    /// A job to run an inference request.
+    RunInference,
+}
+
+/// A runnable job candidate selected from the SQLite scheduler.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RunnableJobCandidate {
+    /// Stable FIFO position assigned when the job is created.
+    pub queue_position: i64,
+    /// Stable operation identifier for the job.
+    pub operation_id: OperationId,
+    /// Owning user peer resolved through the operation row.
+    pub user_peer_id: PeerId,
+    /// Variant-specific reducer to invoke.
+    pub kind: AgentJobKind,
+}
+
+/// A concrete node/model route considered by the inference scheduler.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum InferenceRoutingCandidate {
+    /// The target model is already loaded and inference can start immediately.
+    Loaded {
+        /// Node that already has the target model loaded.
+        node: Node,
+        /// Target model selected for inference.
+        model_id: ModelId,
+    },
+    /// The node has no loaded models and can load the target directly.
+    Load {
+        /// Empty node selected for loading.
+        node: Node,
+        /// Target model to load.
+        model_id: ModelId,
+    },
+    /// The node is occupied and must evict one model before loading the target.
+    UnloadThenLoad {
+        /// Occupied node selected for the operation.
+        node: Node,
+        /// Target model to load after eviction.
+        model_id: ModelId,
+        /// Loaded model selected for eviction.
+        unloading_model_id: ModelId,
+    },
+}
+
+impl InferenceRoutingCandidate {
+    /// Return the stable preference key used to order routing candidates.
+    pub(crate) fn sort_key(&self) -> (u8, String, String) {
+        match self {
+            Self::Loaded { node, model_id } => (0, String::from(*model_id), node.id().to_string()),
+            Self::Load { node, model_id } => (1, String::from(*model_id), node.id().to_string()),
+            Self::UnloadThenLoad { node, model_id, .. } => {
+                (2, String::from(*model_id), node.id().to_string())
+            }
+        }
+    }
+}
+
+/// Generic scheduler readiness for an agent job.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::AsRefStr,
+    strum::Display,
+    strum::EnumString,
+    IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum AgentJobSchedulerState {
+    /// The variant reducer may advance the job on a queue tick.
+    Runnable,
+    /// One external operation is outstanding for the job.
+    Waiting,
     /// The job completed successfully.
     Completed,
     /// The job completed with failure.

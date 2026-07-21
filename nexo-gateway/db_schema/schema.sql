@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS inference_runs (
 	node_client_id TEXT,
 	node_device_id TEXT,
 	model_id TEXT,
+	unloading_model_id TEXT,
 	error_message TEXT,
 	created_at TEXT NOT NULL,
 	preparing_started_at TEXT,
@@ -124,26 +125,57 @@ CREATE TABLE IF NOT EXISTS inference_runs (
 	completed_at TEXT,
 	failed_at TEXT,
 	last_state_changed_at TEXT NOT NULL,
+	CHECK ((node_client_id IS NULL) = (node_device_id IS NULL)),
+	CHECK (
+		(run_state IN ('queued', 'preparing_context') AND node_client_id IS NULL AND model_id IS NULL AND unloading_model_id IS NULL)
+		OR (run_state = 'unloading_model' AND node_client_id IS NOT NULL AND model_id IS NOT NULL AND unloading_model_id IS NOT NULL)
+		OR (run_state IN ('loading_model', 'in_progress', 'completed') AND node_client_id IS NOT NULL AND model_id IS NOT NULL AND unloading_model_id IS NULL)
+		OR run_state = 'failed'
+	),
+	CHECK ((run_state = 'failed') = (error_message IS NOT NULL)),
 	FOREIGN KEY (node_client_id, node_device_id) REFERENCES nodes(client_id, device_id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS agent_job_queue (
+CREATE TABLE IF NOT EXISTS agent_jobs (
 	queue_position INTEGER PRIMARY KEY AUTOINCREMENT,
-	operation_id TEXT NOT NULL REFERENCES operations(operation_id) ON DELETE CASCADE,
-	user_client_id TEXT NOT NULL,
-	user_device_id TEXT NOT NULL,
+	operation_id TEXT NOT NULL UNIQUE REFERENCES operations(operation_id) ON DELETE CASCADE,
 	job_kind TEXT NOT NULL CHECK (job_kind IN ('run_inference')),
-	status TEXT NOT NULL CHECK (status IN ('queued', 'claimed', 'completed', 'failed')),
-	attempt_count INTEGER NOT NULL DEFAULT 0,
+	scheduler_state TEXT NOT NULL CHECK (scheduler_state IN ('runnable', 'waiting', 'completed', 'failed')),
+	scheduled_for TEXT,
+	waiting_since TEXT,
+	wait_deadline TEXT,
 	failure_message TEXT,
-	enqueued_at TEXT NOT NULL,
-	claimed_at TEXT,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
 	finished_at TEXT,
-	FOREIGN KEY (operation_id, user_client_id, user_device_id) REFERENCES operations(operation_id, user_client_id, user_device_id) ON DELETE CASCADE
+	CHECK (
+		(scheduler_state = 'runnable' AND waiting_since IS NULL AND wait_deadline IS NULL AND finished_at IS NULL)
+		OR (scheduler_state = 'waiting' AND waiting_since IS NOT NULL AND wait_deadline IS NOT NULL AND finished_at IS NULL)
+		OR (scheduler_state = 'completed' AND failure_message IS NULL AND finished_at IS NOT NULL)
+		OR (scheduler_state = 'failed' AND failure_message IS NOT NULL AND finished_at IS NOT NULL)
+	)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_job_queue_dequeue
-	ON agent_job_queue(status, queue_position);
+CREATE TABLE IF NOT EXISTS node_job_leases (
+	node_client_id TEXT NOT NULL,
+	node_device_id TEXT NOT NULL,
+	operation_id TEXT NOT NULL UNIQUE REFERENCES agent_jobs(operation_id) ON DELETE CASCADE,
+	acquired_at TEXT NOT NULL,
+	disconnected_at TEXT,
+	disconnect_expires_at TEXT,
+	CHECK ((disconnected_at IS NULL) = (disconnect_expires_at IS NULL)),
+	PRIMARY KEY (node_client_id, node_device_id),
+	FOREIGN KEY (node_client_id, node_device_id) REFERENCES nodes(client_id, device_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_jobs_runnable
+	ON agent_jobs(scheduler_state, scheduled_for, queue_position);
+
+CREATE INDEX IF NOT EXISTS idx_agent_jobs_wait_deadline
+	ON agent_jobs(scheduler_state, wait_deadline);
+
+CREATE INDEX IF NOT EXISTS idx_node_job_leases_expiry
+	ON node_job_leases(disconnect_expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_inference_runs_state
 	ON inference_runs(run_state, last_state_changed_at);

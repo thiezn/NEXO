@@ -9,7 +9,11 @@ impl DbClient {
     ///
     /// * `user_peer_id` - The user peer whose tool assignments should be replaced.
     /// * `tools` - The complete set of tool definitions currently exposed by the user.
-    pub async fn replace_user_tools(&self, user_peer_id: PeerId, tools: &[ToolDefinition]) -> Result {
+    pub async fn replace_user_tools(
+        &self,
+        user_peer_id: PeerId,
+        tools: &[ToolDefinition],
+    ) -> Result {
         let mut tx = self.pool().begin().await?;
         self.upsert_tool_definitions_tx(&mut tx, tools).await?;
 
@@ -38,7 +42,11 @@ impl DbClient {
     ///
     /// * `node_peer_id` - The node peer whose tool assignments should be replaced.
     /// * `tools` - The complete set of tool definitions currently exposed by the node.
-    pub async fn replace_node_tools(&self, node_peer_id: PeerId, tools: &[ToolDefinition]) -> Result {
+    pub async fn replace_node_tools(
+        &self,
+        node_peer_id: PeerId,
+        tools: &[ToolDefinition],
+    ) -> Result {
         let mut tx = self.pool().begin().await?;
         self.upsert_tool_definitions_tx(&mut tx, tools).await?;
 
@@ -117,8 +125,8 @@ mod tests {
 
     use super::*;
     use nexo_core::{
-        ClientInfo, DeviceInfo, Node, NodeProperties, NodeState, ToolDefinition, ToolExecutionConstraints,
-        User, UserProperties,
+        ClientInfo, DeviceInfo, Node, NodeProperties, NodeState, ToolDefinition,
+        ToolExecutionConstraints, User, UserProperties,
     };
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -135,12 +143,14 @@ mod tests {
     }
 
     fn test_user() -> User {
-        let properties = UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
+        let properties =
+            UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
         User::from_properties(&properties)
     }
 
     fn test_node() -> Node {
-        let properties = NodeProperties::new(ClientInfo::new("test-node"), DeviceInfo::default(), "token");
+        let properties =
+            NodeProperties::new(ClientInfo::new("test-node"), DeviceInfo::default(), "token");
         Node::from_properties(&properties, NodeState::Idle, HashSet::new())
     }
 
@@ -163,8 +173,12 @@ mod tests {
 
         db.connect_user(&user).await.unwrap();
         db.connect_node(&node).await.unwrap();
-        db.replace_user_tools(user.id(), &[tool.clone()]).await.unwrap();
-        db.replace_node_tools(node.id(), &[tool.clone()]).await.unwrap();
+        db.replace_user_tools(user.id(), &[tool.clone()])
+            .await
+            .unwrap();
+        db.replace_node_tools(node.id(), &[tool.clone()])
+            .await
+            .unwrap();
 
         let stored = db.get_tool_definition(&tool.name).await.unwrap();
         assert_eq!(stored, tool);

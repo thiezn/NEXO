@@ -1,37 +1,6 @@
 use super::DbClient;
 use crate::{Error, Result};
 use nexo_core::{InferenceIntent, InferenceOperationKind, OperationId};
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StoredInferenceIntent {
-    operation_id: nexo_core::OperationId,
-    session_id: nexo_core::SessionId,
-    model_selection: nexo_core::ModelSelection,
-    operation: nexo_core::InferenceOperation,
-}
-
-impl From<&InferenceIntent> for StoredInferenceIntent {
-    fn from(value: &InferenceIntent) -> Self {
-        Self {
-            operation_id: value.operation_id,
-            session_id: value.session_id,
-            model_selection: value.model_selection.clone(),
-            operation: value.operation.clone(),
-        }
-    }
-}
-
-impl From<StoredInferenceIntent> for InferenceIntent {
-    fn from(value: StoredInferenceIntent) -> Self {
-        Self {
-            operation_id: value.operation_id,
-            session_id: value.session_id,
-            model_selection: value.model_selection,
-            operation: value.operation,
-        }
-    }
-}
 
 impl DbClient {
     /// Persist a canonical inference intent for a known operation.
@@ -48,7 +17,7 @@ impl DbClient {
         .bind(intent.session_id.to_string())
         .bind(InferenceOperationKind::from(&intent.operation).to_string())
         .bind(serde_json::to_string(&intent.model_selection)?)
-        .bind(serde_json::to_string(&StoredInferenceIntent::from(intent))?)
+        .bind(serde_json::to_string(intent)?)
         .bind(&now)
         .bind(&now)
         .execute(self.pool())
@@ -77,7 +46,7 @@ impl DbClient {
             });
         };
 
-        Ok(InferenceIntent::from(serde_json::from_str::<StoredInferenceIntent>(&intent_json)?))
+        Ok(serde_json::from_str(&intent_json)?)
     }
 }
 
@@ -89,7 +58,8 @@ mod tests {
     use nexo_core::inference::requests::multimodal::MultiModalPayload;
     use nexo_core::{
         ClientInfo, ConversationMessage, DeviceInfo, InferenceOperation, ModelCapability,
-        ModelSelection, OperationId, ReasoningSettings, SessionId, ToolChoice, User, UserProperties,
+        ModelSelection, OperationId, ReasoningSettings, SessionId, ToolChoice, User,
+        UserProperties,
     };
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -104,7 +74,8 @@ mod tests {
     }
 
     fn test_user() -> User {
-        let properties = UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
+        let properties =
+            UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
         User::from_properties(&properties)
     }
 
@@ -129,7 +100,9 @@ mod tests {
         let intent = test_intent();
 
         db.connect_user(&user).await.unwrap();
-        db.create_operation(intent.operation_id, user.id()).await.unwrap();
+        db.create_operation(intent.operation_id, user.id())
+            .await
+            .unwrap();
         db.upsert_inference_intent(&intent).await.unwrap();
 
         let stored = db.get_inference_intent(intent.operation_id).await.unwrap();

@@ -6,10 +6,9 @@ mod messages;
 mod runtime;
 
 pub use inference_run_state::{
-    Completed, Failed, InProgress, InferenceRun, InferenceRunSnapshot, InferenceRunState,
-    InferenceRunStateKind, InferenceRunTimeline, LoadingModel, PreparingContext, Queued,
-    UnloadingModel,
+    InferenceRunSnapshot, InferenceRunState, InferenceRunStateKind, InferenceRunTimeline,
 };
-pub use job::{AgentJobKind, AgentJobQueueStatus};
+pub use job::{AgentJobKind, AgentJobSchedulerState};
+pub(crate) use job::{InferenceRoutingCandidate, RunnableJobCandidate};
 pub use messages::{NexoAgentInput, NexoAgentOutput};
 pub use runtime::NexoAgent;

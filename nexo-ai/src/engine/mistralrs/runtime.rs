@@ -12,7 +12,7 @@ use mistralrs_core::{
 };
 use nexo_core::inference::requests::MultiModalPayload;
 use nexo_core::{
-    EmbedResponse, EmbeddingVector, InferenceOutput, InferenceMeta, InferenceOperation,
+    EmbedResponse, EmbeddingVector, InferenceMeta, InferenceOperation, InferenceOutput,
     InferenceRequest, InferenceStream, InferenceUpdate, ModelId, ModelRuntimeState, StreamSeq,
 };
 use std::num::NonZeroUsize;

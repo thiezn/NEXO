@@ -1,5 +1,7 @@
-use nexo_core::{CompactionRequest, InferenceIntent, InferenceRequest, ModelId, NexoState, Node, OperationId, PeerId, User};
-use nexo_ws_schema::{InferenceRunEvent, NexoEvent};
+use nexo_core::{
+    CompactionRequest, InferenceIntent, InferenceRequest, InferenceRunEvent, LoadModelEvent,
+    ModelId, NexoState, Node, OperationId, PeerId, UnloadModelEvent, User,
+};
 use strum::IntoStaticStr;
 
 /// A message sent from NexoGateway to the NexoAgent.
@@ -29,26 +31,33 @@ pub enum NexoAgentInput {
     },
     /// A request to compact a given session.
     UserCompact(CompactionRequest),
-    /// An event indicating that a node loaded a model for an operation.
-    ModelLoaded {
-        /// The operation ID associated with the model load event.
+    /// A model-load lifecycle event emitted by an authenticated node.
+    NodeLoadModelEvent {
+        /// Operation associated with the model load.
         operation_id: OperationId,
-        /// The node that has loaded the model.
-        node: Node,
-        /// The model ID that has been loaded.
-        model_id: ModelId,
+        /// Authenticated node peer that emitted the event.
+        source_node_id: PeerId,
+        /// Shared model-load event payload.
+        event: LoadModelEvent,
     },
-    /// An event indicating that a node unloaded a model for an operation.
-    ModelUnloaded {
-        /// The operation ID associated with the model unload event.
+    /// A model-unload lifecycle event emitted by an authenticated node.
+    NodeUnloadModelEvent {
+        /// Operation associated with the model unload.
         operation_id: OperationId,
-        /// The node that has unloaded the model.
-        node: Node,
-        /// The model ID that has been unloaded.
-        model_id: ModelId,
+        /// Authenticated node peer that emitted the event.
+        source_node_id: PeerId,
+        /// Shared model-unload event payload.
+        event: UnloadModelEvent,
     },
-    /// An event emitted from the node related to an inference run operation.
-    NodeInferenceRunEvent(NexoEvent<InferenceRunEvent>),
+    /// A correlated inference event emitted by an authenticated node.
+    NodeInferenceRunEvent {
+        /// Authenticated node peer that emitted the event.
+        source_node_id: PeerId,
+        /// Operation associated with the event.
+        operation_id: OperationId,
+        /// Shared inference lifecycle event payload.
+        event: InferenceRunEvent,
+    },
     /// Retrieve the current state of the whole Nexo system.
     GetState {
         /// The requesting user peer that should receive the response.
@@ -60,8 +69,33 @@ pub enum NexoAgentInput {
 
 /// An event sent from the Nexo Agent.
 pub enum NexoAgentOutput {
-    /// Send a fully prepared request to the node for processing.
-    StartInferenceRun(Node, InferenceRequest),
+    /// Ask a node to load a model for an inference operation.
+    LoadModel {
+        /// Target node for the command.
+        node_peer_id: PeerId,
+        /// Operation that requires the model.
+        operation_id: OperationId,
+        /// Model to load.
+        model_id: ModelId,
+    },
+    /// Ask a node to unload a model before loading the selected target model.
+    UnloadModel {
+        /// Target node for the command.
+        node_peer_id: PeerId,
+        /// Operation waiting for memory to become available.
+        operation_id: OperationId,
+        /// Model to unload.
+        model_id: ModelId,
+    },
+    /// Ask a node to begin a fully prepared inference request.
+    StartInference {
+        /// Target node for the command.
+        node_peer_id: PeerId,
+        /// Operation to execute.
+        operation_id: OperationId,
+        /// Fully prepared request with a concrete model selection.
+        request: InferenceRequest,
+    },
     /// Return the current state of the Nexo system.
     GetState {
         /// The requesting user peer that should receive the response.

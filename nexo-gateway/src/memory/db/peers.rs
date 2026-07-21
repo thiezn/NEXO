@@ -1,6 +1,6 @@
 use super::DbClient;
-use crate::{Error, Result};
 use crate::engine::PeerConnectionStateKind;
+use crate::{Error, Result};
 use nexo_core::{ModelId, Node, NodeStateKind, PeerId, User};
 
 impl DbClient {
@@ -116,10 +116,24 @@ impl DbClient {
 
         self.replace_node_tools(node.id(), &node.tools().iter().cloned().collect::<Vec<_>>())
             .await?;
-        self.replace_node_models_on_disk(node.id(), node.models_on_disk().iter().copied().collect::<Vec<_>>().as_slice())
-            .await?;
-        self.replace_node_models_in_memory(node.id(), node.models_in_memory().iter().copied().collect::<Vec<_>>().as_slice())
-            .await?;
+        self.replace_node_models_on_disk(
+            node.id(),
+            node.models_on_disk()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .await?;
+        self.replace_node_models_in_memory(
+            node.id(),
+            node.models_in_memory()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .await?;
         Ok(())
     }
 
@@ -206,13 +220,19 @@ impl DbClient {
     ///
     /// * `peer_id` - The node peer whose on-disk model inventory should be replaced.
     /// * `model_ids` - The complete set of models currently available on disk for the node.
-    pub async fn replace_node_models_on_disk(&self, peer_id: PeerId, model_ids: &[ModelId]) -> Result {
+    pub async fn replace_node_models_on_disk(
+        &self,
+        peer_id: PeerId,
+        model_ids: &[ModelId],
+    ) -> Result {
         let mut tx = self.pool().begin().await?;
-        sqlx::query("DELETE FROM node_models_on_disk WHERE node_client_id = ? AND node_device_id = ?")
-            .bind(peer_id.client_id().to_string())
-            .bind(peer_id.device_id().to_string())
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "DELETE FROM node_models_on_disk WHERE node_client_id = ? AND node_device_id = ?",
+        )
+        .bind(peer_id.client_id().to_string())
+        .bind(peer_id.device_id().to_string())
+        .execute(&mut *tx)
+        .await?;
 
         for model_id in model_ids {
             sqlx::query("INSERT INTO node_models_on_disk (node_client_id, node_device_id, model_id) VALUES (?, ?, ?)")
@@ -233,13 +253,19 @@ impl DbClient {
     ///
     /// * `peer_id` - The node peer whose in-memory model inventory should be replaced.
     /// * `model_ids` - The complete set of models currently loaded in memory for the node.
-    pub async fn replace_node_models_in_memory(&self, peer_id: PeerId, model_ids: &[ModelId]) -> Result {
+    pub async fn replace_node_models_in_memory(
+        &self,
+        peer_id: PeerId,
+        model_ids: &[ModelId],
+    ) -> Result {
         let mut tx = self.pool().begin().await?;
-        sqlx::query("DELETE FROM node_models_in_memory WHERE node_client_id = ? AND node_device_id = ?")
-            .bind(peer_id.client_id().to_string())
-            .bind(peer_id.device_id().to_string())
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "DELETE FROM node_models_in_memory WHERE node_client_id = ? AND node_device_id = ?",
+        )
+        .bind(peer_id.client_id().to_string())
+        .bind(peer_id.device_id().to_string())
+        .execute(&mut *tx)
+        .await?;
 
         for model_id in model_ids {
             sqlx::query("INSERT INTO node_models_in_memory (node_client_id, node_device_id, model_id) VALUES (?, ?, ?)")
@@ -260,7 +286,9 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use nexo_core::{ClientInfo, DeviceInfo, Node, NodeProperties, NodeState, User, UserProperties};
+    use nexo_core::{
+        ClientInfo, DeviceInfo, Node, NodeProperties, NodeState, User, UserProperties,
+    };
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::HashSet;
 
@@ -275,12 +303,14 @@ mod tests {
     }
 
     fn test_user() -> User {
-        let properties = UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
+        let properties =
+            UserProperties::new(ClientInfo::new("test-user"), DeviceInfo::default(), "token");
         User::from_properties(&properties)
     }
 
     fn test_node() -> Node {
-        let properties = NodeProperties::new(ClientInfo::new("test-node"), DeviceInfo::default(), "token");
+        let properties =
+            NodeProperties::new(ClientInfo::new("test-node"), DeviceInfo::default(), "token");
         Node::from_properties(&properties, NodeState::Idle, HashSet::new())
     }
 
@@ -292,12 +322,14 @@ mod tests {
         db.connect_user(&user).await.unwrap();
         db.disconnect_user(user.id()).await.unwrap();
 
-        let (state,): (String,) = sqlx::query_as("SELECT connection_state FROM users WHERE client_id = ? AND device_id = ?")
-            .bind(user.id().client_id().to_string())
-            .bind(user.id().device_id().to_string())
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
+        let (state,): (String,) = sqlx::query_as(
+            "SELECT connection_state FROM users WHERE client_id = ? AND device_id = ?",
+        )
+        .bind(user.id().client_id().to_string())
+        .bind(user.id().device_id().to_string())
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
         assert_eq!(state, PeerConnectionStateKind::Disconnected.to_string());
     }
 
@@ -311,12 +343,13 @@ mod tests {
             .await
             .unwrap();
 
-        let (state,): (String,) = sqlx::query_as("SELECT node_state FROM nodes WHERE client_id = ? AND device_id = ?")
-            .bind(node.id().client_id().to_string())
-            .bind(node.id().device_id().to_string())
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
+        let (state,): (String,) =
+            sqlx::query_as("SELECT node_state FROM nodes WHERE client_id = ? AND device_id = ?")
+                .bind(node.id().client_id().to_string())
+                .bind(node.id().device_id().to_string())
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
         assert_eq!(state, NodeStateKind::RunningInference.to_string());
     }
 
